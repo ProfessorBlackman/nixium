@@ -42,4 +42,11 @@ cancelled: boolean,
 /**
  * Whether [`ScanResult::errors`] was truncated.
  */
-errors_truncated: boolean, };
+errors_truncated: boolean, 
+/**
+ * A sentence describing incomplete coverage, or `None` when the scan was complete.
+ *
+ * Carried as a field rather than computed in the frontend so the wording lives in one place,
+ * and so it is impossible to render a total without the caveat being available beside it.
+ */
+coverage_note: string | null, };

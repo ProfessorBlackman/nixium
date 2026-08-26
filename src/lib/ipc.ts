@@ -14,10 +14,18 @@ import type { Completion } from "../bindings/Completion";
 import type { Diagnostics } from "../bindings/Diagnostics";
 import type { OperationId } from "../bindings/OperationId";
 import type { Progress } from "../bindings/Progress";
+import type { Filesystem } from "../bindings/Filesystem";
+import type { ScanResult } from "../bindings/ScanResult";
 import type { Settings } from "../bindings/Settings";
 import type { Snapshot } from "../bindings/Snapshot";
+import type { SpaceEntry } from "../bindings/SpaceEntry";
 
-export type { AppError, Completion, Diagnostics, Progress, Settings, Snapshot };
+export type { AppError, Completion, Diagnostics, Filesystem, Progress, ScanResult, Settings, Snapshot, SpaceEntry };
+export type { Accounting } from "../bindings/Accounting";
+export type { Category } from "../bindings/Category";
+export type { EntryId } from "../bindings/EntryId";
+export type { Safety } from "../bindings/Safety";
+export type { SpaceTree } from "../bindings/SpaceTree";
 export type { Capability } from "../bindings/Capability";
 export type { Cause } from "../bindings/Cause";
 export type { ErrorCode } from "../bindings/ErrorCode";
@@ -27,6 +35,7 @@ export type { Theme } from "../bindings/Theme";
 
 export const EVENT_PROGRESS = "op://progress";
 export const EVENT_DONE = "op://done";
+export const EVENT_SCAN_DONE = "scan://done";
 
 /** Whether a rejected value is one of our typed errors rather than an unexpected throw. */
 export function isAppError(value: unknown): value is AppError {
@@ -80,6 +89,14 @@ export const api = {
   operationCancel: (id: OperationId) => call<boolean>("operation_cancel", { id }),
   operationCount: () => call<number>("operation_count"),
   helperProbe: () => call<HelperProbe>("helper_probe"),
+  filesystems: () => call<Filesystem[]>("filesystems"),
+  homeDirectory: () => call<string>("home_directory"),
+  scanStart: (path: string, maxDepth?: number, crossFilesystems?: boolean) =>
+    call<OperationId>("scan_start", {
+      path,
+      maxDepth: maxDepth ?? null,
+      crossFilesystems: crossFilesystems ?? null,
+    }),
   /** Phase 0 scaffolding: a slow operation, so progress and cancellation can be verified. */
   demoOperation: (steps: number, failAt?: number) =>
     call<OperationId>("demo_operation", { steps, failAt: failAt ?? null }),
@@ -95,4 +112,9 @@ export function onProgress(handler: (p: Progress) => void): Promise<UnlistenFn> 
 /** Subscribe to terminal outcomes for all operations. */
 export function onDone(handler: (c: Completion) => void): Promise<UnlistenFn> {
   return listen<Completion>(EVENT_DONE, (event) => handler(event.payload));
+}
+
+/** Subscribe to completed scan results. A cancelled scan still delivers its partial tree. */
+export function onScanDone(handler: (r: ScanResult) => void): Promise<UnlistenFn> {
+  return listen<ScanResult>(EVENT_SCAN_DONE, (event) => handler(event.payload));
 }

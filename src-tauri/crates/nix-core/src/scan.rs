@@ -121,6 +121,11 @@ pub struct ScanResult {
     pub cancelled: bool,
     /// Whether [`ScanResult::errors`] was truncated.
     pub errors_truncated: bool,
+    /// A sentence describing incomplete coverage, or `None` when the scan was complete.
+    ///
+    /// Carried as a field rather than computed in the frontend so the wording lives in one place,
+    /// and so it is impossible to render a total without the caveat being available beside it.
+    pub coverage_note: Option<String>,
 }
 
 /// Cap on retained per-path errors. Beyond this the count still rises but the list stops growing.
@@ -407,6 +412,7 @@ pub fn scan(
         .map_err(|_| AppError::internal("The scan's error list lock was poisoned."))?;
     let errors_seen = shared.counters.errors_seen.load(Ordering::Relaxed);
 
+    let cancelled = token.is_cancelled();
     Ok(ScanResult {
         tree,
         files: shared.counters.files.load(Ordering::Relaxed),
@@ -415,8 +421,9 @@ pub fn scan(
         allocated: total.allocated,
         skipped: shared.counters.skipped.load(Ordering::Relaxed),
         errors_truncated: errors_seen as usize > errors.len(),
+        coverage_note: ScanResult::describe_coverage(cancelled, errors.len()),
         errors,
-        cancelled: token.is_cancelled(),
+        cancelled,
     })
 }
 
@@ -432,13 +439,13 @@ impl ScanResult {
         !self.cancelled && self.errors.is_empty()
     }
 
-    /// A sentence describing coverage, for the UI to show beside the total.
+    /// Build the coverage sentence from a scan's outcome.
     ///
     /// Being explicit about partial coverage is the difference between a number a user can trust and
     /// one they cannot. Stacer showed a total with no indication that a scan had skipped anything.
     #[must_use]
-    pub fn coverage_note(&self) -> Option<String> {
-        match (self.cancelled, self.errors.len()) {
+    fn describe_coverage(cancelled: bool, error_count: usize) -> Option<String> {
+        match (cancelled, error_count) {
             (false, 0) => None,
             (true, 0) => Some("Stopped early, so this is a partial total.".to_string()),
             (false, n) => Some(format!(
@@ -500,7 +507,7 @@ mod tests {
         );
         assert!(result.is_complete(), "{:?}", result.errors);
         assert!(
-            result.coverage_note().is_none(),
+            result.coverage_note.is_none(),
             "a complete scan has nothing to caveat"
         );
     }
@@ -630,7 +637,7 @@ mod tests {
             "a cancelled scan must not have visited everything"
         );
         assert!(
-            result.coverage_note().is_some(),
+            result.coverage_note.is_some(),
             "a partial total must be caveated"
         );
     }
@@ -694,7 +701,7 @@ mod tests {
             fx.files()
         );
         assert!(
-            result.coverage_note().is_some(),
+            result.coverage_note.is_some(),
             "a partial total must be caveated"
         );
         // Generous: a debug build, and other tests share the disk. The point is that the walk
@@ -722,7 +729,8 @@ mod tests {
         if !result.errors.is_empty() {
             assert!(!result.is_complete());
             let note = result
-                .coverage_note()
+                .coverage_note
+                .clone()
                 .expect("partial coverage must be stated");
             assert!(note.contains("could not be read"), "{note}");
         }
@@ -879,6 +887,7 @@ mod tests {
             ],
             cancelled: false,
             errors_truncated: true,
+            coverage_note: ScanResult::describe_coverage(false, MAX_ERRORS),
         };
         assert_eq!(result.errors.len(), MAX_ERRORS);
         assert!(result.errors_truncated);

@@ -24,6 +24,7 @@ use nix_core::helper::{self, Op, OpResult};
 use nix_core::logging::{self, Diagnostics};
 use nix_core::op::{Completion, OperationId, Progress};
 use nix_core::settings::Settings;
+use nix_core::{fs as nixfs, scan};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -132,6 +133,89 @@ pub(crate) struct HelperProbe {
     pub(crate) uid: u32,
     pub(crate) elevated: bool,
     pub(crate) kernel: String,
+}
+
+/// Mounted filesystems. `STO-1`.
+///
+/// Pseudo-filesystems are excluded unless the user has asked for them: they are not storage, and
+/// including them is why Stacer's disk chart needed two filter combo boxes to be readable.
+#[tauri::command]
+pub(crate) fn filesystems(state: State<'_, AppState>) -> Result<Vec<nixfs::Filesystem>> {
+    nixfs::filesystems(state.settings().show_pseudo_filesystems)
+        .map_err(|e| e.context("listing filesystems"))
+}
+
+/// Where a completed scan's result is delivered.
+pub(crate) const EVENT_SCAN_DONE: &str = "scan://done";
+
+/// Start a scan. `STO-2`.
+///
+/// Returns an [`OperationId`] immediately; progress arrives on `op://progress`, the tree on
+/// `scan://done`, and the terminal outcome on `op://done`. Nothing about this blocks the caller.
+#[tauri::command]
+pub(crate) fn scan_start(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: PathBuf,
+    max_depth: Option<usize>,
+    cross_filesystems: Option<bool>,
+) -> OperationId {
+    let (id, token) = state.operations.start();
+    let exclude = state.settings().protected_paths;
+
+    let options = scan::Options::new(path)
+        .max_depth(max_depth.or(Some(12)))
+        .cross_filesystems(cross_filesystems.unwrap_or(false))
+        .exclude(exclude);
+
+    let emitter = app.clone();
+    std::thread::spawn(move || {
+        let progress_handle = emitter.clone();
+        let outcome = scan::scan(options, token, move |files, bytes| {
+            let progress = Progress::new(id, files)
+                .with_message(format!("{files} items, {bytes} bytes so far"));
+            if let Err(e) = progress_handle.emit(EVENT_PROGRESS, &progress) {
+                tracing::warn!(error = %e, "could not emit scan progress");
+            }
+        });
+
+        // A cancelled scan still carries a usable partial tree, so it is delivered either way.
+        let completion = match outcome {
+            Ok(result) => {
+                let cancelled = result.cancelled;
+                if let Err(e) = emitter.emit(EVENT_SCAN_DONE, &result) {
+                    tracing::warn!(error = %e, "could not emit scan result");
+                }
+                if cancelled {
+                    Completion::Cancelled { id }
+                } else {
+                    Completion::Done { id }
+                }
+            }
+            Err(error) => Completion::Failed { id, error },
+        };
+
+        if let Err(e) = emitter.emit(EVENT_DONE, &completion) {
+            tracing::warn!(error = %e, "could not emit scan completion");
+        }
+        if let Some(state) = emitter.try_state::<AppState>() {
+            state.operations.finish(id);
+        }
+    });
+
+    id
+}
+
+/// The user's home directory, as a sensible default scan root.
+#[tauri::command]
+pub(crate) fn home_directory() -> Result<PathBuf> {
+    nix_core::paths::home_dir().ok_or_else(|| {
+        AppError::new(
+            ErrorCode::Unsupported,
+            "Could not work out your home directory.",
+        )
+        .with_remedy("Set HOME and try again.")
+    })
 }
 
 /// A deliberately slow operation, so progress, cancellation and the terminal event can be verified

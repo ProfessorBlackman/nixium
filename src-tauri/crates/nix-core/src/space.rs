@@ -33,10 +33,36 @@ use ts_rs::TS;
 ///
 /// Derived from the entry's identity — its path, or its label for a logical entry — rather than
 /// from insertion order, so a refresh does not invalidate the user's selection. That is invariant 5.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
-#[serde(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, TS)]
 #[ts(export, type = "string")]
-pub struct EntryId(#[ts(type = "string")] pub u64);
+pub struct EntryId(pub u64);
+
+/// Serialised as a **hex string**, not a number, deliberately.
+///
+/// An id is used both as a value (`roots`) and as a map key (`entries`). JSON object keys are always
+/// strings, so a numeric id would cross the wire as a string in one position and a number in the
+/// other — and an earlier version of this type did exactly that while declaring `string` to
+/// TypeScript, which typechecked and would have failed at runtime. One representation everywhere
+/// removes the whole class of problem.
+impl Serialize for EntryId {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        serializer.serialize_str(&format!("{self}"))
+    }
+}
+
+impl<'de> Deserialize<'de> for EntryId {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        let raw = String::deserialize(deserializer)?;
+        u64::from_str_radix(&raw, 16)
+            .map(Self)
+            .map_err(|e| serde::de::Error::custom(format!("invalid entry id {raw:?}: {e}")))
+    }
+}
 
 impl EntryId {
     /// FNV-1a over the bytes of a key. Not cryptographic — it only needs to be stable and
@@ -315,7 +341,12 @@ impl std::fmt::Display for Violation {
 #[ts(export)]
 pub struct SpaceTree {
     /// Every entry, keyed by id.
-    #[ts(type = "Record<string, SpaceEntry>")]
+    ///
+    /// `#[ts(as = ...)]` rather than `#[ts(type = ...)]`: a raw type *string* is emitted verbatim
+    /// with no import, which silently broke the generated module and collapsed every downstream
+    /// type to `any`. Naming a real Rust type instead lets ts-rs collect `SpaceEntry` as a
+    /// dependency and import it.
+    #[ts(as = "HashMap<String, SpaceEntry>")]
     pub entries: HashMap<EntryId, SpaceEntry>,
     /// Top-level entries, in insertion order.
     pub roots: Vec<EntryId>,
@@ -741,6 +772,39 @@ mod tests {
         );
         assert!(e.reclaim.is_none());
         assert_eq!(e.label, "thing.iso");
+    }
+
+    #[test]
+    fn entry_ids_cross_the_wire_as_strings_in_every_position() {
+        let mut tree = SpaceTree::new();
+        let root = tree.insert_root(dir("/data", 10));
+        let child = tree.insert(file("/data/a", 10));
+        tree.attach(root, child);
+
+        let json = serde_json::to_value(&tree).unwrap();
+        // As a value.
+        let roots = json["roots"].as_array().unwrap();
+        assert!(
+            roots[0].is_string(),
+            "roots must hold strings, got {:?}",
+            roots[0]
+        );
+        // As a map key — always a string in JSON, which is why values match it.
+        let entries = json["entries"].as_object().unwrap();
+        assert!(
+            entries.keys().all(|k| k.len() == 16),
+            "keys are 16-char hex: {:?}",
+            entries.keys()
+        );
+
+        let back: SpaceTree = serde_json::from_value(json).unwrap();
+        assert_eq!(tree, back);
+    }
+
+    #[test]
+    fn a_malformed_entry_id_is_rejected_rather_than_defaulted() {
+        let err = serde_json::from_str::<EntryId>("\"not hex\"").unwrap_err();
+        assert!(err.to_string().contains("invalid entry id"), "{err}");
     }
 
     #[test]
