@@ -5,13 +5,17 @@ and shows you what your machine is doing while it does.
 
 Rust + Tauri. A replacement for [Stacer](https://github.com/oguzhaninan/Stacer) — not a port of it.
 
-> Status: **pre-alpha. Phase 0 complete** — foundation only, no user-facing features yet.
-> Next is M2, the space explorer. See [docs/PLAN.md](docs/PLAN.md).
+> Status: **pre-alpha. Phase 0 and M2 complete.** The space explorer works and is read-only.
+> Next is M3, the first safe reclaim. See [docs/PLAN.md](docs/PLAN.md).
 
-What exists today is every load-bearing mechanism and nothing else: a typed error surface where no
-failure is silent, a privileged helper behind an exact-path allow-list, versioned settings,
-capability probing, structured logging, and one cancellation-and-progress primitive that every
-future long operation reuses. All of it is exercisable from the app's **About** view.
+**What works today:** scan a filesystem or your home directory and see where the space went — a
+canvas treemap and a drill-down table over one shared scan, streaming and cancellable, at roughly
+450,000 files per second. It opens on the previous scan labelled with its age, and it deletes
+nothing: reclaiming arrives in M3 behind a preview and a confirmation.
+
+Underneath it: a typed error surface where no failure is silent, a privileged helper behind an
+exact-path allow-list, versioned settings, capability probing, and one cancellation-and-progress
+primitive every long operation reuses. All of it is exercisable from the **About** view.
 
 ## Documentation
 

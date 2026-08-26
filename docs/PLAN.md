@@ -11,8 +11,9 @@ The spec says *what* and *why*. This says *in what order, and how we know it wor
 | --- | --- |
 | **M0** Walking skeleton | **complete** |
 | **M1** Foundation complete (Phase 0, tasks 0.1–0.11) | **complete** |
-| M2 "Where did my disk go?" | next |
-| M3 – M9 | not started |
+| **M2** "Where did my disk go?" (tasks 1.1–1.6, 1.15) | **complete** |
+| M3 First safe reclaim (tasks 1.7–1.10) | next |
+| M4 – M9 | not started |
 
 Phase 0 shipped all eleven tasks: the three-crate workspace and quality gates, the error taxonomy,
 the IPC contract with its progress/cancellation primitive, the app shell with lazily-mounted views,
@@ -26,6 +27,25 @@ Two things changed during implementation and are worth carrying forward:
   tests showed prefixes would have exposed `/etc/shadow` and other users' `/proc/<pid>/environ`.
 - **Task 0.11's fixture had a real API bug** — naming temp directories by seed alone made
   parallel tests delete each other's trees. Fixed with a per-process counter.
+
+M2 shipped the space model with property-tested invariants, filesystem enumeration with
+btrfs-correct accounting, the streaming scanner at **447,000 files/sec** (2.23 µs per file against a
+30 µs budget), the canvas treemap and virtualised table, cached-first opening, and inotify staleness
+watching. 169 tests. The explorer is read-only by design, so it can be used and trusted before any
+reclaim code exists.
+
+Four bugs found by the tests, each worth remembering:
+
+- The helper's read allow-list used directory *prefixes*, which would have exposed `/etc/shadow` and
+  other users' `/proc/<pid>/environ`. Now exact paths.
+- `rpc_pipefs` was missing from the pseudo-filesystem name list, so `is_pseudo` is now backed by a
+  structural check — no capacity means not storage. While fixing it I widened the fuse rule and
+  would have hidden NTFS volumes, which mount as `fuseblk`.
+- The scanner created a `rayon::scope` per directory. Nested blocking scopes starve the shared pool;
+  it looked fine in isolation and collapsed to fifteen seconds under concurrency.
+- `EntryId` was `#[serde(transparent)]` over `u64` while declaring `string` to TypeScript — the same
+  id crossed the wire as a string when used as a map key and a number when used as a value. It
+  typechecked.
 
 Note also that §4's parallelisation advice no longer applies: this is a solo project, which is why
 **task 0.9 was completed within Phase 0 rather than deferred** — see §5.2 for why M2 is nonetheless

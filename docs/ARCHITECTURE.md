@@ -81,15 +81,42 @@ Built in Phase 0:
 | `budget` | 0.11 | performance budgets from the specification |
 | `paths` | — | XDG base-directory resolution |
 
+Built in M2:
+
+| Module | Task | Contents |
+| --- | --- | --- |
+| `space` | 1.1 | the space model, its invariants, and the checker that enforces them |
+| `fs` | 1.2 | mount enumeration, per-filesystem accounting, btrfs honesty |
+| `scan` | 1.3 | streaming, cancellable, parallel walker |
+| `cache` | 1.4 | scan persistence, so the explorer opens on the last result |
+| `watch` | 1.15 | inotify staleness watching over the largest directories |
+
 Planned, so tasks land in predictable places rather than accreting into one module:
 
 | Module | Task | Contents |
 | --- | --- | --- |
-| `space` | 1.1 | the space model and its five invariants |
-| `fs` | 1.2 | mount enumeration, per-filesystem accounting including btrfs |
-| `scan` | 1.3 | streaming, cancellable walker |
-| `cache` | 1.4 | scan persistence |
 | `reclaim` | 1.8–1.9 | executor pipeline and the category registry |
+
+## Two rules the scanner exists to enforce
+
+**Both sizes are carried, never one.** Apparent size and on-disk allocation diverge on sparse,
+compressed and copy-on-write filesystems. Picking one and calling it "the size" is how a tool ends up
+promising space it cannot free, so `SpaceEntry` holds both and the reclaim figure is always the
+allocated one.
+
+**Partial coverage is visible.** A scan that was cancelled, or that could not read everything, still
+returns its tree — and carries a `coverage_note` field describing the gap. It is a field rather than
+a computed method precisely so a total cannot be rendered without the caveat being at hand. Stacer
+showed a total with no indication that a scan had skipped anything.
+
+## Parallelism: `par_iter`, never nested `scope`
+
+The scanner fans out with `par_iter().map().reduce()`. An earlier version used a `rayon::scope` per
+directory, and the failure is worth recording: a scope **blocks its calling thread** until every
+child finishes, so a tree of nested scopes fills the pool with threads waiting on children that need
+those same threads. In isolation it measured 35 ms for 2,590 files; with concurrent scans it
+collapsed to fifteen seconds, and cancellation could not unwind through the blocked scopes.
+`par_iter` is built on `join` and nests correctly.
 
 ## The privileged helper
 

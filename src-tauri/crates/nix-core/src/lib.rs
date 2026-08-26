@@ -31,6 +31,7 @@
 //! | [`fs`] | 1.2 | mount enumeration, per-filesystem accounting, btrfs honesty |
 //! | [`scan`] | 1.3 | streaming, cancellable, parallel walker |
 //! | [`cache`] | 1.4 | scan persistence, so the explorer opens on the last result |
+//! | [`watch`] | 1.15 | inotify staleness watching over the largest directories |
 //!
 //! Next: `reclaim` (1.8–1.9).
 
@@ -47,6 +48,7 @@ pub mod paths;
 pub mod scan;
 pub mod settings;
 pub mod space;
+pub mod watch;
 
 /// Crate version, surfaced so the app and helper can verify they were built together.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
