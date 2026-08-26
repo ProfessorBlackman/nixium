@@ -1,0 +1,15 @@
+# Generated TypeScript types go straight into the frontend source tree, so the frontend can be
+# type-checked without first running the Rust test suite.
+#
+# This file lives at the **repository root**, not under src-tauri/. Cargo discovers config by walking
+# up from the *current directory*, so a config under src-tauri/ is silently missed by
+# `cargo --manifest-path src-tauri/... ` run from the root — and ts-rs then falls back to its default
+# of ./bindings, quietly writing a second, stale copy of every type. From here it applies whichever
+# directory cargo is invoked from.
+#
+# `relative = true` resolves against this file's parent directory, so the path is the same either way.
+#
+# The generated files are committed, and CI regenerates and diffs them, so a Rust type change that is
+# not reflected in the bindings fails the build rather than drifting.
+[env]
+TS_RS_EXPORT_DIR = { value = "src/bindings", relative = true }

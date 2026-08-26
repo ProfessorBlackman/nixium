@@ -157,8 +157,13 @@ a single `Command` invocation.
 
 ## Generated TypeScript
 
-Rust types that cross the IPC boundary derive `ts_rs::TS`, and `.cargo/config.toml` points
-`TS_RS_EXPORT_DIR` at `src/bindings/`. The files are **committed**, so the frontend type-checks
+Rust types that cross the IPC boundary derive `ts_rs::TS`, and `.cargo/config.toml` — at the
+**repository root**, deliberately — points `TS_RS_EXPORT_DIR` at `src/bindings/`.
+
+The location matters: Cargo discovers config by walking up from the *current directory*, so a config
+under `src-tauri/` is silently missed by `cargo --manifest-path src-tauri/…` run from the root. ts-rs
+then falls back to its default of `./bindings` and quietly writes a second, stale copy of every type
+— which is exactly what happened, and what `src-tauri/crates/*/bindings/` is now gitignored to catch. The files are **committed**, so the frontend type-checks
 without first running the Rust suite, and CI regenerates and diffs them — a Rust type change that is
 not reflected in the bindings fails the build rather than drifting.
 

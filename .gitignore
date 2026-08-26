@@ -34,3 +34,6 @@ src-tauri/gen/apple
 
 # nix local state
 /.nix-local/
+
+# ts-rs writes here if TS_RS_EXPORT_DIR is not picked up. Committed bindings live in src/bindings.
+src-tauri/crates/*/bindings/

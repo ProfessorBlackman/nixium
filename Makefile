@@ -25,7 +25,7 @@ helper: ## Build the helper binary (the client's integration tests spawn it)
 	cd $(CARGO_DIR) && cargo build -p nix-helper
 
 bindings: ## Regenerate the TypeScript types from the Rust definitions
-	cd $(CARGO_DIR) && cargo test -p nix-core --lib
+	cd $(CARGO_DIR) && cargo test -p nix-core --lib export_bindings
 	@echo "bindings written to src/bindings/"
 
 perf: ## Measure the performance budgets (release mode)
