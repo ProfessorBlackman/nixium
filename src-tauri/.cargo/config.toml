@@ -1,0 +1,8 @@
+# Generated TypeScript types go straight into the frontend source tree, so the frontend can be
+# type-checked without first running the Rust test suite. `relative = true` resolves this against
+# the directory containing .cargo/, i.e. src-tauri/, so this is nix/src/bindings.
+#
+# The files are committed, and CI re-generates and diffs them, so a Rust type change that is not
+# reflected in the bindings fails the build rather than drifting silently.
+[env]
+TS_RS_EXPORT_DIR = { value = "../src/bindings", relative = true }

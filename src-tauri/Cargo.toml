@@ -22,6 +22,11 @@ repository = "https://github.com/tlc/nix"
 nix-core = { path = "crates/nix-core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+ts-rs = "11"
 
 # Quality gates encoded in the toolchain rather than in a checklist.
 # `unwrap_used` is the machine-checkable half of the plan's definition of done.
@@ -64,6 +69,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 nix-core = { workspace = true }
+tracing = { workspace = true }
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 serde = { workspace = true }

@@ -1,0 +1,45 @@
+# Flatpak manifest.
+#
+# Two caveats worth knowing before relying on this:
+#
+# 1. A sandboxed build cannot install a host systemd user timer, so growth history (STO-16) falls
+#    back to session-timer collection and says so. That fallback exists because of this constraint.
+# 2. The privileged helper needs host polkit. `--talk-name=org.freedesktop.PolicyKit1` plus
+#    host filesystem access is the minimum, and the helper itself must be installed on the host
+#    rather than inside the sandbox. Until that is resolved, the Flatpak build is read-only:
+#    scanning works, reclaiming system paths does not.
+#
+# Tracked as part of task 0.10; the deb and rpm builds are the ones with a complete privilege story.
+app-id: com.tlc.nix
+runtime: org.gnome.Platform
+runtime-version: "47"
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+  - org.freedesktop.Sdk.Extension.node22
+command: nix
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # Storage insight needs to see the filesystem it is reporting on.
+  - --filesystem=host:ro
+  - --talk-name=org.freedesktop.PolicyKit1
+modules:
+  - name: nix
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/node22/bin
+      env:
+        CARGO_HOME: /run/build/nix/cargo
+    build-commands:
+      - pnpm install --frozen-lockfile --offline
+      - pnpm build
+      - cargo build --release --manifest-path src-tauri/Cargo.toml
+      - install -Dm755 src-tauri/target/release/nix /app/bin/nix
+      - install -Dm644 packaging/nix.desktop /app/share/applications/com.tlc.nix.desktop
+      - install -Dm644 src-tauri/icons/128x128.png /app/share/icons/hicolor/128x128/apps/com.tlc.nix.png
+    sources:
+      - type: dir
+        path: ../..

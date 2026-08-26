@@ -1,34 +1,44 @@
-import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import "./App.css";
-
-type Versions = { app: string; core: string };
-
 /**
- * Placeholder shell. Its only job right now is to prove the app crate and nix-core were built
- * together and that a typed command round-trips. The real shell — routing, lazy views, theme
- * tokens — is task 0.4 (FND-1, FND-6).
+ * Application root: resolves the theme and the start view, then hands off to the shell.
  */
-function App() {
-  const [versions, setVersions] = useState<Versions | null>(null);
-  const [error, setError] = useState<string | null>(null);
+import { useEffect, useState } from "react";
+
+import { Shell, type ViewId } from "./components/Shell";
+import { api, toAppError } from "./lib/ipc";
+import { notify } from "./lib/notices";
+import { applyTheme, watchSystemTheme } from "./lib/theme";
+import type { Theme } from "./lib/ipc";
+
+export default function App() {
+  const [ready, setReady] = useState(false);
+  const [startView, setStartView] = useState<ViewId>("overview");
+  const [preference, setPreference] = useState<Theme>("system");
 
   useEffect(() => {
-    invoke<Versions>("versions").then(setVersions).catch((e) => setError(String(e)));
+    api
+      .settingsGet()
+      .then((settings) => {
+        setPreference(settings.theme);
+        applyTheme(settings.theme);
+        // The stored value is a stable identifier, so it maps directly onto a view id.
+        setStartView(settings.start_view as ViewId);
+      })
+      .catch((thrown) => {
+        // Defaults are already applied; the failure is worth reporting but not worth blocking on.
+        notify.error(toAppError(thrown));
+        applyTheme("system");
+      })
+      .finally(() => setReady(true));
   }, []);
 
-  return (
-    <main className="container">
-      <h1>nix</h1>
-      <p>Linux storage insight and system utility.</p>
-      {error && <p role="alert">Could not reach the backend: {error}</p>}
-      {versions && (
-        <p>
-          nix-app <code>{versions.app}</code> · nix-core <code>{versions.core}</code>
-        </p>
-      )}
-    </main>
-  );
-}
+  // Follow the desktop while the preference is "system".
+  useEffect(() => {
+    if (preference !== "system") return;
+    return watchSystemTheme(() => applyTheme("system"));
+  }, [preference]);
 
-export default App;
+  // Nothing renders until the theme is resolved, so the window cannot flash the wrong palette.
+  if (!ready) return null;
+
+  return <Shell initialView={startView} />;
+}

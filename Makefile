@@ -2,7 +2,7 @@
 SHELL := /bin/bash
 CARGO_DIR := src-tauri
 
-.PHONY: help check fmt fmt-check clippy test typecheck dev build hooks
+.PHONY: help check fmt fmt-check clippy test typecheck bindings perf helper dev build hooks
 
 help:
 	@grep -E '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | expand -t22
@@ -18,8 +18,18 @@ fmt-check: ## Fail if Rust sources are unformatted
 clippy: ## Lint the whole workspace, warnings are errors
 	cd $(CARGO_DIR) && cargo clippy --workspace --all-targets -- -D warnings
 
-test: ## Run the Rust test suite
+test: helper ## Run the Rust test suite
 	cd $(CARGO_DIR) && cargo test --workspace
+
+helper: ## Build the helper binary (the client's integration tests spawn it)
+	cd $(CARGO_DIR) && cargo build -p nix-helper
+
+bindings: ## Regenerate the TypeScript types from the Rust definitions
+	cd $(CARGO_DIR) && cargo test -p nix-core --lib
+	@echo "bindings written to src/bindings/"
+
+perf: ## Measure the performance budgets (release mode)
+	cd $(CARGO_DIR) && NIX_PERF=1 cargo test -p nix-core --release --lib -- budget:: --nocapture
 
 typecheck: ## Type-check the frontend
 	pnpm tsc --noEmit

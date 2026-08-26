@@ -65,16 +65,97 @@ an operation path"). It warns locally so it does not interrupt exploration, and 
 `unsafe_code = "deny"` is a workspace default. If a crate genuinely needs it, it gets an explicit,
 reviewed, per-crate allow — not a silent relaxation of the default.
 
-## Planned module layout in `nix-core`
+## Module layout in `nix-core`
 
-Recorded so tasks land in predictable places rather than accreting into one module.
+Built in Phase 0:
 
 | Module | Task | Contents |
 | --- | --- | --- |
-| `error` | 0.2 | `AppError` taxonomy, cause chain, remedy field |
-| `caps` | 0.7 | capability probe registry |
+| `error` | 0.2 | `AppError` taxonomy, cause chain, remedy, context breadcrumbs |
+| `op` | 0.3 | `CancelToken`, `Progress`, `Completion`, operation registry |
+| `settings` | 0.6 | versioned, atomically written preferences |
+| `caps` | 0.7 | capability probing — never distro detection |
+| `logging` | 0.8 | structured logging and the diagnostics bundle |
+| `helper` | 0.9 | privileged helper: protocol, client, allow-list, audit |
+| `fixture` | 0.11 | reproducible filesystem fixtures |
+| `budget` | 0.11 | performance budgets from the specification |
+| `paths` | — | XDG base-directory resolution |
+
+Planned, so tasks land in predictable places rather than accreting into one module:
+
+| Module | Task | Contents |
+| --- | --- | --- |
 | `space` | 1.1 | the space model and its five invariants |
 | `fs` | 1.2 | mount enumeration, per-filesystem accounting including btrfs |
 | `scan` | 1.3 | streaming, cancellable walker |
 | `cache` | 1.4 | scan persistence |
 | `reclaim` | 1.8–1.9 | executor pipeline and the category registry |
+
+## The privileged helper
+
+Stacer escalated by re-running individual commands under `pkexec`: one authentication prompt *per
+action*, and because it read only stdout and never checked exit status, a cancelled prompt was
+indistinguishable from success.
+
+nix spawns **one** helper under `pkexec` and keeps a privileged session, exchanging line-delimited
+JSON over the child's stdin and stdout:
+
+```
+  nix-app ──spawn── pkexec ──exec── nix-helper --serve      (one authentication)
+      │                                    │
+      └──── Request  (one JSON per line) ──┤
+      ◄──── Response (one JSON per line) ──┘
+```
+
+**The security boundary is the `Op` enum, not the transport.** The helper accepts no free-form
+command, no argument vector, and no path it has not validated. Properties that hold by construction:
+
+- Malformed input is answered, audited, counted, and after a threshold the process exits — a
+  confused or hostile peer cannot spin a root process forever.
+- Reads are matched against an **exact-path allow-list**. This started as a list of permitted
+  directory roots, and the tests caught why that was wrong: any file under `/etc` includes
+  `/etc/shadow`, and anywhere under `/proc` includes other users' `/proc/<pid>/environ`. A prefix
+  allow-list on a privileged read is escalation with extra steps.
+- Exact matching also removes normalisation as a concern — worth noting because
+  `Path::components()` silently drops `.` segments, so a check for them never fires.
+- The helper exits on EOF, so it cannot outlive the app that authorised it.
+- Every request and outcome is audited *before* the response is written.
+
+### How it is tested
+
+`pkexec` cannot run in CI, so `helper::Transport` abstracts how the child is started. Tests spawn
+the helper **directly as the current user**, which exercises serialisation, dispatch, validation,
+rejection and auditing without root. The only path CI does not cover is escalation itself, which is
+a single `Command` invocation.
+
+## Generated TypeScript
+
+Rust types that cross the IPC boundary derive `ts_rs::TS`, and `.cargo/config.toml` points
+`TS_RS_EXPORT_DIR` at `src/bindings/`. The files are **committed**, so the frontend type-checks
+without first running the Rust suite, and CI regenerates and diffs them — a Rust type change that is
+not reflected in the bindings fails the build rather than drifting.
+
+`u64` counters that cross the wire are annotated `#[ts(type = "number")]`: a double holds integers
+exactly to 2^53, and `bigint` would make every arithmetic site in the frontend awkward for no gain.
+
+## Frontend structure
+
+| Path | Contents |
+| --- | --- |
+| `src/lib/ipc.ts` | typed wrappers over every command; normalises any rejection into an `AppError` |
+| `src/lib/notices.ts` | notification centre store — an external store, not context, per D8 rule 3 |
+| `src/lib/useOperation.ts` | the React binding for progress and cancellation, written once |
+| `src/lib/theme.ts` | three-state theme resolution (explicit light, explicit dark, follow desktop) |
+| `src/components/Shell.tsx` | sidebar, header, lazily-mounted content |
+| `src/views/*` | one file per view, each `React.lazy` |
+
+Views are code-split: `pnpm build` emits a separate chunk per view, so principle P9 — nothing runs
+until its view mounts — is verifiable at the bundler level rather than asserted.
+
+## Packaging
+
+See `packaging/README.md`. The short version: deb and rpm install the helper to
+`/usr/libexec/nix/nix-helper` with a polkit policy and have a complete privilege story. AppImage and
+Flatpak are relocatable, and polkit authorises by absolute executable path, so both are read-only
+until the helper ships as a separate host-installed package (M9 / PLT-5). The app degrades honestly
+in that case: the capability probe reports `pkexec` unavailable and privileged features say why.

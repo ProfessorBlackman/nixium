@@ -5,6 +5,32 @@
 
 The spec says *what* and *why*. This says *in what order, and how we know it works*.
 
+## Progress
+
+| Milestone | State |
+| --- | --- |
+| **M0** Walking skeleton | **complete** |
+| **M1** Foundation complete (Phase 0, tasks 0.1–0.11) | **complete** |
+| M2 "Where did my disk go?" | next |
+| M3 – M9 | not started |
+
+Phase 0 shipped all eleven tasks: the three-crate workspace and quality gates, the error taxonomy,
+the IPC contract with its progress/cancellation primitive, the app shell with lazily-mounted views,
+the notification centre, the settings store, capability probing, structured logging, the privileged
+helper with its exact-path allow-list and audit log, packaging for four formats, and the fixture and
+budget harness. 84 tests, all four gates green in CI.
+
+Two things changed during implementation and are worth carrying forward:
+
+- **The helper's read allow-list was rewritten** from directory prefixes to exact paths, after the
+  tests showed prefixes would have exposed `/etc/shadow` and other users' `/proc/<pid>/environ`.
+- **Task 0.11's fixture had a real API bug** — naming temp directories by seed alone made
+  parallel tests delete each other's trees. Fixed with a per-process counter.
+
+Note also that §4's parallelisation advice no longer applies: this is a solo project, which is why
+**task 0.9 was completed within Phase 0 rather than deferred** — see §5.2 for why M2 is nonetheless
+not gated on it.
+
 ---
 
 ## 1. How to read this, and what it assumes

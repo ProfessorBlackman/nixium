@@ -5,7 +5,13 @@ and shows you what your machine is doing while it does.
 
 Rust + Tauri. A replacement for [Stacer](https://github.com/oguzhaninan/Stacer) — not a port of it.
 
-> Status: **pre-alpha, Phase 0.** No user-facing features yet. See [docs/PLAN.md](docs/PLAN.md).
+> Status: **pre-alpha. Phase 0 complete** — foundation only, no user-facing features yet.
+> Next is M2, the space explorer. See [docs/PLAN.md](docs/PLAN.md).
+
+What exists today is every load-bearing mechanism and nothing else: a typed error surface where no
+failure is silent, a privileged helper behind an exact-path allow-list, versioned settings,
+capability probing, structured logging, and one cancellation-and-progress primitive that every
+future long operation reuses. All of it is exercisable from the app's **About** view.
 
 ## Documentation
 
@@ -13,7 +19,8 @@ Rust + Tauri. A replacement for [Stacer](https://github.com/oguzhaninan/Stacer) 
 | --- | --- |
 | [docs/SPEC.md](docs/SPEC.md) | Product requirements: 57 features across 7 phases, the space model, resolved decisions |
 | [docs/PLAN.md](docs/PLAN.md) | Development plan: milestones, task breakdown, risks, definition of done |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Crate layout and the rules that keep it honest |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Crate layout, the helper design, and the rules that keep them honest |
+| [packaging/README.md](packaging/README.md) | What each package format installs, and what it cannot do |
 | [docs/stacer/](docs/stacer/README.md) | Reverse-engineered analysis of Stacer — the source of our requirements *and* our anti-requirements |
 
 ## Quick start

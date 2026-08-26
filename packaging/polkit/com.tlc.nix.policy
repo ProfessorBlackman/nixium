@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD polkit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/software/polkit/policyconfig-1.dtd">
+<!--
+  polkit action for the nix privileged helper.
+
+  Installed to /usr/share/polkit-1/actions/. Without this file, pkexec falls back to the generic
+  org.freedesktop.policykit.exec action, whose prompt says nothing about what is being authorised.
+
+  `auth_admin_keep` is deliberate: nix opens one privileged session rather than prompting per
+  action. Stacer re-ran every individual command under pkexec, so toggling five services meant five
+  dialogs — and because it never checked exit status, a cancelled prompt looked like success.
+-->
+<policyconfig>
+  <vendor>nix</vendor>
+  <vendor_url>https://github.com/tlc/nix</vendor_url>
+
+  <action id="com.tlc.nix.helper">
+    <description>Manage system storage and services</description>
+    <message>Authentication is required to inspect and reclaim system storage.</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/nix/nix-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+</policyconfig>

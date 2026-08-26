@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=nix
+GenericName=Storage Insight
+Comment=Find out where your disk went and reclaim it safely
+Exec=nix
+Icon=nix
+Terminal=false
+Categories=System;Filesystem;Monitor;
+Keywords=disk;storage;space;cleanup;reclaim;monitor;
+StartupWMClass=nix
