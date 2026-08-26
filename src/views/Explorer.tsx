@@ -14,7 +14,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { SpaceTable } from "../components/SpaceTable";
 import { Treemap } from "../components/Treemap";
-import { formatBytes, formatCount, formatPercent } from "../lib/format";
+import { formatAge, formatBytes, formatCount, formatPercent } from "../lib/format";
 import {
   api,
   onScanDone,
@@ -30,6 +30,8 @@ export default function Explorer() {
   const [filesystems, setFilesystems] = useState<Filesystem[] | null>(null);
   const [result, setResult] = useState<ScanResult | null>(null);
   const [scanRoot, setScanRoot] = useState<string | null>(null);
+  /** When the shown result was produced. Null means it is from this session's own scan. */
+  const [scannedAt, setScannedAt] = useState<Date | null>(null);
   /** Drill-down stack: the last id is the directory on screen. */
   const [path, setPath] = useState<string[]>([]);
   const op = useOperation();
@@ -41,11 +43,35 @@ export default function Explorer() {
       .catch((thrown) => notify.error(toAppError(thrown)));
   }, []);
 
+  // Cached-first (D6): open on the previous scan so the view is never empty after the first use.
+  // Browsing stale data is fine; acting on it is not, and nothing here acts.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .homeDirectory()
+      .then((home) => api.scanCached(home).then((cached) => ({ home, cached })))
+      .then(({ home, cached }) => {
+        if (cancelled || !cached) return;
+        setResult(cached.result);
+        setScanRoot(cached.root);
+        setScannedAt(new Date(cached.scanned_at * 1000));
+        setPath(cached.result.tree.roots.length > 0 ? [cached.result.tree.roots[0]] : []);
+        void home;
+      })
+      .catch(() => {
+        // No cache and no home directory is not worth reporting: the user simply picks a root.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // The completed tree arrives on its own event, so a cancelled scan still delivers what it found.
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     void onScanDone((r) => {
       setResult(r);
+      setScannedAt(null);
       setPath(r.tree.roots.length > 0 ? [r.tree.roots[0]] : []);
       if (r.cancelled) {
         notify.info("Scan stopped.", r.coverage_note ?? null);
@@ -67,6 +93,7 @@ export default function Explorer() {
 
   async function startScan(root: string) {
     setResult(null);
+    setScannedAt(null);
     setPath([]);
     setScanRoot(root);
     await op.start(() => api.scanStart(root));
@@ -195,6 +222,17 @@ export default function Explorer() {
                 <span className="muted">directories</span>
               </div>
             </div>
+            {scannedAt && scanRoot && (
+              <p className="stale">
+                <span>
+                  Scanned <strong>{formatAge(scannedAt)}</strong> — this is the last saved result,
+                  not a fresh measurement.
+                </span>
+                <button type="button" onClick={() => void startScan(scanRoot)} disabled={op.running}>
+                  Rescan
+                </button>
+              </p>
+            )}
             {result.coverage_note && <p className="caveat">{result.coverage_note}</p>}
             {result.allocated !== result.apparent_size && (
               <p className="muted">

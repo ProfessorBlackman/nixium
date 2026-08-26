@@ -18,6 +18,7 @@
 
 use std::path::PathBuf;
 
+use nix_core::cache::{Cache, CachedScan};
 use nix_core::caps;
 use nix_core::error::{AppError, ErrorCode, Result};
 use nix_core::helper::{self, Op, OpResult};
@@ -148,6 +149,30 @@ pub(crate) fn filesystems(state: State<'_, AppState>) -> Result<Vec<nixfs::Files
 /// Where a completed scan's result is delivered.
 pub(crate) const EVENT_SCAN_DONE: &str = "scan://done";
 
+/// The previous scan of a path, if one was kept.
+///
+/// The explorer calls this on mount so the view is never empty after the first scan, per D6. The
+/// result is labelled with its age in the UI: a figure presented without its age invites a reader to
+/// trust a stale number.
+#[tauri::command]
+pub(crate) fn scan_cached(path: PathBuf, max_depth: Option<usize>) -> Option<CachedScan> {
+    let options = scan::Options::new(path).max_depth(max_depth.or(Some(12)));
+    Cache::discover().ok()?.load_for(&options)
+}
+
+/// Forget cached scans. Offered because a cache the user cannot clear is a cache they cannot trust.
+#[tauri::command]
+pub(crate) fn scan_cache_clear() -> Result<()> {
+    Cache::discover()?.clear()
+}
+
+/// How much space nix's own cache occupies. A storage tool should be able to answer this about
+/// itself.
+#[tauri::command]
+pub(crate) fn scan_cache_size() -> u64 {
+    Cache::discover().map(|c| c.size_on_disk()).unwrap_or(0)
+}
+
 /// Start a scan. `STO-2`.
 ///
 /// Returns an [`OperationId`] immediately; progress arrives on `op://progress`, the tree on
@@ -168,6 +193,7 @@ pub(crate) fn scan_start(
         .cross_filesystems(cross_filesystems.unwrap_or(false))
         .exclude(exclude);
 
+    let cache_options = options.clone();
     let emitter = app.clone();
     std::thread::spawn(move || {
         let progress_handle = emitter.clone();
@@ -183,6 +209,14 @@ pub(crate) fn scan_start(
         let completion = match outcome {
             Ok(result) => {
                 let cancelled = result.cancelled;
+
+                // Persist for the next open. A cache that cannot be written is a missed
+                // optimisation, not a failed scan, so this only logs.
+                match Cache::discover().and_then(|c| c.store(&cache_options, &result)) {
+                    Ok(()) => tracing::debug!(root = %cache_options.root.display(), "scan cached"),
+                    Err(e) => tracing::warn!(error = %e, "could not cache the scan"),
+                }
+
                 if let Err(e) = emitter.emit(EVENT_SCAN_DONE, &result) {
                     tracing::warn!(error = %e, "could not emit scan result");
                 }

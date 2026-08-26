@@ -823,3 +823,20 @@ select {
   50% { margin-left: 60%; }
   100% { margin-left: 0; }
 }
+
+/* A cached result says how old it is, with the refresh right beside it — a figure shown without
+   its age invites a reader to trust a stale number. */
+.stale {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin: 0.6rem 0 0;
+  padding: 0.5rem 0.7rem;
+  background: var(--surface-alt);
+  border-left: 3px solid var(--rule-strong);
+  border-radius: var(--radius);
+  font-size: 0.8125rem;
+  color: var(--ink-mid);
+}

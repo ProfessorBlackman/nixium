@@ -14,13 +14,14 @@ import type { Completion } from "../bindings/Completion";
 import type { Diagnostics } from "../bindings/Diagnostics";
 import type { OperationId } from "../bindings/OperationId";
 import type { Progress } from "../bindings/Progress";
+import type { CachedScan } from "../bindings/CachedScan";
 import type { Filesystem } from "../bindings/Filesystem";
 import type { ScanResult } from "../bindings/ScanResult";
 import type { Settings } from "../bindings/Settings";
 import type { Snapshot } from "../bindings/Snapshot";
 import type { SpaceEntry } from "../bindings/SpaceEntry";
 
-export type { AppError, Completion, Diagnostics, Filesystem, Progress, ScanResult, Settings, Snapshot, SpaceEntry };
+export type { AppError, CachedScan, Completion, Diagnostics, Filesystem, Progress, ScanResult, Settings, Snapshot, SpaceEntry };
 export type { Accounting } from "../bindings/Accounting";
 export type { Category } from "../bindings/Category";
 export type { EntryId } from "../bindings/EntryId";
@@ -91,6 +92,10 @@ export const api = {
   helperProbe: () => call<HelperProbe>("helper_probe"),
   filesystems: () => call<Filesystem[]>("filesystems"),
   homeDirectory: () => call<string>("home_directory"),
+  scanCached: (path: string, maxDepth?: number) =>
+    call<CachedScan | null>("scan_cached", { path, maxDepth: maxDepth ?? null }),
+  scanCacheClear: () => call<void>("scan_cache_clear"),
+  scanCacheSize: () => call<number>("scan_cache_size"),
   scanStart: (path: string, maxDepth?: number, crossFilesystems?: boolean) =>
     call<OperationId>("scan_start", {
       path,

@@ -30,10 +30,12 @@
 //! | [`space`] | 1.1 | the space model and its invariants |
 //! | [`fs`] | 1.2 | mount enumeration, per-filesystem accounting, btrfs honesty |
 //! | [`scan`] | 1.3 | streaming, cancellable, parallel walker |
+//! | [`cache`] | 1.4 | scan persistence, so the explorer opens on the last result |
 //!
-//! Next: `cache` (1.4), `reclaim` (1.8–1.9).
+//! Next: `reclaim` (1.8–1.9).
 
 pub mod budget;
+pub mod cache;
 pub mod caps;
 pub mod error;
 pub mod fixture;
