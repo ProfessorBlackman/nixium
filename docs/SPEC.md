@@ -1,0 +1,721 @@
+# nix — Product Requirements & Specification
+
+**Status:** draft v0.2 — all eight open decisions resolved (§9) · **Owner:** methuselah.nwodobeh@amalitech.com · **Last updated:** 2026-08-26
+
+Master specification for **nix**, a Linux system utility built with Rust and Tauri. nix is the
+replacement for [Stacer](docs/stacer/README.md) — not a port of it. Stacer's behaviour is
+documented in `docs/stacer/` and is used here as a source of requirements and of
+anti-requirements, never as a design to copy.
+
+---
+
+## 1. Product thesis
+
+**Storage is the centre of the product. Everything else supports it.**
+
+Stacer's defining flaw was that it was twelve unrelated tools sharing a sidebar. Disk concerns
+in particular were scattered across four pages that never spoke to each other — a five-category
+cleaner, an uninstaller with no size information, a `find` form, and a pie chart of volume
+*capacity*. The question a user actually arrives with — *"what is eating my disk, and what can I
+safely reclaim?"* — was answered by no page and could not be, because nothing shared a model of
+"space attributed to a thing."
+
+nix is built the other way round: a single **space model** (§5) is the product's spine. Every
+storage view is a projection of it. Monitoring, process and service management are supporting
+features, valuable in their own right but subordinate in priority.
+
+### One-line positioning
+
+> nix tells you where your disk went, reclaims it safely, and shows you what your machine is
+> doing while it does.
+
+---
+
+## 2. Non-goals
+
+| Not building | Why |
+| --- | --- |
+| A Stacer clone | Different UI, different page structure, different workflows are all expected |
+| A partition editor | Destructive filesystem geometry is GParted's job; nix never writes partition tables |
+| A file manager | We locate and reclaim; we don't browse, rename, or organise |
+| A general terminal replacement | Where a CLI is better, we say so and get out of the way |
+| A resident daemon or system service | Nothing of ours runs as root or stays resident. An **opt-in systemd user timer** running a bounded periodic job is permitted (§STO-16); no lingering, no system units |
+| Cross-platform | Linux only. No Windows/macOS abstraction tax |
+| Telemetry of any kind | No analytics, no crash reporting to us, no phone-home |
+| Kernel or boot tuning | Out of scope; too much risk for too little payoff |
+
+---
+
+## 3. Engineering principles
+
+These are binding constraints, written to be testable. Every feature below inherits them.
+
+| # | Principle | Test |
+| --- | --- | --- |
+| P1 | **Errors are values.** Every fallible operation returns a typed `Result` carrying exit status, stderr and context. Every failure reaches the UI. | No `unwrap()` in operation paths; a forced failure of any privileged op produces a visible, specific message |
+| P2 | **Preview → confirm → execute → report.** Nothing destructive runs without a computed diff first, and every execution returns per-item results. | Every destructive command has a paired `preview_*` command; no destructive command is callable without a preview token |
+| P3 | **One owner of state.** The backend samples; the frontend subscribes. No two consumers share mutable sampler state. | Sampler state is owned by a single task; no `static mut`, no shared delta counters |
+| P4 | **No subprocess where an API exists.** `/proc` over `ps`; systemd D-Bus over `systemctl`; a native walker over `find`. | Zero subprocess spawns in the steady-state monitoring loop |
+| P5 | **Async, streaming, cancellable.** Anything that may exceed 100 ms streams partial results and honours a cancellation token. | Every scan can be cancelled mid-flight and leaves no partial mutation |
+| P6 | **Least privilege.** One typed, allow-listed helper. Prefer APIs that already integrate with polkit (systemd, PackageKit) and write no helper for them. | The helper accepts no free-form argv; no `rm -rf` with a UI-built argument list, ever |
+| P7 | **Capability detection, never distro-name detection.** Probe for the schema, the binary, the filesystem type. Degrade the control, not the feature. | No branch anywhere reads a distro or desktop *name* to decide whether a feature exists |
+| P8 | **Honest numbers.** Parse into maps, never by line index. Distinguish apparent size from on-disk allocation. Show usage, not capacity. Chart maxima decay. | Golden-file tests for every parser; sizes cross-checked against `du`/`df` within tolerance |
+| P9 | **Lazy views.** Nothing samples, scans, or queries until its view is mounted. | Cold start performs no scan; idle CPU with the window closed is ~0 |
+
+---
+
+## 4. Platform support
+
+| Tier | Scope |
+| --- | --- |
+| **Tier 1** — CI-tested, must work | Ubuntu 22.04+/24.04, Debian 12+, Fedora 39+, Arch (rolling). GNOME and KDE. Wayland and X11. ext4, btrfs, xfs. |
+| **Tier 2** — supported, best effort | openSUSE Tumbleweed/Leap, Linux Mint, Pop!_OS. Xfce, Cinnamon. ZFS, LVM. |
+| **Tier 3** — degrade gracefully, don't crash | Immutable/ostree distros (Silverblue, Bazzite) — read-only storage insight, no package mutation. Containers, WSL2, headless. |
+
+**Package backends:** apt/dpkg, dnf/rpm, pacman, zypper, snap, flatpak.
+Detection is per-capability (§P7): a machine with both apt and flatpak reports both.
+
+**Minimum:** Linux 5.15, glibc 2.35 or musl, polkit for privileged operations.
+Absent polkit, nix runs read-only and says so.
+
+---
+
+## 5. The space model
+
+The spec's core. Everything in Phase 1 and 2 is a producer or a consumer of this model.
+
+### 5.1 `SpaceEntry`
+
+A scan produces a stream of entries. Each entry attributes bytes to a *thing*, with enough
+provenance that the UI can explain itself and the executor can act safely.
+
+```rust
+struct SpaceEntry {
+    id:            EntryId,          // stable across rescans
+    path:          Option<PathBuf>,  // None for logical entries (e.g. a journal budget)
+    label:         String,           // human name: "Firefox cache", "linux-image-6.5.0-21"
+    apparent_size: u64,              // sum of file sizes
+    allocated:     u64,              // on-disk, from stat blocks — differs on sparse/CoW/compressed
+    category:      Category,
+    provenance:    Provenance,       // how we identified it — shown in the UI
+    safety:        Safety,
+    reclaim:       ReclaimMethod,
+    last_used:     Option<SystemTime>,
+    children:      Vec<EntryId>,     // the model is a tree
+}
+```
+
+### 5.2 Categories
+
+`PackagePayload` · `PackageCache` · `AppCache` · `Log` · `Journal` · `Trash` ·
+`Snapshot` · `ContainerImage` · `BuildArtifact` · `Thumbnail` · `CrashDump` ·
+`OrphanedConfig` · `UserFile` · `Duplicate` · `Unknown`
+
+`Unknown` is a first-class category, not a bug. Space nix cannot attribute is shown as
+unattributed rather than silently dropped, and the sum of all categories plus `Unknown` must
+equal filesystem usage (§P8).
+
+### 5.3 Safety ratings
+
+| Rating | Meaning | UI treatment |
+| --- | --- | --- |
+| `Safe` | Regenerable with no user-visible loss. Package caches, thumbnails, rotated logs. | Selectable in bulk, pre-checked in "quick clean" |
+| `Review` | Reclaimable but has a cost — a slower next launch, lost browser session, lost build cache. | Selectable, never pre-checked, cost stated inline |
+| `Risky` | May break a running service or lose data. Active logs, container volumes, anything a process holds open. | Requires per-item confirmation; blocked from bulk selection |
+| `Never` | Not reclaimable by nix at all. Live system files, mounted volumes, anything under a protected path. | Displayed for attribution only, no selection control |
+
+The rating is computed, not hardcoded per category: an open file handle, a recent access time, or
+a protected-path match escalates the rating.
+
+### 5.4 Reclaim methods
+
+Reclamation always prefers the owning tool over `unlink`:
+
+| Method | Used for |
+| --- | --- |
+| `PackageManager(cmd)` | `apt-get clean`, `dnf clean packages`, `pacman -Sc`, `flatpak uninstall --unused` |
+| `JournalVacuum{size,time}` | `journalctl --vacuum-size=` / `--vacuum-time=` |
+| `SnapRevision(pkg,rev)` | Drop superseded snap revisions |
+| `ContainerPrune(scope)` | `podman`/`docker` image and build-cache prune |
+| `TrashEmpty(volume)` | Spec-compliant per-volume trash |
+| `MoveToTrash(path)` | **Default for user files** — reversible |
+| `Unlink(path)` | Last resort, only for `Safe` entries under a validated category root |
+
+### 5.5 Model invariants
+
+1. Every entry's `allocated` ≤ its parent's `allocated`.
+2. Category totals + `Unknown` = filesystem used bytes, within 1%.
+3. An entry with `safety: Never` has no reclaim method.
+4. `Unlink` is only ever emitted for a path whose ancestor is the category's declared root.
+5. Rescanning produces the same `EntryId` for the same thing, so selections survive a refresh.
+
+---
+
+## 6. Feature catalogue
+
+57 features across seven phases. Priorities: **P0** ship-blocking for that phase · **P1**
+expected · **P2** desirable.
+
+---
+
+### Phase 0 — Foundation
+
+*Goal: an empty app that already has every load-bearing mechanism. No user-facing features.*
+
+| ID | Feature | Pri |
+| --- | --- | --- |
+| FND-1 | App shell & navigation | P0 |
+| FND-2 | IPC contract & command conventions | P0 |
+| FND-3 | Error & notification surface | P0 |
+| FND-4 | Privileged helper | P0 |
+| FND-5 | Settings store | P0 |
+| FND-6 | Theme tokens & light/dark | P1 |
+| FND-7 | Capability probe registry | P0 |
+| FND-8 | Structured logging & diagnostics | P0 |
+| FND-9 | Build, CI & packaging skeleton | P1 |
+
+**FND-1 App shell & navigation.** Lazy-mounted views (§P9), keyboard-navigable, no splash
+screen. *Accepts:* cold start to interactive < 800 ms; mounting a view is the only thing that
+starts its data flow.
+
+**FND-2 IPC contract.** Typed commands and events with a single naming convention; every
+command returns `Result<T, AppError>`; long operations return a handle plus a progress event
+stream and accept a cancellation token. *Accepts:* a generated TS type surface with no `any`;
+cancelling any streaming command stops backend work within 200 ms.
+
+**FND-3 Error & notification surface.** Every `AppError` carries a code, a plain-language
+message, the underlying cause (exit status, stderr, errno) and an optional remedy. A persistent
+notification centre keeps the last N failures. *Accepts:* a deliberately failed privileged
+operation shows a specific message naming the operation and the cause — never "something went
+wrong". This is the direct answer to Stacer's total absence of an error surface.
+
+**FND-4 Privileged helper.** A separate binary with a typed, allow-listed operation set,
+reached over a socket, authorised by polkit, with an audit log. No free-form command execution.
+*Accepts:* the helper rejects any operation not in its enum; a fuzzed IPC payload cannot cause
+it to execute an arbitrary path; every invocation is logged with caller, operation and result.
+
+**FND-5 Settings store.** Versioned, schema-validated, atomically written to
+`$XDG_CONFIG_HOME/nix/settings.json`. Stable machine keys — never localised strings (Stacer
+persisted its start page as a translated name). *Accepts:* corrupt or future-version settings
+load defaults and warn instead of failing.
+
+**FND-6 Theme tokens.** Complete light and dark palettes as tokens; system-preference default
+with an explicit override. The Stacer `values.ini` palettes are the starting point and are
+already complete for both themes. *Accepts:* no colour is defined only inside a theme block.
+
+**FND-7 Capability probe registry.** One place that answers "is `flatpak` present", "does this
+schema exist", "is this filesystem btrfs", cached per session with explicit invalidation.
+*Accepts:* no feature branches on a distro or desktop name (§P7); removing a backend binary at
+runtime degrades exactly the affected controls after invalidation.
+
+**FND-8 Structured logging.** `tracing` to stderr and to a rotating file under
+`$XDG_STATE_HOME/nix/`, with a level control in Settings and a "copy diagnostics" action.
+*Accepts:* logging is actually initialised — verified by a test that asserts the file exists
+after startup. (Stacer implemented a logger and never installed it.)
+
+**FND-9 Build, CI & packaging skeleton.** Reproducible builds, clippy + fmt + test gates,
+artefacts for `.deb`, `.rpm`, AppImage and Flatpak from day one. *Accepts:* a tagged commit
+produces all four artefacts unattended.
+
+---
+
+### Phase 1 — Storage core
+
+*Goal: nix is already worth installing for storage alone. This phase is the product.*
+
+| ID | Feature | Pri |
+| --- | --- | --- |
+| STO-1 | Filesystem overview | P0 |
+| STO-2 | Space explorer | P0 |
+| STO-3 | Reclaim scan | P0 |
+| STO-4 | Reclaim executor | P0 |
+| STO-5 | App & user caches | P0 |
+| STO-6 | Logs & journal | P0 |
+| STO-7 | Trash | P1 |
+| STO-8 | Package manager caches | P0 |
+| STO-9 | Protected paths & exclusions | P0 |
+
+**STO-1 Filesystem overview.** Real mounts with used/free/total, filesystem type, device, and
+mount options. Pseudo-filesystems (tmpfs, squashfs, overlay, devtmpfs) hidden by default behind
+a disclosure. Source: `/proc/self/mountinfo` + `statvfs`. *Accepts:* reported usage matches `df`
+within 1%; a snap-heavy Ubuntu install shows a handful of real volumes, not forty loop mounts.
+
+**STO-2 Space explorer.** The answer to "what is eating my disk". A treemap plus a sortable
+tree table over the space model, drilling from filesystem → directory → entry, with
+attribution and category shown at every level. Scanning is streamed, cancellable, and
+progressive — the treemap fills in as results arrive. Results **persist**, so
+every visit after the first opens on the last scan immediately, labelled with its age, with
+refresh offered — the view is never empty again (D6). While the view is mounted, the top-N
+largest directories are watched via inotify so subtrees can be marked stale; inotify watches are
+capped per user, which is why it is top-N and not the whole tree. *Accepts:* first useful paint
+within 2 s on a 500 GB home directory; full scan of 2 M files under 60 s; cancellation is
+immediate; unattributed space is visible as `Unknown`, never hidden; a second open renders from
+cache in under 300 ms with a visible scan age.
+
+**STO-3 Reclaim scan.** Produces categorised, safety-rated reclaimable entries with a total
+"you can free X" figure. Runs per-category so partial results are usable. Replaces Stacer's
+five fixed checkboxes with the full category set from §5.2. *Accepts:* every entry states its
+provenance and its cost; the sum of `Safe` entries is achievable without any user-visible loss.
+
+**STO-4 Reclaim executor.** The §P2 pipeline made concrete: a preview listing every affected
+path and its method, an explicit confirm, execution with progress, then a per-item report of
+what was freed and what failed. User files default to `MoveToTrash`, not `Unlink`.
+**Stale
+cache is never an action basis:** the executor re-stats every path in the preview immediately
+before acting, which §7.4 requires anyway for TOCTOU safety. You may browse stale data; you may
+never reclaim from it. *Accepts:* the reported freed bytes match the measured filesystem delta
+within 2%; a partial failure reports exactly which items failed and why; no operation runs
+without a preview; a path that changed between preview and execute is skipped and reported.
+
+**STO-5 App & user caches.** `~/.cache` attributed to owning applications, plus thumbnails,
+browser caches, and known per-app cache locations outside `~/.cache`. Each with a stated cost
+("Firefox will re-download cached assets"). *Accepts:* the top ten cache consumers are named
+applications, not opaque directory names.
+
+**STO-6 Logs & journal.** Rotated and archived logs under `/var/log`, **and journald** — sized
+via `journalctl --disk-usage` and reclaimed via vacuum by size or age. Active log files held
+open by a running process are rated `Risky` and excluded from bulk selection. Stacer skipped
+journald entirely (it filtered `/var/log` to regular files, and `journal/` is a directory) —
+which usually meant skipping the single largest log consumer. *Accepts:* journal usage is
+reported and vacuumable; no bulk operation can truncate a log a running service holds open.
+
+**STO-7 Trash.** Freedesktop-spec trash: per-volume `.Trash-$uid`, correct relative `Path=` for
+files under `$HOME`, restore support, and per-volume emptying. *Accepts:* a file trashed by nix
+is restorable by the desktop's own file manager, and vice versa.
+
+**STO-8 Package manager caches.** Reclaimed with the owning tool (`apt-get clean`,
+`dnf clean packages`, `pacman -Sc`, snap/flatpak equivalents), never by unlinking cache files.
+*Accepts:* on a Fedora machine the DNF cache is found and cleaned — Stacer pointed its DNF
+branch at the pacman directory and always reported zero.
+
+**STO-9 Protected paths & exclusions.** A built-in never-touch set (system binaries, live
+databases, mounted media, `.git`, active container volumes) plus user-editable exclusions
+consulted by both the scanner and the executor. *Accepts:* a protected path is never emitted
+with a reclaim method (§5.5 invariant 3); user exclusions survive a rescan.
+
+---
+
+### Phase 2 — Storage depth
+
+*Goal: cover the reclaimable space that actually dominates real machines.*
+
+| ID | Feature | Pri |
+| --- | --- | --- |
+| STO-10 | Package storage attribution | P0 |
+| STO-11 | Removable system packages | P0 |
+| STO-12 | Snap & flatpak revisions | P1 |
+| STO-13 | Container & image storage | P1 |
+| STO-14 | Developer build artifacts | P1 |
+| STO-15 | Large files & duplicates | P1 |
+| STO-16 | Growth history | P2 |
+| STO-17 | btrfs, LVM & ZFS awareness | **P0** |
+| STO-18 | Incremental rescan | P1 |
+
+**STO-10 Package storage attribution.** Installed size per package, joined into the space model
+so a directory can name the package that owns it. This is what makes an uninstaller a storage
+tool — Stacer's showed no sizes at all. *Accepts:* installed sizes are available for every
+Tier-1 backend; sorting installed software by size is possible.
+
+**STO-11 Removable system packages.** Superseded kernels and their headers/modules, orphaned
+dependencies, and residual configuration — with a cascade preview. On Ubuntu these are
+routinely the largest single reclaim available, and Stacer covered none of them. *Accepts:* the
+currently booted kernel is never offered for removal; the preview matches what the package
+manager actually does.
+
+**STO-12 Snap & flatpak revisions.** Superseded snap revisions, unused flatpak runtimes, and
+per-app data sizes. *Accepts:* only non-current revisions are offered; reclaim uses the native
+tooling.
+
+**STO-13 Container & image storage.** Docker/podman images, stopped containers, dangling layers
+and build caches, with a prune preview. Volumes are `Risky` and never bulk-selected.
+*Accepts:* preview totals match `system df`; no volume is removed without per-item confirmation.
+
+**STO-14 Developer build artifacts.** `target/`, `node_modules/`, `.venv`, `__pycache__`,
+`build/`, plus package-manager caches for cargo, npm/pnpm, pip and Go — recognised by marker
+files, rated `Review` with an honest cost ("next build will be slow"). *Accepts:* detection is
+by project marker, not by name alone; a directory inside an active project is never rated `Safe`.
+
+**STO-15 Large files & duplicates.** Largest-files view over the scan (no separate query form —
+Stacer made you fill in a `find` dialogue), and content-hash duplicate detection with
+size-then-partial-hash-then-full-hash staging. *Accepts:* duplicate detection never reports a
+false positive; hashing is incremental and cancellable.
+
+**STO-16 Growth history.** Periodic snapshots of **category totals plus top-N directory
+sizes** — trends, not detail — enabling "`~/.cache` grew 4 GB this week". Collected by an
+**opt-in systemd user timer** (D5), off by default, whose `ExecStart` is a subcommand of the
+same binary (`nix snapshot --quiet`) rather than a second artefact. The job is an *incremental*
+refresh against the existing scan cache, never a fresh walk, and is constrained in the unit:
+`Nice=19`, `IOSchedulingClass=idle`, `ConditionACPower=true`, `Persistent=true` so a run missed
+while the machine was off fires at next login. **No lingering** — `enable-linger` would make user
+units run without a session and is out of scope. Where a user timer cannot be installed
+(Flatpak sandboxes, non-systemd systems) the capability probe falls back to **session-timer
+collection and says so**: "trend data will only be collected while nix is open". Storage is
+bounded — a hard retention cap, because a storage tool whose own data grows without limit is
+indefensible. *Accepts:* history survives restarts; the timer job completes in seconds and never
+runs on battery; disabling removes the unit and deletes collected data; an orphaned unit from a
+previous version is detected at startup and repairable; gaps in the series are rendered as gaps,
+never interpolated (§P8).
+
+**STO-17 btrfs, LVM & ZFS awareness.** **P0, not P1** — Fedora is Tier 1 and Fedora
+Workstation is btrfs by default, so wrong numbers here are wrong numbers on a Tier-1 default.
+Report-aware, reclaim-naive, never dishonest (D3):
+
+- **Correct free space.** `statvfs` is misleading on btrfs — it ignores metadata allocation and
+  RAID-profile duplication. Read `btrfs filesystem usage` instead. This is §P8 applied to a
+  filesystem we already claim to support, not a btrfs nicety.
+- **Subvolume and snapshot inventory** as a `Snapshot` category, so the space is attributed
+  rather than landing in `Unknown`.
+- **Exclusive vs shared extents** via `btrfs filesystem du`, which reports total/exclusive/
+  set-shared per path **without requiring qgroups**. Quotas are usually disabled and carry a real
+  performance cost; nix must never enable them silently.
+- **Where exclusive size is unobtainable, suppress the estimate rather than fake it** — "shared
+  with a snapshot, freeing this may reclaim nothing" instead of a number.
+
+Snapshot *deletion* is backlog, behind explicit opt-in and its own design review: removing a
+snapper or Timeshift snapshot can destroy a user's only rollback point.
+*Accepts:* free space matches `btrfs filesystem usage`, not `df`; no reclaim estimate is shown
+for extents nix cannot prove are exclusive; nix never claims space it cannot free.
+
+**STO-18 Incremental rescan.** The optimisation half of the cache STO-2 already owns: keyed by
+(path, mtime, size) so a rescan only walks what changed. Also what makes STO-16's timer job cheap
+enough to run daily. *Accepts:* a rescan of an unchanged tree completes in under 10% of the
+initial scan time.
+
+---
+
+### Phase 3 — Monitoring
+
+*Goal: replace Stacer's Dashboard and Resources pages, honestly and cheaply.*
+
+| ID | Feature | Pri |
+| --- | --- | --- |
+| MON-1 | Live metrics pipeline | P0 |
+| MON-2 | Overview dashboard | P0 |
+| MON-3 | History charts | P0 |
+| MON-4 | Sensors — temperature & fans | P1 |
+| MON-5 | Battery & power | P1 |
+| MON-6 | Threshold alerts | P1 |
+| MON-7 | Per-interface network | P2 |
+
+**MON-1 Live metrics pipeline.** One sampler task per metric family, single owner of delta
+state, fixed tick, 60-sample ring buffers held in the backend, paused when nothing subscribes.
+Sources: `/proc/stat`, `/proc/meminfo` (parsed into a **map**, §P8 — Stacer's positional parse
+was silently wrong), `/proc/loadavg`, `/sys/block/*/stat`, `/sys/class/net/*/statistics/*`,
+`scaling_cur_freq`. Zero subprocesses (§P4). *Accepts:* a late-mounting view immediately
+receives the full 60-second history; idle CPU under 1% of one core; memory figures cross-checked
+against `free`.
+
+**MON-2 Overview dashboard.** At-a-glance CPU, memory, disk and network, plus **storage headline
+figures** — this is a storage-first product, so the dashboard leads with "X GB reclaimable"
+rather than burying it. *Accepts:* renders from cached state with no scan on mount.
+
+**MON-3 History charts.** 60-second rolling charts per metric family; per-core CPU with an
+n-core-safe palette (Stacer asserted past 20 cores); byte axes formatted in binary units;
+**maxima decay** instead of only growing. *Accepts:* a traffic burst does not permanently
+flatten the axis; a 64-core machine renders correctly.
+
+**MON-4 Sensors.** `/sys/class/hwmon` temperatures, fan speeds and throttling state, absent
+entirely from Stacer. *Accepts:* machines with no hwmon show a clean empty state.
+
+**MON-5 Battery & power.** Charge, health, rate, time remaining, power profile. *Accepts:*
+hidden on desktops via capability probe.
+
+**MON-6 Threshold alerts.** CPU, memory, disk-usage and **disk-space** thresholds with
+desktop notifications, hysteresis, and per-alert cooldown held in real state.
+*Accepts:* an alert does not re-fire while the condition persists; disabling is immediate.
+
+**MON-7 Per-interface network.** All interfaces with rates, addresses and link state; user
+selects which to feature. Stacer picked the first non-loopback interface once at startup and
+never re-evaluated. *Accepts:* switching Ethernet → Wi-Fi is reflected without restart.
+
+---
+
+### Phase 4 — Processes & services
+
+| ID | Feature | Pri |
+| --- | --- | --- |
+| PRC-1 | Process table | P0 |
+| PRC-2 | Process actions | P0 |
+| PRC-3 | Process detail | P1 |
+| PRC-4 | Process tree | P2 |
+| SVC-1 | systemd unit inventory | P0 |
+| SVC-2 | Unit actions | P0 |
+| SVC-3 | Live unit state | P1 |
+| SVC-4 | Timers & user units | P1 |
+| SVC-5 | Unit logs | P2 |
+
+**PRC-1 Process table.** Direct `/proc/<pid>` reads (§P4), **diff-updated** rather than
+rebuilt each tick, with real instantaneous %CPU computed from `utime + stime` deltas — `ps`
+reports an average since process start, which Stacer displayed as if it were live. Filter by
+name, user, or state. *Accepts:* selection, scroll position and sort survive refreshes; column
+choices persist.
+
+**PRC-2 Process actions.** Signal (TERM, then optional KILL escalation), renice, with
+confirmation for non-own processes and a real result. *Accepts:* a failed signal reports errno;
+no silent no-op.
+
+**PRC-3 Process detail.** Per-process CPU/memory/IO history, open files, threads, environment,
+cgroup, and **disk footprint** — the link back to the storage model.
+
+**PRC-4 Process tree.** Parent/child hierarchy with aggregated subtree resource use.
+
+**SVC-1 systemd unit inventory.** Over D-Bus (`ListUnits`, `ListUnitFiles`, plus properties) —
+one round trip instead of Stacer's `1 + 2N` subprocess spawns. Includes `static`, `masked` and
+`generated` units, which Stacer's `--state=enabled,disabled` filter dropped, and template units,
+which it discarded with a regex. *Accepts:* inventory of 400 units in under 500 ms.
+
+**SVC-2 Unit actions.** Enable/disable, start/stop/restart via D-Bus, so polkit integrates
+natively — one prompt, a real error, no custom helper. *Accepts:* a denied authorisation is
+reported as denied, not as success.
+
+**SVC-3 Live unit state.** Subscribe to unit change signals; no manual refresh needed.
+Stacer loaded the list once per app run. *Accepts:* enabling a unit in a terminal updates the UI.
+
+**SVC-4 Timers & user units.** `--user` units and `.timer` units with next/last elapse, both
+absent from Stacer.
+
+**SVC-5 Unit logs.** Recent journal entries for the selected unit, with follow.
+
+---
+
+### Phase 5 — Software & system tools
+
+*Phase 6 was folded in here once SYS-3 was cut (D7), leaving two system tools too small to stand
+as their own phase.*
+
+| ID | Feature | Pri |
+| --- | --- | --- |
+| PKG-1 | Installed software inventory | P0 |
+| PKG-2 | Removal with cascade preview | P0 |
+| PKG-3 | Multi-backend coverage | P1 |
+| PKG-4 | Startup applications | P1 |
+| PKG-5 | Repository management | P2 |
+| SYS-1 | Hosts file editor | P1 |
+| SYS-2 | File search | P2 |
+
+**PKG-1 Installed software inventory.** Name, version, **installed size** (STO-10), summary,
+install date, explicit-vs-dependency, sortable by size. Machine-readable queries only
+(`dpkg-query -W -f=`, `rpm -qa --qf`, `pacman -Qi`), never display-string parsing — Stacer
+round-tripped package names through a padded UI label.
+
+Size is reported **twice, deliberately** (D2): the package database figure by default, plus a
+per-row **Measure** action that walks the package's file list on disk (via the helper for system
+paths). Both are shown and labelled distinctly — "2.1 GB installed" vs "2.4 GB measured" — because
+the gap between them *is* information: it is post-install growth. Measured results are cached
+against the package version. *Accepts:* names are never derived from rendered text; the two
+figures are never conflated or silently substituted.
+
+**PKG-2 Removal with cascade preview.** Show exactly what else goes (`apt-get -s remove`,
+`dnf remove --assumeno`, `pacman -Rp`), require confirmation, report per-package results.
+No unconditional empty invocations — Stacer ran `pkexec snap remove` with no arguments on every
+uninstall. *Accepts:* the preview matches the actual outcome; a removal that would take out a
+desktop environment is flagged prominently.
+
+**PKG-3 Multi-backend coverage.** apt, dnf, pacman, **zypper** (Stacer detected it and never
+implemented it), snap, flatpak — each behind a common trait, each independently capability-probed.
+
+**Per-manager implementations, not PackageKit** (D4). With the privileged helper landing in
+Phase 0 (D1), PackageKit's main draw — free polkit integration for removal — is already paid for,
+and what remains argues against it: it abstracts away exactly the detail this product needs
+(installed size, orphan and superseded-kernel detection, cache locations, per-manager preview
+semantics), two of our six backends bypass it entirely, and backend coverage is uneven across
+distros. Trait surface: `list`, `installed_size`, `preview_removal`, `remove`, `clean_cache`,
+`orphans`, `superseded`. A manager that cannot answer returns `Unsupported`, never a fabricated
+value (§P7) — which keeps the zypper gap explicit rather than silent.
+
+**PKG-4 Startup applications.** XDG autostart CRUD with **spec-correct defaults** — absence of
+`Hidden` and `X-GNOME-Autostart-enabled` means *enabled*, which Stacer got backwards. Honour
+`NoDisplay`, `OnlyShowIn`/`NotShowIn`, `TryExec`; show `Icon`; list `/etc/xdg/autostart`
+read-only; atomic writes preserving unknown keys and comments. *Accepts:* distro-shipped entries
+show their true state; an edit preserves every key nix does not manage.
+
+**PKG-5 Repository management.** APT sources with **deb822 `.sources` support** — the format
+current Debian/Ubuntu increasingly uses and which Stacer could not see at all — plus legacy
+one-line entries. Entries tracked by file **and line number**, never located by substring match.
+`signed-by` keyring fields are first-class. *Accepts:* a deb822-only system shows its real
+sources; an edit never rewrites a different line.
+
+---
+
+**SYS-1 Hosts editor.** Table editing of `/etc/hosts` preserving comments and unparsed lines
+(the one thing Stacer's editor did well), with IPv4/IPv6 validation, delete that actually
+removes the line, external-change detection, and an **atomic privileged write preserving mode
+and ownership** — never a fixed `/tmp` staging path (Stacer's created a symlink race).
+*Accepts:* a concurrent external edit is detected and surfaced rather than overwritten.
+
+**SYS-2 File search.** A **filter over the storage index**, not a separate tool — the walker is
+STO-2's walker, which is what makes this nearly free once Phase 1 exists, and it means results
+carry size and category attribution for free. Streaming, no row cap. Stacer shelled out to
+`find`, capped its table at 2000 rows, and emitted a `-invert` flag that isn't a real predicate,
+so "invert" silently returned nothing. Filters: name/glob/regex, size, times, type, owner,
+permissions. *Accepts:* results stream; the query is cancellable; every filter maps to real
+behaviour.
+
+---
+
+### Phase 6 — Release readiness
+
+*Runs partly in parallel with Phases 3–5; blocking for 1.0.*
+
+| ID | Feature | Pri |
+| --- | --- | --- |
+| PLT-1 | Internationalisation | P1 |
+| PLT-2 | Accessibility & keyboard | P0 |
+| PLT-3 | Tray & background behaviour | P1 |
+| PLT-4 | First-run experience | P2 |
+| PLT-5 | Packaging & distribution | P0 |
+| PLT-6 | Performance budget verification | P0 |
+| PLT-7 | Documentation & in-app help | P1 |
+
+**PLT-1 Internationalisation.** Harvest Stacer's 26 existing Qt `.ts` locale files into JSON
+rather than restarting translation. Live language switching (Stacer required a restart), RTL
+layout for Arabic. *Accepts:* no user-facing string is hardcoded; switching language needs no
+restart.
+
+**PLT-2 Accessibility & keyboard.** Full keyboard operation, visible focus, screen-reader
+labels on every control, `prefers-reduced-motion` honoured, WCAG AA contrast in both themes.
+
+**PLT-3 Tray & background behaviour.** Optional tray icon, quit-vs-minimise preference, and
+`--hide` start — worth carrying over. Sampling stays paused while hidden unless an alert is
+armed (§P9). *Accepts:* hidden in tray with no alerts armed, CPU is ~0.
+
+**PLT-4 First-run experience.** Explain what nix will and won't touch, offer a first scan, set
+up protected paths. Establishing trust before the first destructive action is the point.
+
+**PLT-5 Packaging & distribution.** `.deb`, `.rpm`, AppImage, Flatpak, AUR. Desktop entry,
+icon theme sizes, polkit policy file installed correctly per format. *Accepts:* each artefact
+installs and runs on its Tier-1 target in CI.
+
+**PLT-6 Performance budget verification.** The budgets in §7.3 asserted in CI on a fixed
+fixture, failing the build on regression.
+
+**PLT-7 Documentation & in-app help.** Per-category explanations of what reclaiming actually
+does — inline, at the point of decision, not in a manual.
+
+---
+
+### Backlog — explicitly deferred
+
+**Desktop tweaks** (ex-SYS-3, cut by D7) · **btrfs snapshot deletion** (from D3, needs its own
+design review) · scheduled/automatic cleanup · filesystem-level dedupe (`duperemove`) ·
+GPU monitoring · remote or multi-machine use · a plugin API · kernel/boot tuning ·
+Wine/Proton and game-library storage · disk health (SMART) · benchmark tooling.
+
+Deferred, not rejected. Each needs its own justification when it comes up.
+
+---
+
+## 7. Cross-cutting requirements
+
+### 7.1 Privilege
+
+One helper (FND-4) with a closed operation set. Prefer polkit-integrated APIs — systemd D-Bus
+for units, PackageKit where viable — and write no helper code for them. No operation accepts
+free-form argv. No `rm -rf` invocation is ever constructed from UI state. Root-destined file
+writes are atomic and staged in a root-owned directory.
+
+### 7.2 Failure semantics
+
+Every operation reports success, partial success, or failure, with per-item detail for batch
+operations. A cancelled authorisation is reported as cancelled — never as success, which was
+Stacer's single most damaging behaviour. Exit status and stderr are captured for every
+subprocess that survives §P4.
+
+### 7.3 Performance budgets
+
+| Budget | Target |
+| --- | --- |
+| Cold start to interactive | < 800 ms |
+| Idle CPU, window open, monitoring view mounted | < 1% of one core |
+| Idle CPU, hidden in tray, no alerts armed | ~0 (no sampling) |
+| Resident memory, steady state | < 150 MB |
+| Subprocess spawns in the steady-state monitoring loop | **0** (Stacer: ~2/second) |
+| Space explorer, first useful paint | < 2 s on a 500 GB home |
+| Full scan, 2 M files | < 60 s |
+| Incremental rescan, unchanged tree | < 10% of initial |
+| Service inventory, 400 units | < 500 ms (Stacer: seconds, 800+ spawns) |
+| Cancellation latency, any streaming op | < 200 ms |
+
+### 7.4 Security review checklist
+
+Ahead of 1.0, each must be signed off: helper operation surface, TOCTOU on every privileged
+write, path validation before any unlink, protected-path enforcement in both scanner and
+executor, no shell interpolation anywhere, dependency audit, and packaged polkit policy
+correctness.
+
+---
+
+## 8. Success criteria
+
+nix 1.0 succeeds if:
+
+1. A user with a full disk can answer "what's using my space?" **without leaving the first
+   storage view**, and reclaim safely from the same place.
+2. The three largest reclaim wins on a typical Ubuntu desktop — old kernels, snap revisions,
+   caches — are all found and offered. Stacer found none of them.
+3. **No operation ever fails silently.** Zero known silent-failure paths at release.
+4. Reported reclaimed bytes match measured filesystem delta within 2%.
+5. Steady-state idle cost is indistinguishable from an idle desktop.
+6. Every Tier-1 platform passes the full feature matrix in CI.
+7. No destructive action is reachable without a preview and a confirmation.
+
+---
+
+## 9. Resolved decisions
+
+All eight decisions are settled. Recorded here with rationale, because the *reasons* constrain
+future work more than the answers do.
+
+| # | Question | Decision | Why |
+| --- | --- | --- | --- |
+| **D1** | Privileged helper in Phase 0, or Phase 1 read-only first? | **Phase 0.** | More work up front, but avoids building a throwaway escalation path — and it removes the main argument for PackageKit (D4). |
+| **D2** | Installed package size — database, or on-disk measurement? | **Both, explicitly.** DB figure by default, per-row *Measure* action for the on-disk walk. | The gap between them is post-install growth, which is information. Never conflate or silently substitute the two. |
+| **D3** | btrfs depth in v1 — report-only, or snapshot-aware reclaim? | **Report-aware, reclaim-naive, never dishonest.** STO-17 raised to **P0**. | Fedora is Tier 1 and btrfs by default, so `statvfs` numbers are already wrong there. Where exclusivity can't be proven, suppress the estimate instead of faking it. Snapshot deletion → backlog. |
+| **D4** | PackageKit, or per-manager implementations? | **Per-manager, behind a common trait.** | It hides exactly the detail we need, two of six backends bypass it, coverage is uneven — and D1 already bought us polkit integration. |
+| **D5** | Growth history — session timer, or systemd user timer? | **Opt-in systemd user timer**, with session-timer collection as the fallback tier. | On a session timer the series is one sample every few weeks, so the feature ships, works, and never produces a useful reading. A bounded periodic one-shot is not the resident daemon the non-goal protects against. Flatpak and non-systemd systems need the fallback regardless. |
+| **D6** | Background indexing, or strictly on-demand? | **Cached-first, on-demand refresh, incremental.** | Gets ~95% of indexing's felt speed with no daemon. Safe because *you may browse stale data, you may never reclaim from it* — the executor re-stats before acting, which TOCTOU safety requires anyway. |
+| **D7** | Keep desktop tweaks (SYS-3)? | **Cut.** Moved to backlog; Phase 6 folded into Phase 5. | The cost isn't implementation, it's a maintenance surface of every desktop × version × schema rename. Stacer's page rotted in a few years and then silently did nothing — worse than never shipping it. GNOME Tweaks and KDE System Settings already do this well. |
+| **D8** | Keep the scaffolded React 19? | **Keep React 19**, with three binding architectural rules. | The treemap and charts must be canvas-rendered in *any* framework, and virtualised tables bound reconciliation cost — so the workloads where Solid or Svelte would win are canvas anyway. That leaves ecosystem and switching cost, both of which favour staying. |
+
+### D8's binding rules
+
+React was chosen on the assumption that these hold. If any is dropped, the decision should be
+re-opened rather than quietly absorbed as a performance problem:
+
+1. **Treemap and charts render to canvas.** A 100k-node treemap in the DOM is a non-starter.
+2. **Every table is virtualised** — TanStack Table + TanStack Virtual — so only ~50 rows are live.
+3. **Shared state lives in a small external store** (Zustand or similar), not context, so a 1 Hz
+   metrics tick cannot re-render a subtree.
+
+Re-open D8 if the team turns out to have no React familiarity; that is the one input that flips it.
+
+### Consequential changes from these decisions
+
+| Change | Source |
+| --- | --- |
+| STO-17 raised P1 → **P0** | D3 |
+| STO-16 respecified: user timer, opt-in, bounded job, fallback tier | D5 |
+| Scan **persistence** moved from STO-18 into STO-2 (Phase 1), so cached-first works without depending on a Phase 2 feature; STO-18 keeps the incremental-rescan optimisation | D6 |
+| SYS-3 cut; Phase 6 (System tools) folded into Phase 5; Release readiness renumbered 7 → 6 | D7 |
+| SYS-2 reframed as a filter over the storage index rather than a standalone search tool | D7 |
+| Non-goal reworded from "always-on daemon" to "resident daemon or system service" | D5 |
+| Total: 58 features / 8 phases → **57 features / 7 phases** | D7 |
+
+---
+
+## 10. Deliberately not carried over from Stacer
+
+| Dropped | Reason |
+| --- | --- |
+| Unity 7 / Compiz tweak surface | Targets deleted schemas; gated on a distro-name string match |
+| Feedback form | Posted to a retired Heroku endpoint via a `curl` subprocess |
+| Update check | Pointed at an abandoned repository, compared versions as strings |
+| Splash screen | Only existed because all twelve pages were built eagerly at startup |
+| `find`-form search UI | Query-builder-as-form; replaced by a native walker with live filters |
+| Per-action `pkexec` prompting | Replaced by one audited helper and polkit-integrated APIs |
+| The twelve-page sidebar structure | Replaced by a storage-first information architecture |
+| Sidebar-tooltip page identity, translated setting keys | Fragile string-matching for navigation and persistence |
+
+Carried over deliberately: the visual identity of the donut gauges and 60-second spline charts
+with live readouts in the legend, the tray behaviour, the empty-state and loading affordances,
+and the 26 translation files.
