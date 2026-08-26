@@ -1,0 +1,78 @@
+# This file is both the Cargo workspace root and the Tauri application package.
+#
+# Layout (see docs/ARCHITECTURE.md):
+#   src-tauri/                 workspace root + `nix-app` package (Tauri needs these together)
+#   src-tauri/src/             nix-app sources — the Tauri shell, commands, event plumbing
+#   src-tauri/crates/nix-core   library: model, scanners, samplers. No Tauri, no GUI.
+#   src-tauri/crates/nix-helper binary: the privileged helper. No Tauri, no GUI.
+#
+# The app package lives at the workspace root rather than under crates/ so that the Tauri CLI
+# finds Cargo.toml and tauri.conf.json in the same directory, which is what it expects.
+
+[workspace]
+members = ["crates/nix-core", "crates/nix-helper"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+repository = "https://github.com/tlc/nix"
+
+[workspace.dependencies]
+nix-core = { path = "crates/nix-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Quality gates encoded in the toolchain rather than in a checklist.
+# `unwrap_used` is the machine-checkable half of the plan's definition of done.
+# CI runs clippy with `-D warnings`, so these warn locally and block on merge.
+[workspace.lints.rust]
+unsafe_code = "deny"
+# Groups must carry a lower priority than individual lints, or Cargo rejects the table.
+rust_2018_idioms = { level = "warn", priority = -1 }
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+dbg_macro = "warn"
+todo = "warn"
+
+[package]
+name = "nix-app"
+description = "nix — Linux storage insight and system utility"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+# The user-facing command is `nix`, even though the package is `nix-app`.
+# The package is not named `nix` because that name belongs to the well-known
+# Unix-syscall crate we expect to depend on.
+[[bin]]
+name = "nix"
+path = "src/main.rs"
+
+[lib]
+name = "nix_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[lints]
+workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+nix-core = { workspace = true }
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

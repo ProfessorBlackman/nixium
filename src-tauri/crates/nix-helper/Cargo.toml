@@ -1,0 +1,17 @@
+[package]
+name = "nix-helper"
+description = "Privileged helper for nix. Typed, allow-listed operations behind polkit."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "nix-helper"
+path = "src/main.rs"
+
+[dependencies]
+nix-core = { workspace = true }

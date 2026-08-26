@@ -1,0 +1,13 @@
+[package]
+name = "nix-core"
+description = "Core model, scanners and samplers for nix. No GUI, no Tauri."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }

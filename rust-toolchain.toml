@@ -1,0 +1,6 @@
+# Pinned so local builds and CI cannot disagree about lint behaviour.
+# Bump deliberately, and only together with a CI run.
+[toolchain]
+channel = "1.98.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

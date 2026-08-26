@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Fast checks only — anything slow gets bypassed with --no-verify and then stops being a gate.
+# The full suite is `make check`, and CI runs it on every push.
+set -euo pipefail
+
+if git diff --cached --name-only --diff-filter=ACM | grep -q '\.rs$'; then
+    echo "pre-commit: cargo fmt --check"
+    if ! (cd src-tauri && cargo fmt --all --check); then
+        echo
+        echo "Rust sources are unformatted. Run 'make fmt' and stage the result." >&2
+        exit 1
+    fi
+fi
+
+# 3.6 GB of build artefacts live under src-tauri/target; catch it if .gitignore ever regresses.
+if git diff --cached --name-only --diff-filter=ACM | grep -qE '(^|/)target/'; then
+    echo "pre-commit: refusing to commit build artefacts under target/" >&2
+    exit 1
+fi
