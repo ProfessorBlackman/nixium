@@ -44,7 +44,11 @@ impl Default for Spec {
 }
 
 impl Spec {
-    /// A tree sized for budget measurement rather than correctness.
+    /// A tree sized for budget measurement rather than correctness: roughly 93,000 files.
+    ///
+    /// **Release-mode measurement only.** Building it takes seconds, and a debug test that creates
+    /// one while its siblings run concurrently produces an I/O storm that swamps every timing
+    /// assertion in the module — which is exactly what happened to the scanner's cancellation test.
     #[must_use]
     pub fn perf() -> Self {
         Self {

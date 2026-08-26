@@ -75,6 +75,14 @@ pub const CACHED_OPEN: Budget = Budget {
     limit: Duration::from_millis(300),
 };
 
+/// Directory scan throughput. The specification's figure is 2 million files in 60 seconds; this is
+/// expressed per file so a smaller fixture can assert the same rate.
+pub const SCAN_PER_FILE: Budget = Budget {
+    id: "scan_per_file",
+    what: "filesystem scan, per file (2M files in 60s)",
+    limit: Duration::from_nanos(30_000),
+};
+
 /// Whether measurement is enabled for this run.
 #[must_use]
 pub fn enabled() -> bool {
@@ -115,7 +123,7 @@ mod tests {
 
     #[test]
     fn budget_ids_are_unique() {
-        let all = [COLD_START, CANCEL_LATENCY, CACHED_OPEN];
+        let all = [COLD_START, CANCEL_LATENCY, CACHED_OPEN, SCAN_PER_FILE];
         let mut seen = std::collections::HashSet::new();
         for b in all {
             assert!(seen.insert(b.id), "duplicate budget id {}", b.id);
@@ -145,6 +153,43 @@ mod tests {
             took < Duration::from_millis(20),
             "best_of must not report the worst run"
         );
+    }
+
+    /// Scan throughput, measured in release only — a debug build is roughly 160 times slower on
+    /// this loop, so a debug measurement would say nothing about the shipped binary.
+    #[test]
+    fn scan_throughput_meets_its_budget() {
+        if !enabled() {
+            eprintln!("skipping: set NIX_PERF=1 to measure");
+            return;
+        }
+
+        use crate::fixture::{Fixture, Spec};
+        use crate::op::CancelToken;
+        use crate::scan;
+
+        let fixture = Fixture::create(&Spec::perf()).expect("fixture");
+        let files = fixture.files();
+        assert!(
+            files > 10_000,
+            "the fixture must be large enough to measure"
+        );
+
+        let elapsed = best_of(3, || {
+            scan::scan_quiet(
+                scan::Options::new(fixture.root()).max_depth(None),
+                CancelToken::new(),
+            )
+            .expect("scan")
+        });
+
+        let per_file = elapsed / u32::try_from(files).unwrap_or(u32::MAX);
+        let verdict = SCAN_PER_FILE.verdict(per_file);
+        eprintln!(
+            "{verdict}  ({files} files in {elapsed:?}, {:.0} files/sec)",
+            files as f64 / elapsed.as_secs_f64()
+        );
+        assert!(verdict.passed, "{verdict}");
     }
 
     /// The cancellation budget is the one we can already measure: task 0.3 landed the primitive.

@@ -27,6 +27,13 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 ts-rs = "11"
+# statvfs and the metadata syscalls. Chosen over `libc` because its API is safe, so nothing here
+# needs to relax the workspace's `unsafe_code = "deny"`.
+rustix = { version = "1", features = ["fs"] }
+# Parallel directory traversal. `rayon::scope` gives correct termination for a recursive fan-out,
+# which is the part that is easy to get wrong by hand.
+rayon = "1"
+proptest = "1"
 
 # Quality gates encoded in the toolchain rather than in a checklist.
 # `unwrap_used` is the machine-checkable half of the plan's definition of done.

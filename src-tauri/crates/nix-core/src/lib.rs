@@ -23,19 +23,28 @@
 //! | [`budget`] | 0.11 | performance budgets from the specification |
 //! | [`paths`] | — | XDG base-directory resolution |
 //!
-//! # What is next (Phase 1)
+//! # Phase 1
 //!
-//! `space` (1.1), `fs` (1.2), `scan` (1.3), `cache` (1.4), `reclaim` (1.8–1.9).
+//! | Module | Task | Contents |
+//! |---|---|---|
+//! | [`space`] | 1.1 | the space model and its invariants |
+//! | [`fs`] | 1.2 | mount enumeration, per-filesystem accounting, btrfs honesty |
+//! | [`scan`] | 1.3 | streaming, cancellable, parallel walker |
+//!
+//! Next: `cache` (1.4), `reclaim` (1.8–1.9).
 
 pub mod budget;
 pub mod caps;
 pub mod error;
 pub mod fixture;
+pub mod fs;
 pub mod helper;
 pub mod logging;
 pub mod op;
 pub mod paths;
+pub mod scan;
 pub mod settings;
+pub mod space;
 
 /// Crate version, surfaced so the app and helper can verify they were built together.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
