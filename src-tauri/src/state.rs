@@ -4,6 +4,8 @@ use std::sync::Mutex;
 
 use nix_core::error::Result;
 use nix_core::op;
+use nix_core::protect::Guard;
+use nix_core::reclaim::{Registry, Session};
 use nix_core::settings::{Settings, Store};
 
 /// Everything a command may need, owned by Tauri and reachable through `State<AppState>`.
@@ -14,6 +16,10 @@ pub(crate) struct AppState {
     store: Store,
     /// In-flight long operations, so they can be cancelled by id.
     pub(crate) operations: op::Registry,
+    /// The outstanding reclaim preview. One at a time, so a stale ticket cannot be replayed.
+    pub(crate) reclaim: Session,
+    /// The categories nix knows how to reclaim.
+    pub(crate) categories: Registry,
     /// A warning raised while loading settings, surfaced once the frontend is ready to show it.
     startup_warning: Mutex<Option<nix_core::error::AppError>>,
 }
@@ -39,6 +45,8 @@ impl AppState {
             settings: Mutex::new(settings),
             store,
             operations: op::Registry::new(),
+            reclaim: Session::new(),
+            categories: Registry::with_defaults(),
             startup_warning: Mutex::new(warning),
         }
     }
@@ -55,6 +63,14 @@ impl AppState {
             *current = next.clone();
         }
         Ok(next)
+    }
+
+    /// The protection rules, built from the user's current settings.
+    ///
+    /// Rebuilt on each call rather than cached: the user can change their exclusions at any time,
+    /// and the executor re-checks them immediately before acting.
+    pub(crate) fn guard(&self) -> Guard {
+        Guard::from_settings(&self.settings())
     }
 
     /// Take the startup warning, if any. Returns it once and then forgets it, so the frontend

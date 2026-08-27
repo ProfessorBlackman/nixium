@@ -101,6 +101,27 @@ impl Rng {
     }
 }
 
+/// Total on-disk bytes under a directory, recursively.
+///
+/// Uses allocated blocks rather than apparent size, so it matches what freeing the tree would
+/// actually return to the filesystem.
+#[must_use]
+pub fn directory_size(path: &Path) -> u64 {
+    use std::os::unix::fs::MetadataExt;
+
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return 0;
+    };
+    entries
+        .filter_map(std::result::Result::ok)
+        .map(|entry| match entry.metadata() {
+            Ok(meta) if meta.is_dir() => directory_size(&entry.path()) + meta.blocks() * 512,
+            Ok(meta) => meta.blocks() * 512,
+            Err(_) => 0,
+        })
+        .sum()
+}
+
 /// A generated tree that removes itself when dropped.
 #[derive(Debug)]
 pub struct Fixture {

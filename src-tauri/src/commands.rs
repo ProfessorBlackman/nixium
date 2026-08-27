@@ -24,6 +24,8 @@ use nix_core::error::{AppError, ErrorCode, Result};
 use nix_core::helper::{self, Op, OpResult};
 use nix_core::logging::{self, Diagnostics};
 use nix_core::op::{Completion, OperationId, Progress};
+use nix_core::protect::Refusal;
+use nix_core::reclaim::{Preview, Report, Ticket};
 use nix_core::settings::Settings;
 use nix_core::{fs as nixfs, scan};
 use serde::Serialize;
@@ -250,6 +252,79 @@ pub(crate) fn home_directory() -> Result<PathBuf> {
         )
         .with_remedy("Set HOME and try again.")
     })
+}
+
+/// What could be reclaimed, and at what cost. `STO-3`.
+///
+/// Computes but changes nothing. The returned [`Preview`] carries a ticket, and [`reclaim_execute`]
+/// will not act without it — so there is no path from the UI to a deletion that skips this step.
+#[tauri::command]
+pub(crate) fn reclaim_preview(state: State<'_, AppState>) -> Result<Preview> {
+    let token = nix_core::op::CancelToken::new();
+    state
+        .reclaim
+        .preview(&state.categories, &state.guard(), &token)
+        .map_err(|e| e.context("working out what can be reclaimed"))
+}
+
+/// Reclaim a subset of the outstanding preview. `STO-4`.
+///
+/// `ticket` must match the preview the user was shown, and `selection` must name items from it.
+/// Both guards — the protection rules and the time-of-check comparison — run again per item, at the
+/// moment of acting.
+#[tauri::command]
+pub(crate) fn reclaim_execute(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    ticket: Ticket,
+    selection: Vec<u64>,
+) -> Result<Report> {
+    let token = nix_core::op::CancelToken::new();
+    let (id, _) = state.operations.start();
+    let emitter = app.clone();
+
+    let report = state.reclaim.execute(
+        ticket,
+        &selection,
+        &state.guard(),
+        &token,
+        move |done, total| {
+            let progress = Progress::new(id, done as u64)
+                .with_total(total as u64)
+                .with_message(format!("Reclaiming {} of {total}", done + 1));
+            if let Err(e) = emitter.emit(EVENT_PROGRESS, &progress) {
+                tracing::warn!(error = %e, "could not emit reclaim progress");
+            }
+        },
+    );
+
+    state.operations.finish(id);
+
+    match &report {
+        Ok(r) => tracing::info!(
+            freed = r.freed,
+            reclaimed = r.reclaimed_count,
+            skipped = r.skipped_count,
+            failed = r.failed_count,
+            agrees = ?r.measurement_agrees,
+            "reclaim finished"
+        ),
+        Err(e) => tracing::warn!(error = %e, "reclaim failed"),
+    }
+
+    report.map_err(|e| e.context("reclaiming space"))
+}
+
+/// Discard the outstanding preview, e.g. on navigating away, so its ticket cannot be used later.
+#[tauri::command]
+pub(crate) fn reclaim_clear(state: State<'_, AppState>) {
+    state.reclaim.clear();
+}
+
+/// The paths nix refuses to touch. A user should be able to read what is protected on their behalf.
+#[tauri::command]
+pub(crate) fn protected_paths() -> Vec<Refusal> {
+    nix_core::protect::Guard::built_in_rules()
 }
 
 /// A deliberately slow operation, so progress, cancellation and the terminal event can be verified

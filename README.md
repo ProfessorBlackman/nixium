@@ -5,13 +5,18 @@ and shows you what your machine is doing while it does.
 
 Rust + Tauri. A replacement for [Stacer](https://github.com/oguzhaninan/Stacer) — not a port of it.
 
-> Status: **pre-alpha. Phase 0 and M2 complete.** The space explorer works and is read-only.
-> Next is M3, the first safe reclaim. See [docs/PLAN.md](docs/PLAN.md).
+> Status: **pre-alpha. Phase 0, M2 and M3 complete.** The explorer works, and trash can be
+> reclaimed through the full preview pipeline. Next is M4. See [docs/PLAN.md](docs/PLAN.md).
 
 **What works today:** scan a filesystem or your home directory and see where the space went — a
 canvas treemap and a drill-down table over one shared scan, streaming and cancellable, at roughly
-450,000 files per second. It opens on the previous scan labelled with its age, and it deletes
-nothing: reclaiming arrives in M3 behind a preview and a confirmation.
+450,000 files per second. It opens on the previous scan labelled with its age.
+
+Reclaiming works for trash, through the full pipeline: **preview → confirm → execute → report**.
+`execute` requires a ticket only `preview` can mint, so there is no path from the UI to a deletion
+that skips the review step. Protected paths are re-checked at execution time, every path is
+re-stat'd immediately before it is touched, and the report compares what nix counted against what
+the filesystem actually gave back.
 
 Underneath it: a typed error surface where no failure is silent, a privileged helper behind an
 exact-path allow-list, versioned settings, capability probing, and one cancellation-and-progress

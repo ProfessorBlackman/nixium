@@ -15,13 +15,20 @@ import type { Diagnostics } from "../bindings/Diagnostics";
 import type { OperationId } from "../bindings/OperationId";
 import type { Progress } from "../bindings/Progress";
 import type { CachedScan } from "../bindings/CachedScan";
+import type { Preview } from "../bindings/Preview";
+import type { PreviewItem } from "../bindings/PreviewItem";
+import type { Refusal } from "../bindings/Refusal";
+import type { Report } from "../bindings/Report";
+import type { Ticket } from "../bindings/Ticket";
 import type { Filesystem } from "../bindings/Filesystem";
 import type { ScanResult } from "../bindings/ScanResult";
 import type { Settings } from "../bindings/Settings";
 import type { Snapshot } from "../bindings/Snapshot";
 import type { SpaceEntry } from "../bindings/SpaceEntry";
 
-export type { AppError, CachedScan, Completion, Diagnostics, Filesystem, Progress, ScanResult, Settings, Snapshot, SpaceEntry };
+export type { AppError, CachedScan, Completion, Diagnostics, Filesystem, Preview, PreviewItem, Progress, Refusal, Report, ScanResult, Settings, Snapshot, SpaceEntry, Ticket };
+export type { ItemOutcome } from "../bindings/ItemOutcome";
+export type { ReclaimMethod } from "../bindings/ReclaimMethod";
 export type { Accounting } from "../bindings/Accounting";
 export type { Category } from "../bindings/Category";
 export type { EntryId } from "../bindings/EntryId";
@@ -92,6 +99,11 @@ export const api = {
   helperProbe: () => call<HelperProbe>("helper_probe"),
   filesystems: () => call<Filesystem[]>("filesystems"),
   homeDirectory: () => call<string>("home_directory"),
+  reclaimPreview: () => call<Preview>("reclaim_preview"),
+  reclaimExecute: (ticket: Ticket, selection: number[]) =>
+    call<Report>("reclaim_execute", { ticket, selection }),
+  reclaimClear: () => call<void>("reclaim_clear"),
+  protectedPaths: () => call<Refusal[]>("protected_paths"),
   scanCached: (path: string, maxDepth?: number) =>
     call<CachedScan | null>("scan_cached", { path, maxDepth: maxDepth ?? null }),
   scanCacheClear: () => call<void>("scan_cache_clear"),

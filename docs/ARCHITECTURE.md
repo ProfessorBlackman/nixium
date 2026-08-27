@@ -91,11 +91,38 @@ Built in M2:
 | `cache` | 1.4 | scan persistence, so the explorer opens on the last result |
 | `watch` | 1.15 | inotify staleness watching over the largest directories |
 
-Planned, so tasks land in predictable places rather than accreting into one module:
+Built in M3:
 
 | Module | Task | Contents |
 | --- | --- | --- |
-| `reclaim` | 1.8–1.9 | executor pipeline and the category registry |
+| `protect` | 1.7 | paths nix must never reclaim, checked by scanner and executor |
+| `trash` | 1.10 | the freedesktop trash specification |
+| `reclaim` | 1.8–1.9 | the preview pipeline and the category registry |
+
+## How "nothing bypasses preview" is enforced
+
+Not by convention, and not by a code review rule that erodes. `reclaim::execute` requires a
+`Ticket`, and the only thing that mints one is `reclaim::preview`. The ticket is tied to the exact
+item set the preview described, and a session holds one preview at a time — so a caller cannot
+construct a ticket, cannot replay a superseded one, and cannot widen the selection after the user
+agreed to it. Selecting an id that was not in the preview is an error, not a silent skip, because it
+means acting on something nobody was shown.
+
+Two guards then run again **at execution time**, per item:
+
+- **Protection** is re-checked, because the user's exclusions may have changed since the preview.
+- **Time-of-check/time-of-use**: every path is re-stat'd and compared against a fingerprint recorded
+  at preview time. A file that changed size or became a different inode is skipped and reported.
+
+That second guard is also what makes decision D6 safe: the explorer may serve a cached tree because
+stale data can misinform a reader but cannot misdirect a deletion.
+
+## The report checks its own arithmetic
+
+`Report` carries both what nix counted and the filesystem's own before/after delta, and states
+whether they agree within the specification's 2%. Where they disagree the UI says so plainly rather
+than reporting the flattering number — copy-on-write filesystems and snapshots can hold onto space
+that looks freed, and a tool that hides that is lying about the one thing it exists to do.
 
 ## Two rules the scanner exists to enforce
 

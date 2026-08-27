@@ -12,8 +12,9 @@ The spec says *what* and *why*. This says *in what order, and how we know it wor
 | **M0** Walking skeleton | **complete** |
 | **M1** Foundation complete (Phase 0, tasks 0.1–0.11) | **complete** |
 | **M2** "Where did my disk go?" (tasks 1.1–1.6, 1.15) | **complete** |
-| M3 First safe reclaim (tasks 1.7–1.10) | next |
-| M4 – M9 | not started |
+| **M3** First safe reclaim (tasks 1.7–1.10) | **complete** |
+| M4 Storage core complete (tasks 1.11–1.14) | next |
+| M5 – M9 | not started |
 
 Phase 0 shipped all eleven tasks: the three-crate workspace and quality gates, the error taxonomy,
 the IPC contract with its progress/cancellation primitive, the app shell with lazily-mounted views,
@@ -46,6 +47,15 @@ Four bugs found by the tests, each worth remembering:
 - `EntryId` was `#[serde(transparent)]` over `u64` while declaring `string` to TypeScript — the same
   id crossed the wire as a string when used as a map key and a number when used as a value. It
   typechecked.
+
+M3 built the safety machinery: protected paths, the preview → confirm → execute → report pipeline,
+the category registry, and a spec-compliant trash implementation. **Trash is the only registered
+category**, deliberately — the pipeline is proven against the one destructive operation whose
+consequences the user has already accepted before anything irreversible is wired in. 228 tests.
+
+The gate that matters is enforced by the type system rather than by convention: `execute` requires a
+`Ticket` that only `preview` can mint, tied to the exact item set it described. A caller cannot
+construct one, reuse a superseded one, or widen the selection afterwards.
 
 Note also that §4's parallelisation advice no longer applies: this is a solo project, which is why
 **task 0.9 was completed within Phase 0 rather than deferred** — see §5.2 for why M2 is nonetheless

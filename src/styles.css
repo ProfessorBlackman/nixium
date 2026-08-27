@@ -840,3 +840,146 @@ select {
   font-size: 0.8125rem;
   color: var(--ink-mid);
 }
+
+/* ---------- reclaim ---------- */
+
+.reclaim-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.reclaim-item {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+}
+
+/* The safety rating is encoded in form as well as in words, so it reads at a glance. */
+.reclaim-item.safety-safe { border-left-color: var(--safe); }
+.reclaim-item.safety-review { border-left-color: var(--review); }
+.reclaim-item.safety-risky { border-left-color: var(--risky); }
+
+.reclaim-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.65rem 0.8rem;
+  cursor: pointer;
+}
+
+.reclaim-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.reclaim-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.reclaim-bytes {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.reclaim-path {
+  color: var(--ink-mute);
+  font-size: 0.75rem;
+  word-break: break-all;
+}
+
+.reclaim-cost {
+  font-size: 0.8125rem;
+  color: var(--ink-mid);
+}
+
+.safety-tag {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  padding: 0.05rem 0.4rem;
+  border-radius: 2px;
+}
+
+.safety-tag.safety-safe { background: var(--safe-soft); color: var(--safe); }
+.safety-tag.safety-review { background: var(--review-soft); color: var(--review); }
+.safety-tag.safety-risky { background: var(--risky-soft); color: var(--risky); }
+.safety-tag.safety-never { background: var(--surface-alt); color: var(--ink-mute); }
+
+.card-confirm {
+  border-color: var(--rule-strong);
+  border-top: 3px solid var(--accent);
+}
+
+.confirm-list,
+.refusal-list,
+.outcome-list {
+  list-style: none;
+  margin: 0.5rem 0 0.9rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8125rem;
+}
+
+.confirm-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.2rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.refusal-list li,
+.outcome-list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.2rem 0.6rem;
+  align-items: baseline;
+  padding: 0.25rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.refusal-list code,
+.outcome-list code {
+  word-break: break-all;
+  grid-column: 1 / -1;
+}
+
+.outcome-tag {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.05rem 0.4rem;
+  border-radius: 2px;
+  justify-self: start;
+}
+
+.outcome-reclaimed .outcome-tag { background: var(--safe-soft); color: var(--safe); }
+.outcome-skipped .outcome-tag { background: var(--surface-alt); color: var(--ink-mute); }
+.outcome-failed .outcome-tag { background: var(--risky-soft); color: var(--risky); }
+
+button.danger {
+  background: var(--risky);
+  border-color: var(--risky);
+  color: var(--on-accent);
+  font-weight: 500;
+}
+
+button.danger:hover:not(:disabled) {
+  color: var(--on-accent);
+  filter: brightness(1.08);
+}
