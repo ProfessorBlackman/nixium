@@ -317,7 +317,7 @@ with a reclaim method (§5.5 invariant 3); user exclusions survive a rescan.
 | STO-12 | Snap & flatpak revisions | P1 |
 | STO-13 | Container & image storage | P1 — done |
 | STO-14 | Developer build artifacts | P1 — done |
-| STO-15 | Large files & duplicates | P1 |
+| STO-15 | Large files & duplicates | P1 — done |
 | STO-16 | Growth history | P2 |
 | STO-17 | btrfs, LVM & ZFS awareness | **P0** |
 | STO-18 | Incremental rescan | ~~P1~~ superseded |
@@ -382,6 +382,27 @@ therefore unavailable until a scan exists, and says so.
 Stacer made you fill in a `find` dialogue), and content-hash duplicate detection with
 size-then-partial-hash-then-full-hash staging. *Accepts:* duplicate detection never reports a
 false positive; hashing is incremental and cancellable.
+
+**Met.** "Never a false positive" rules out finishing on a hash, however strong — a hash says "almost
+certainly identical", and almost certainly is not never. So detection is staged and ends with a
+**byte-for-byte comparison**: size, then the first 4 KiB, then whole content, then bytes. The
+comparison only runs on a pair that already agrees on all three, so it is cheap and it is what turns
+near-certainty into fact. That makes the hash a *filter* and never the verdict, which also means it
+needs no cryptographic strength and no new dependency.
+
+Two things a naive implementation would report are excluded:
+
+- **Hard links.** Two names for one inode share their blocks, so deleting a name frees nothing and
+  reporting them promises space that does not exist. Verified by removing the guard, which made the
+  tool claim 2 MiB recoverable from a link.
+- **Symbolic links**, never followed, here as everywhere else.
+
+Cancellation is checked between chunks of a single file, so stopping does not wait for a gigabyte to
+finish hashing. The largest-files list is a projection over the existing scan and costs no filesystem
+access at all.
+
+nix does not choose which copy to delete. Which one matters is a judgement about the user's work, not
+about storage.
 
 **STO-16 Growth history.** Periodic snapshots of **category totals plus top-N directory
 sizes** — trends, not detail — enabling "`~/.cache` grew 4 GB this week". Collected by an

@@ -227,7 +227,16 @@ Docker's sizes are powers of ten, verified against `docker image inspect` rather
 the second tool to do this after APT, which suggests treating any human-formatted size from an external
 tool as decimal-until-proven.
 
-Remaining: STO-15, STO-16.
+**STO-15 is done.** A `Find` view answers two questions without a form: what are the biggest files,
+and what is here twice.
+
+The interesting constraint was "never a false positive", which rules out finishing on a hash. Detection
+stages size, then the first 4 KiB, then whole content, then a **byte-for-byte comparison** — the hash is
+a filter and never the verdict, so it needs no cryptographic strength and no new dependency. Hard links
+are excluded because two names for one inode share their blocks; verified by removing the guard, which
+made the tool claim 2 MiB recoverable from a link that frees nothing.
+
+Remaining: STO-16.
 
 Note also that §4's parallelisation advice no longer applies: this is a solo project, which is why
 **task 0.9 was completed within Phase 0 rather than deferred** — see §5.2 for why M2 is nonetheless
