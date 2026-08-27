@@ -41,7 +41,7 @@ says so plainly rather than implying one.
 
 | File | Covers | Entries |
 | --- | --- | --- |
-| [01-privilege-and-security.md](01-privilege-and-security.md) | the privileged helper's boundary | 3 |
+| [01-privilege-and-security.md](01-privilege-and-security.md) | the privileged helper's boundary | 5 |
 | [02-rust-typescript-boundary.md](02-rust-typescript-boundary.md) | generated bindings and type drift | 7 |
 | [03-reclaim-pipeline.md](03-reclaim-pipeline.md) | preview, guards and execution | 6 |
 | [04-measurement-accuracy.md](04-measurement-accuracy.md) | sizes, and not overstating them | 7 |
@@ -51,7 +51,7 @@ says so plainly rather than implying one.
 | [08-documentation-accuracy.md](08-documentation-accuracy.md) | claims about Stacer that were not true | 4 |
 | [09-patterns.md](09-patterns.md) | what generalises, and what to do about it | — |
 
-Forty-seven entries: **5 critical, 13 serious, 17 moderate, 12 friction**.
+Forty-nine entries: **6 critical, 13 serious, 18 moderate, 12 friction**.
 
 ## The tally by finding mechanism
 
@@ -62,9 +62,10 @@ Forty-seven entries: **5 critical, 13 serious, 17 moderate, 12 friction**.
 | Reasoning about the code while changing something nearby | 9 | Includes the helper's read hole and one near-miss never shipped |
 | Reading generated output rather than trusting it compiled | 5 | The entire Rust↔TypeScript cluster |
 | Writing a test and finding it disagreed with the code | 5 | Three were the test's fault, two the code's |
-| Verifying a documented claim against the source, or proofreading | 4 | Every Stacer claim re-checked turned out wrong |
+| Verifying a documented claim against the source, or proofreading | 5 | Every Stacer claim re-checked turned out wrong |
 | An external tool refusing what was written | 1 | The artifact skill's CSS rule |
 | The user reading output I had been filtering | 1 | A build warning on every compile for months |
+| The machine doing the thing | 1 | A test escalated silently and removed a kernel |
 
 Two rows are worth dwelling on.
 
@@ -76,7 +77,7 @@ measurement had used `/usr`, and pointing the same code at a real home directory
 
 **Gates** found the most, and cost the least. The ten they caught took minutes each. The defects found
 by reasoning took hours, and the two most serious — an entire milestone shipping inert — were nearly
-not caught at all. That asymmetry is the argument for [09-patterns.md §9](09-patterns.md).
+not caught at all. That asymmetry is the argument for [09-patterns.md §10](09-patterns.md).
 
 ## Open items
 

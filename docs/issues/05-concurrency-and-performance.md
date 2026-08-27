@@ -300,7 +300,7 @@ never ran. The test was asserting something true for a reason unrelated to what 
 classified `UserFile`, which is deliberately not decisive. It then fails without the fix, with
 `{Unknown: 8000}`.
 
-This is [09-patterns.md §11](09-patterns.md) earning its place for the third time: a guard that has
+This is [09-patterns.md §12](09-patterns.md) earning its place for the third time: a guard that has
 never failed is a guard that has never been tested. It is also the second instance in this project of a
 test passing because its *fixture had the wrong shape* — the first put plain files where production
 uses directories.

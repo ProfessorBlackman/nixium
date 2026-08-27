@@ -19,8 +19,20 @@ fmt-check: ## Fail if Rust sources are unformatted
 clippy: ## Lint the whole workspace, warnings are errors
 	cd $(CARGO_DIR) && cargo clippy --workspace --all-targets -- -D warnings
 
+# The test suite must be safe to run on a machine where the helper is actually installed.
+#
+# It was not. A unit test escalated through polkit — silently, because auth_admin_keep had cached an
+# earlier authorisation — and removed a real kernel. `Elevation` no longer has a `Default`, so no test
+# can ask for escalation by accident, and no fixture names a package that exists. This is the third
+# layer: point the client at a path that cannot exist, so even a test that *did* ask to escalate finds
+# nothing to launch.
+#
+# It is belt and braces, not the mechanism. If this line is what saves you, two guards have already
+# failed.
+TEST_ENV := NIX_HELPER_PATH=/nonexistent/nix-helper-must-not-be-found
+
 test: helper ## Run the Rust test suite
-	cd $(CARGO_DIR) && cargo test --workspace
+	cd $(CARGO_DIR) && $(TEST_ENV) cargo test --workspace
 
 helper: ## Build the helper binary (the client's integration tests spawn it)
 	cd $(CARGO_DIR) && cargo build -p nix-helper

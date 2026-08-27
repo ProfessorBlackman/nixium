@@ -1,6 +1,6 @@
 # What generalises
 
-Forty-seven entries is enough to see structure. This is the part worth re-reading.
+Forty-nine entries is enough to see structure. This is the part worth re-reading.
 
 ---
 
@@ -170,9 +170,27 @@ it.
 
 ---
 
-## 9. Encode the guard in the toolchain, not in memory
+## 9. Make the dangerous option the one you have to ask for
 
-Ten of forty-seven entries were caught by a gate. Those cost minutes. The ones that cost hours were
+`Elevation::default()` escalated to root. `Default` is the API's suggestion about what a caller
+probably wants, and this one suggested "run as root". Two tests took it, on the reasonable assumption
+that no helper would be installed during development — and one day one was.
+
+Removing the `Default` impl fixed it in a way vigilance could not: there is now no way to obtain an
+escalating `Elevation` without writing the word `production`, and the non-escalating constructor is
+`cfg(test)`, so in a release build there is nothing to choose between at all.
+
+**Generalisation.** For anything irreversible — root, deletion, network writes — the safe option gets
+to be the default and the dangerous one gets a name. If a type can be constructed into a state that
+does damage, make that construction say so at the call site, where a reader will see it. The compiler
+enforcing this is worth more than any amount of care, because care is what runs out at 8pm on a
+Thursday.
+
+---
+
+## 10. Encode the guard in the toolchain, not in memory
+
+Ten of forty-nine entries were caught by a gate. Those cost minutes. The ones that cost hours were
 caught by reasoning, and the two worst were nearly not caught at all.
 
 Gates currently in force:
@@ -197,7 +215,7 @@ raising the ceiling"*, because a bare size assertion invites raising the number.
 
 ---
 
-## 10. Do not filter your own build output
+## 11. Do not filter your own build output
 
 For most of this project I read compiler output through `grep -E "^error"`, because the interesting
 line is usually an error and the rest is volume. The workspace was printing two ts-rs warnings on every
@@ -215,7 +233,7 @@ warnings is the state that makes a warning meaningful.
 
 ---
 
-## 11. Verify that the guard fires
+## 12. Verify that the guard fires
 
 Twice a guard was written and then confirmed by deliberately breaking the code:
 
@@ -232,12 +250,18 @@ the code under test never reached.
 
 Checking is also how three of this project's tests were found to be wrong at all. It costs a minute.
 
+**But not every guard can be tested by sabotage.** Disabling an escalation guard on a machine with a
+live privileged helper installed is how [01-4](01-privilege-and-security.md) lost a kernel — and doing
+it a second time, to verify the fix, escalated again. It was refused only because a *different* layer
+held. Where breaking the guard is itself the hazard, assert the behaviour where it lives and say in the
+test why sabotage was not used. Recognising which guards those are is part of using the technique.
+
 **Generalisation.** After writing a test for a specific defect, break the code and watch it fail. It
 takes a minute and it is the only evidence the test works.
 
 ---
 
-## 12. When a test fails unexpectedly, read the code before changing the test
+## 13. When a test fails unexpectedly, read the code before changing the test
 
 `candidates_are_ordered_largest_first` failed and looked like a comparator bug. It was not — the
 category was reaching for a hardcoded path rather than the one it had been given, so under test it

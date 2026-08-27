@@ -511,7 +511,7 @@ impl Session {
         let total = chosen.len();
         let mut cancelled = false;
         // One privileged session for the whole batch, opened only if something actually needs it.
-        let mut elevation = Elevation::default();
+        let mut elevation = Elevation::production();
 
         for (index, item) in chosen.iter().enumerate() {
             if token.is_cancelled() {
@@ -573,13 +573,39 @@ fn fingerprint(path: &std::path::Path) -> u64 {
         .unwrap_or(0)
 }
 
+/// Whether a batch may escalate at all.
+///
+/// # Why this is an explicit choice and not a default
+///
+/// `Elevation` used to derive `Default`, and `Elevation::default()` escalated through polkit on first
+/// need. That made the dangerous option the easy one, and it cost a real kernel: a unit test called
+/// `Elevation::default()` expecting elevation to fail because no helper was installed. Once the helper
+/// *was* installed for manual testing, `auth_admin_keep` had already cached the authorisation from an
+/// earlier prompt — so the test escalated silently, the helper agreed the package was a removable old
+/// kernel, and removed it.
+///
+/// Every safety rule held. The mistake was that reaching root took no deliberate act.
+///
+/// So there is no `Default`. A caller has to name which it wants, and the only places that name
+/// [`Elevate::WhenNeeded`] are the ones a person would look at when asking "what can run as root".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Elevate {
+    /// Escalate through polkit when something first needs it.
+    WhenNeeded,
+    /// Never escalate. Every privileged operation fails with a plain reason.
+    ///
+    /// What tests use, so no test can reach root whatever happens to be installed on the machine
+    /// running it.
+    Never,
+}
+
 /// A privileged session, opened lazily and kept for the whole execution.
 ///
 /// **Opened once, not once per item.** Stacer re-ran every individual command under `pkexec`, so
 /// toggling five services meant five authentication dialogs; one session for a batch is the whole
 /// point of the helper's design.
-#[derive(Default)]
 struct Elevation {
+    how: Elevate,
     client: Option<helper::Client>,
     /// The failure that prevented elevation, so every item can report the same honest reason
     /// instead of each retrying and prompting again.
@@ -587,8 +613,37 @@ struct Elevation {
 }
 
 impl Elevation {
+    /// Escalate through polkit on first need. **This is the one that can run things as root.**
+    const fn production() -> Self {
+        Self {
+            how: Elevate::WhenNeeded,
+            client: None,
+            failure: None,
+        }
+    }
+
+    /// Refuse to escalate. Privileged operations fail; nothing runs as root.
+    ///
+    /// `cfg(test)` deliberately: in a release build this does not exist, so [`Elevation::production`]
+    /// is the only way to construct one at all and there is nothing to choose wrongly.
+    #[cfg(test)]
+    const fn never() -> Self {
+        Self {
+            how: Elevate::Never,
+            client: None,
+            failure: None,
+        }
+    }
+
     /// The client, opening a session on first use.
     fn client(&mut self) -> std::result::Result<&mut helper::Client, AppError> {
+        if self.how == Elevate::Never {
+            return Err(AppError::new(
+                ErrorCode::HelperUnavailable,
+                "This operation needs administrator rights, and elevation is disabled here.",
+            )
+            .with_remedy("Nothing was changed."));
+        }
         if self.client.is_none() && self.failure.is_none() {
             match helper::Transport::production().and_then(|t| helper::Client::connect(&t)) {
                 Ok(client) => self.client = Some(client),
@@ -1655,6 +1710,105 @@ mod tests {
         assert_eq!(registry.len(), ids.len());
     }
 
+    /// The guard itself, tested directly on the type.
+    ///
+    /// Deliberately *not* verified by breaking the guard and watching a test fail, which is this
+    /// project's usual practice. Disabling an escalation guard on a machine with a helper actually
+    /// installed is how the kernel was lost in the first place, and repeating it to prove a point
+    /// would be indefensible. This asserts the behaviour where it lives instead.
+    #[test]
+    fn refusing_elevation_never_opens_a_session() {
+        let mut elevation = Elevation::never();
+        let error = elevation
+            .client()
+            .expect_err("elevation must be refused outright");
+        assert_eq!(error.code, ErrorCode::HelperUnavailable);
+        assert!(
+            elevation.client.is_none(),
+            "no privileged process may be started at all"
+        );
+
+        // Asking twice must not start one either — a caller retrying is the obvious way a guard that
+        // only checked once would be defeated.
+        assert!(elevation.client().is_err());
+        assert!(elevation.client.is_none());
+    }
+
+    /// # Regression
+    ///
+    /// A unit test removed a real kernel from a real machine.
+    ///
+    /// It called `Elevation::default()` — which escalated through polkit on first need — expecting
+    /// that to fail because no helper was installed. Then the helper *was* installed, for manual
+    /// testing of the `pkexec` path, and `auth_admin_keep` had already cached the authorisation from
+    /// an earlier prompt. So the test escalated **silently**, the helper's own derivation agreed the
+    /// package was a removable old kernel, and `apt-get remove --purge -y` ran.
+    ///
+    /// Every safety rule held: the helper refused nothing it should have allowed and allowed nothing
+    /// outside its derived set. The defect was that reaching root required no deliberate act, and a
+    /// test fixture happened to name a package that existed.
+    ///
+    /// `Elevation` no longer implements `Default`. This asserts the consequence: with
+    /// [`Elevation::never`], every operation that would need root fails at elevation and nothing runs.
+    #[test]
+    fn no_privileged_operation_can_execute_under_test_elevation() {
+        use crate::space::{Manager, PruneScope, RemovableKind, VacuumLimit};
+
+        let privileged_methods = [
+            ReclaimMethod::Packages {
+                kind: RemovableKind::OldKernel,
+                names: vec!["nix-test-not-a-real-kernel".into()],
+            },
+            ReclaimMethod::Packages {
+                kind: RemovableKind::ResidualConfig,
+                names: vec!["nix-test-not-a-real-package".into()],
+            },
+            ReclaimMethod::PackageManager {
+                manager: Manager::Apt,
+            },
+            ReclaimMethod::JournalVacuum {
+                limit: VacuumLimit::Size { mebibytes: 1 },
+            },
+            ReclaimMethod::SnapRevision {
+                package: "nix-test-not-a-real-snap".into(),
+                revision: "1".into(),
+            },
+            ReclaimMethod::FlatpakUnused,
+        ];
+
+        for method in privileged_methods {
+            let item = PreviewItem {
+                id: 0,
+                path: std::path::PathBuf::from("logical test entry"),
+                label: "test".into(),
+                bytes: 1024,
+                safety: Safety::Review,
+                method: method.clone(),
+                cost: Some("test".into()),
+                category: "test".into(),
+                reclaimable: Reclaimable::Exact,
+                fingerprint: 0,
+            };
+
+            match reclaim_one(&item, &guard(), &mut Elevation::never()) {
+                ItemOutcome::Failed { error, .. } => assert_eq!(
+                    error.code,
+                    ErrorCode::HelperUnavailable,
+                    "{method:?} must fail at elevation, not somewhere further along"
+                ),
+                other => {
+                    panic!("{method:?} must not be carried out under test elevation, got {other:?}")
+                }
+            }
+        }
+
+        // `ContainerPrune` and `ContainerVolume` are deliberately absent: they do not go through the
+        // helper, because nix talks to Docker as the user. They are covered by their own tests, which
+        // is exactly why this list is written out rather than derived — a new privileged method has to
+        // be added here consciously.
+        let _ = PruneScope::BuildCache;
+    }
+
     /// # Regression
     ///
     /// Every category that removes a *logical* object — a kernel, a snap revision — carries a
@@ -1672,7 +1826,7 @@ mod tests {
         for method in [
             ReclaimMethod::Packages {
                 kind: RemovableKind::OldKernel,
-                names: vec!["linux-image-6.8.0-136-generic".into()],
+                names: vec!["nix-test-not-a-real-kernel".into()],
             },
             ReclaimMethod::SnapRevision {
                 package: "chromium".into(),
@@ -1765,13 +1919,13 @@ mod tests {
         }
         fn candidates(&self, _token: &CancelToken) -> Result<Vec<Candidate>> {
             Ok(vec![Candidate {
-                path: std::path::PathBuf::from("kernel 6.8.0-136-generic"),
-                label: "Linux 6.8.0-136-generic".into(),
+                path: std::path::PathBuf::from("kernel nix-test-not-a-real-kernel"),
+                label: "Linux nix-test-not-a-real-kernel".into(),
                 bytes: 1024,
                 safety: Safety::Review,
                 method: ReclaimMethod::Packages {
                     kind: crate::space::RemovableKind::OldKernel,
-                    names: vec!["linux-image-6.8.0-136-generic".into()],
+                    names: vec!["nix-test-not-a-real-kernel".into()],
                 },
                 cost: Some("You could not boot into it.".into()),
                 category: self.id().to_string(),
@@ -1786,13 +1940,13 @@ mod tests {
         let item = PreviewItem {
             id: 0,
             // Exactly what `OldKernelCategory` produces: a description, not a path.
-            path: std::path::PathBuf::from("kernel 6.8.0-136-generic"),
-            label: "Linux 6.8.0-136-generic".into(),
+            path: std::path::PathBuf::from("kernel nix-test-not-a-real-kernel"),
+            label: "Linux nix-test-not-a-real-kernel".into(),
             bytes: 634_600_000,
             safety: Safety::Review,
             method: ReclaimMethod::Packages {
                 kind: crate::space::RemovableKind::OldKernel,
-                names: vec!["linux-image-6.8.0-136-generic".into()],
+                names: vec!["nix-test-not-a-real-kernel".into()],
             },
             cost: Some("cost".into()),
             category: "old_kernels".into(),
@@ -1802,7 +1956,7 @@ mod tests {
 
         // No helper is available in a test, so the attempt must fail at *elevation* — proving it got
         // as far as trying. A `Skipped { "It is already gone." }` here is the bug this guards.
-        match reclaim_one(&item, &guard(), &mut Elevation::default()) {
+        match reclaim_one(&item, &guard(), &mut Elevation::never()) {
             ItemOutcome::Failed { .. } => {}
             ItemOutcome::Skipped { reason, .. } => panic!(
                 "a kernel removal must reach the helper, not be skipped because its label is not a file: {reason}"
@@ -1833,7 +1987,7 @@ mod tests {
             fingerprint: fingerprint(&file),
         };
 
-        match reclaim_one(&item, &guard(), &mut Elevation::default()) {
+        match reclaim_one(&item, &guard(), &mut Elevation::never()) {
             ItemOutcome::Failed { error, .. } => {
                 assert_eq!(error.code, ErrorCode::Unsupported);
             }

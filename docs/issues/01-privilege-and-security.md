@@ -63,7 +63,98 @@ coverage.
 
 ---
 
-## 3. Snap revision strings reach a root command line
+## 3. The polkit action's path could drift from the client's, silently
+
+**Phase 0, guarded in M5** · **Moderate** · **Found by** reading `pkaction --verbose` after the first real prompt
+
+polkit matches an action to a program by the absolute path in its
+`org.freedesktop.policykit.exec.path` annotation. The client's `default_helper_path()` and the policy's
+annotation are two separate declarations of the same fact, in two files, in two languages.
+
+If they drift, `pkexec` finds no matching action and falls back to `org.freedesktop.policykit.exec` —
+which **still authenticates, still runs the helper, and still works**. What is lost is invisible from
+the code:
+
+- The prompt stops saying *"Authentication is required to inspect and reclaim system storage"* and says
+  *"run a program as another user"* instead.
+- `auth_admin_keep` stops applying, so a user is asked for a password **once per operation** rather than
+  once per batch — reintroducing exactly the Stacer behaviour the single-session helper exists to avoid.
+
+A failure that leaves the feature working is a failure nobody reports.
+
+**Resolved** — nothing was broken, so this is a guard rather than a fix. Two tests read the policy file
+and assert it against the compiled-in path and against `auth_admin_keep` for the active session.
+**Verified to fire** by changing the annotation to `/usr/lib/nix/nix-helper`, which produces the
+message naming both paths and what would be lost.
+
+Also corrected while there: `pkaction --verbose` showed the description as *"Manage system storage and
+services"*, and the helper has no service operation — Phase 4 is not built. A privilege statement that
+over-claims is worse than a vague one, and widening it later should be a visible diff that forces a
+reinstall rather than something granted in advance.
+
+---
+
+## 4. A unit test removed a real kernel from a real machine
+
+**M5** · **Critical** · **Found by** the user's machine doing it
+
+The worst thing that has happened in this project, and entirely self-inflicted.
+
+`Elevation` derived `Default`, and `Elevation::default()` escalated through polkit on first need. Two
+unit tests called it, expecting elevation to fail because no helper is installed during development —
+which had always been true.
+
+Then the helper *was* installed, at the shipped path, to exercise the `pkexec` path manually. That
+worked. And `auth_admin_keep` — the policy setting that makes one prompt cover a whole batch, and the
+specific fix for Stacer prompting per action — had cached the authorisation from that prompt.
+
+So the next `make check` escalated **silently**. The test's fixture named
+`linux-image-6.8.0-136-generic`, copied from the machine's own kernel list when the test was written.
+The helper's derivation was asked whether that was a removable old kernel, correctly answered yes, and
+ran `apt-get remove --purge -y`.
+
+```
+DESTRUCTIVE id=2 op=remove_packages detail=RemovePackages { kind: OldKernel,
+             packages: ["linux-image-6.8.0-136-generic"] }
+```
+
+**Every safety rule held.** The helper refused nothing it should have allowed and allowed nothing
+outside its own derivation; the running kernel and the newest were protected; the second attempt was
+correctly denied once the package was gone. The machine kept its running kernel and a fallback, and
+stayed bootable. The audit log recorded it precisely, which is how it was found — within minutes, and
+by reading the trail rather than by noticing a symptom.
+
+None of that makes it acceptable. Something was removed from someone's computer without their consent.
+
+**Three causes, and each got its own fix:**
+
+1. **Reaching root took no deliberate act.** `Elevation` no longer implements `Default`. There are two
+   constructors, `production()` and `never()`, and `never()` is `cfg(test)` — so in a release build the
+   escalating one is the *only* one that exists, and in a test build a caller has to write the word
+   `production` to reach polkit. Compile-time, not vigilance.
+2. **A fixture named a package that existed.** Every test package name is now obviously synthetic —
+   `nix-test-not-a-real-kernel`. This layer was then proven to work by accident: while verifying the
+   first fix I disabled the guard on the same machine, and the run escalated again — and was refused,
+   because the name was fake. Defence in depth is not a slogan.
+3. **The suite was not safe to run on a machine with the helper installed.** `make test` now sets
+   `NIX_HELPER_PATH` to a path that cannot exist, so even a test that asked to escalate finds nothing
+   to launch. Belt and braces: if that line is what saves you, two guards have already failed.
+
+**Guard.** `no_privileged_operation_can_execute_under_test_elevation` runs every helper-backed method
+through `reclaim_one` with `Elevation::never()` and requires each to fail at *elevation* specifically,
+not somewhere further along. `refusing_elevation_never_opens_a_session` asserts no child process is
+started even when a caller retries. The full suite now runs clean on this machine with the helper still
+installed and starts **zero** helper sessions.
+
+Deliberately **not** verified by breaking the guard and watching a test fail, which is this project's
+usual practice — see [09-patterns.md §12](09-patterns.md). Disabling an escalation guard on a machine
+with a live helper is how the kernel was lost, and repeating it to prove a point would be
+indefensible. The behaviour is asserted where it lives instead. Some guards cannot be tested by
+sabotage, and recognising which is part of using the technique.
+
+---
+
+## 5. Snap revision strings reach a root command line
 
 **M5 / STO-12** · **Friction** · **Found by** designing the operation
 
