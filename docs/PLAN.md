@@ -189,7 +189,36 @@ Three things went wrong on the way, and all three were found by measuring rather
    catch it because it only walks what it can reach. Aggregates are now built by the parent. A
    reachability test guards it, verified by reintroducing the bug.
 
-Remaining: STO-14, STO-13, STO-15, STO-16.
+**STO-14 is done**, and it is the largest category in the tool: **71.1 GiB** across 805 project
+artifact directories and **48.1 GiB** of package-manager stores outside `~/.cache`. The whole preview
+went from 43.9 GiB to **161.0 GiB**.
+
+Detection is by marker, never by name — the specification's criterion, and not a formality, since
+`build`, `dist`, `venv` and `target` are ordinary words. Candidates come from the cached scan rather
+than a walk, because traversal costs 33 s here even while pruning; `STO-19`'s bounded tree already
+holds every directory big enough to be worth reclaiming.
+
+Designing it turned up **two accounting defects in shipped code**, both about the same thing:
+
+1. **Trashing was reported as freeing.** The trash must sit on the same filesystem as its contents,
+   because the move is a rename — so trashing frees nothing until the trash is emptied. `Report::freed`
+   counted trashed bytes anyway, so clearing 9.8 GiB of cache reported "Freed 9.8 GiB" with the user's
+   free space unmoved. Five accuracy tests missed it because they compared against a *directory-tree*
+   measurement, which trashing satisfies. Fixed separately in `c051a69`.
+2. **A trashed directory reported the size of its own inode**, about four kilobytes, rather than its
+   contents — and `AppCacheCategory`, the only category that trashed anything, trashes directories
+   exclusively. Every accuracy test trashed plain files.
+
+Both are in [issues §03](issues/03-reclaim-pipeline.md). The second is the more embarrassing: it means
+the reported figure for the one production path that existed was wrong by three orders of magnitude,
+and had been since M3.
+
+The preview also got 20x faster along the way — **27.8 s to 1.4 s** — by taking directory sizes from
+the cached scan instead of walking `~/.cache` and the package stores, which are 85 GiB between them.
+The first attempt at that made it *slower* (7.5 s to 11 s) by reloading and deserialising the whole
+cached tree once per candidate instead of once per category.
+
+Remaining: STO-13, STO-15, STO-16.
 
 Note also that §4's parallelisation advice no longer applies: this is a solo project, which is why
 **task 0.9 was completed within Phase 0 rather than deferred** — see §5.2 for why M2 is nonetheless

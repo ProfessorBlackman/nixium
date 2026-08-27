@@ -116,6 +116,10 @@ impl Registry {
         // snap revisions.
         registry.register(Box::new(super::SnapRevisionCategory::new()));
         registry.register(Box::new(super::FlatpakUnusedCategory::new()));
+        // `STO-14`: the largest category in the tool — 71 GiB of project artifacts and 52 GiB of
+        // package stores on the development machine.
+        registry.register(Box::new(super::BuildArtifactCategory::new()));
+        registry.register(Box::new(super::PackageStoreCategory::new()));
         registry
     }
 

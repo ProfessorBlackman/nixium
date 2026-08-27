@@ -79,6 +79,10 @@ export default function Reclaim() {
     [preview, selected],
   );
   const selectedBytes = selectedItems.reduce((sum, i) => sum + i.bytes, 0);
+  // The part of the selection that would only be staged in the trash rather than freed.
+  const selectedTrashable = selectedItems
+    .filter((i) => i.method.method === "move_to_trash")
+    .reduce((sum, i) => sum + i.bytes, 0);
   const hasRisky = selectedItems.some((i) => i.safety === "risky");
 
   function toggle(item: PreviewItem) {
@@ -293,6 +297,15 @@ export default function Reclaim() {
                   <p className="caveat">
                     Your selection includes items marked risky. These may break something that is
                     running, or lose data.
+                  </p>
+                )}
+                {/* Said before committing, not only afterwards: trashing is a rename within the same
+                    filesystem, so it frees nothing until the trash is emptied. */}
+                {selectedTrashable > 0 && (
+                  <p className="caveat">
+                    {formatBytes(selectedTrashable)} of this goes to the trash, which is reversible but
+                    on the same disk — so that space comes back only once you empty it. nix offers
+                    emptying the trash as its own item.
                   </p>
                 )}
                 <ul className="confirm-list">

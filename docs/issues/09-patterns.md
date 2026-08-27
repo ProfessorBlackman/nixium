@@ -1,6 +1,6 @@
 # What generalises
 
-Forty-three entries is enough to see structure. This is the part worth re-reading.
+Forty-four entries is enough to see structure. This is the part worth re-reading.
 
 ---
 
@@ -106,8 +106,14 @@ Nothing about the tests was sloppy. They measured carefully, to a stated toleran
 independent implementation. They just measured the wrong noun — and being rigorous about the wrong
 quantity is a very comfortable place to be, because everything passes.
 
+The same suite made the same class of mistake a second way: every test that trashed something trashed
+a plain **file**, while the only production category that trashes anything trashes **directories**. The
+directory path reported the size of its own inode — four kilobytes for a 9.8 GiB cache — and no test
+was shaped to notice.
+
 **Generalisation.** For each test, write down the sentence it is supposed to prove, then ask whether a
-plausible wrong implementation could pass it. Here, "the bytes left the directory" and "the user got
+plausible wrong implementation could pass it. Then ask a second question: does the fixture have the
+same *shape* as production? A suite built entirely from files cannot speak about directories. Here, "the bytes left the directory" and "the user got
 the space back" differ by exactly one design decision, and the harness never named which one it meant.
 Naming it — the helper is now called `left_the_tree` — makes the gap visible in the source.
 
@@ -166,7 +172,7 @@ it.
 
 ## 9. Encode the guard in the toolchain, not in memory
 
-Ten of forty-three entries were caught by a gate. Those cost minutes. The ones that cost hours were
+Ten of forty-four entries were caught by a gate. Those cost minutes. The ones that cost hours were
 caught by reasoning, and the two worst were nearly not caught at all.
 
 Gates currently in force:

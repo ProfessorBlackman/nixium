@@ -29,6 +29,7 @@
 //!   rather than acted on. This is also what makes it safe for the explorer to serve a cached tree
 //!   (decision D6): stale data can misinform a reader, but it cannot misdirect a deletion.
 
+mod artifacts;
 mod caches;
 mod kernels;
 mod logs;
@@ -36,6 +37,7 @@ mod packages;
 mod registry;
 mod snaps;
 
+pub use artifacts::{BuildArtifactCategory, PackageStoreCategory};
 pub use caches::AppCacheCategory;
 pub use kernels::{OldKernelCategory, ResidualConfigCategory};
 pub use logs::{JournalCategory, LogCategory};
@@ -131,6 +133,14 @@ pub struct Preview {
     /// Total of only the entries safe enough to pre-check.
     #[ts(type = "number")]
     pub safe_bytes: u64,
+    /// The part of the total that would be **moved to the trash** rather than removed.
+    ///
+    /// Trashing frees nothing on its own: the trash sits on the same filesystem as its contents,
+    /// because the move is a rename. So this much of [`Preview::total_bytes`] needs the trash emptying
+    /// before it comes back, and the UI has to say so *before* the user commits — not only afterwards
+    /// in the report.
+    #[ts(type = "number")]
+    pub trashable_bytes: u64,
     /// Things a category proposed that the protection rules refused. Shown, not hidden: a user
     /// should be able to see that nix declined to touch something.
     pub refused: Vec<Refusal>,
@@ -427,6 +437,11 @@ impl Session {
             safe_bytes: items
                 .iter()
                 .filter(|i| i.safety.pre_checkable())
+                .map(|i| i.reclaimable.promisable(i.bytes))
+                .sum(),
+            trashable_bytes: items
+                .iter()
+                .filter(|i| matches!(i.method, ReclaimMethod::MoveToTrash { .. }))
                 .map(|i| i.reclaimable.promisable(i.bytes))
                 .sum(),
             items,
@@ -1498,7 +1513,9 @@ mod tests {
                 "old_kernels",
                 "residual_config",
                 "snap_revisions",
-                "flatpak_unused"
+                "flatpak_unused",
+                "build_artifacts",
+                "package_stores"
             ],
         );
         // Trash stays first: it is the category the pipeline was proven against, and the one whose

@@ -175,7 +175,37 @@ an explicitly named `left_the_tree`, so nobody mistakes them for a claim about f
 
 ---
 
-## 5. Claiming the full size after removing two of three links
+## 5. A trashed directory reported the size of its own inode
+
+**M3, found in M5** · **Critical** · **Found by** reading `trash_into` while planning to trash 71 GiB
+
+`TrashedItem::size` came from `metadata.blocks() * 512` on the path being trashed. For a file that is
+right. For a **directory** it describes the directory inode — four kilobytes or so — and says nothing
+about what is inside it.
+
+`AppCacheCategory` is the only category in the shipped product that trashes anything, and it trashes
+directories exclusively. So moving a 9.8 GiB cache directory to the trash reported about **four
+kilobytes**, and because `Report` derives every figure from what `trash` returns, the entire account of
+the operation was wrong by three orders of magnitude. This had been true since M3.
+
+Every test in `reclaim_accuracy.rs` trashed plain **files**, so the directory case — the only case that
+occurs in production — was never exercised.
+
+**Resolved** by measuring the tree before the move, since after the rename the source path is gone.
+`fixture::directory_size` already existed for exactly this.
+
+**Guard.** `trashing_a_directory_reports_what_was_inside_it` builds a directory holding 16 KiB across
+two levels and asserts the reported size reflects the contents. **Verified to fire** by restoring the
+old expression: *"a directory holding 16 KiB reported 4.0 KiB — the directory inode is not its
+contents"*.
+
+Together with entry 4 this is one lesson twice: the reclaim figures were checked carefully against the
+wrong thing, and the test suite's own choice of fixture — plain files — quietly excluded the only
+shape that production uses.
+
+---
+
+## 6. Claiming the full size after removing two of three links
 
 **M5 / STO-12** · **Moderate** · **Found by** re-reading the code I had just written
 

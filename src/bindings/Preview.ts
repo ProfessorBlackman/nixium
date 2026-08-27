@@ -26,6 +26,15 @@ promisable_bytes: number,
  */
 safe_bytes: number, 
 /**
+ * The part of the total that would be **moved to the trash** rather than removed.
+ *
+ * Trashing frees nothing on its own: the trash sits on the same filesystem as its contents,
+ * because the move is a rename. So this much of [`Preview::total_bytes`] needs the trash emptying
+ * before it comes back, and the UI has to say so *before* the user commits — not only afterwards
+ * in the report.
+ */
+trashable_bytes: number, 
+/**
  * Things a category proposed that the protection rules refused. Shown, not hidden: a user
  * should be able to see that nix declined to touch something.
  */

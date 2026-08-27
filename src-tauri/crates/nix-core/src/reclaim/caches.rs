@@ -273,6 +273,9 @@ impl Category for AppCacheCategory {
             return Ok(Vec::new());
         };
 
+        // Loaded once, not per candidate: see `artifacts::cached_home_scan`.
+        let cached = super::artifacts::cached_home_scan();
+
         let mut candidates = Vec::new();
         for entry in entries.filter_map(std::result::Result::ok) {
             token.check()?;
@@ -290,7 +293,13 @@ impl Category for AppCacheCategory {
                 continue;
             }
 
-            let bytes = crate::fixture::directory_size(&path);
+            // From the cached scan where it knows, and by walking only when it does not. Measuring
+            // this directory's children by traversal cost 20 seconds of a 28-second preview on the
+            // development machine, where `~/.cache` holds 36.5 GiB. The trade-off is that a cached
+            // figure can be stale, which is acceptable because the preview is an estimate the user
+            // decides against while the report measures what actually moved.
+            let bytes = super::artifacts::cached_size_in(cached.as_ref(), &path)
+                .unwrap_or_else(|| crate::fixture::directory_size(&path));
             // Nothing to offer, and an entry claiming zero bytes is just noise in the list.
             if bytes == 0 {
                 continue;

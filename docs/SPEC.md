@@ -316,7 +316,7 @@ with a reclaim method (§5.5 invariant 3); user exclusions survive a rescan.
 | STO-11 | Removable system packages | P0 |
 | STO-12 | Snap & flatpak revisions | P1 |
 | STO-13 | Container & image storage | P1 |
-| STO-14 | Developer build artifacts | P1 |
+| STO-14 | Developer build artifacts | P1 — done |
 | STO-15 | Large files & duplicates | P1 |
 | STO-16 | Growth history | P2 |
 | STO-17 | btrfs, LVM & ZFS awareness | **P0** |
@@ -346,6 +346,23 @@ and build caches, with a prune preview. Volumes are `Risky` and never bulk-selec
 `build/`, plus package-manager caches for cargo, npm/pnpm, pip and Go — recognised by marker
 files, rated `Review` with an honest cost ("next build will be slow"). *Accepts:* detection is
 by project marker, not by name alone; a directory inside an active project is never rated `Safe`.
+
+**Met, and it is the largest category in the tool.** On the development machine: **71.1 GiB** across
+805 project artifact directories, plus **48.1 GiB** of package-manager stores outside `~/.cache`
+(pnpm 17.1, npm 15.1, Gradle 14.3, Maven 2.7, Cargo 0.8). The whole preview went from 43.9 GiB to
+**161.0 GiB**.
+
+Every artifact directory must be corroborated by a marker a build tool would have left — `target/`
+only beside a `Cargo.toml`, `build/` only beside a `pubspec.yaml`, `CMakeLists.txt`, `meson.build` or
+similar. `build`, `dist`, `venv` and `target` are ordinary words, and a directory called `build` may
+be hand-written source. `vendor/`, `bin/` and `obj/` are deliberately **not** recognised at all,
+because the name cannot distinguish generated from committed. Nothing in the category is ever `Safe`:
+regenerable is not the same as unwanted.
+
+Candidates come from the cached scan rather than a walk. Traversal costs 33 s on this machine even
+pruning at every artifact directory; `STO-19`'s tree already holds every directory big enough to
+matter, so discovery is a filter plus one `stat` per candidate to confirm the marker. The category is
+therefore unavailable until a scan exists, and says so.
 
 **STO-15 Large files & duplicates.** Largest-files view over the scan (no separate query form —
 Stacer made you fill in a `find` dialogue), and content-hash duplicate detection with
