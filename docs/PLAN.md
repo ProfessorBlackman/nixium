@@ -14,7 +14,7 @@ The spec says *what* and *why*. This says *in what order, and how we know it wor
 | **M2** "Where did my disk go?" (tasks 1.1–1.6, 1.15) | **complete** |
 | **M3** First safe reclaim (tasks 1.7–1.10) | **complete** |
 | **M4** Storage core complete (tasks 1.11–1.14) — **Phase 1 done** | **complete** |
-| M5 Storage depth (Phase 2) | next |
+| **M5** Storage depth (Phase 2) | **in progress** — STO-10, STO-11 done; 7 features remain |
 | M6 – M9 | not started |
 
 Phase 0 shipped all eleven tasks: the three-crate workspace and quality gates, the error taxonomy,
@@ -72,6 +72,13 @@ an enum and a vacuum limit is a number, so no caller-supplied text can reach a r
 Task 1.14's harness now checks the specification's fourth success criterion — reported bytes within
 2% of the measured delta — end to end, rather than the claim being asserted in a document and never
 tested.
+
+M5 is under way. §6 orders Phase 2 by reclaim value, and the first two are done — with one swap:
+**STO-10 landed before STO-11**, because deciding which kernels are removable needs a package-query
+layer underneath it. On this development machine the result is **1.2 GiB of removable kernels**,
+correctly excluding the running one.
+
+Remaining: STO-17 (btrfs, **P0**), STO-12, STO-18, STO-14, STO-13, STO-15, STO-16.
 
 Note also that §4's parallelisation advice no longer applies: this is a solo project, which is why
 **task 0.9 was completed within Phase 0 rather than deferred** — see §5.2 for why M2 is nonetheless

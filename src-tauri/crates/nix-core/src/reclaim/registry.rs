@@ -90,6 +90,9 @@ impl Registry {
         registry.register(Box::new(super::LogCategory::new()));
         registry.register(Box::new(super::JournalCategory::new()));
         registry.register(Box::new(super::PackageCacheCategory::new()));
+        // Phase 2 opens with the largest real-world win: old kernels.
+        registry.register(Box::new(super::OldKernelCategory::new()));
+        registry.register(Box::new(super::ResidualConfigCategory::new()));
         registry
     }
 

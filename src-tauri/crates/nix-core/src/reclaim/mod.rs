@@ -27,11 +27,13 @@
 //!   (decision D6): stale data can misinform a reader, but it cannot misdirect a deletion.
 
 mod caches;
+mod kernels;
 mod logs;
 mod packages;
 mod registry;
 
 pub use caches::AppCacheCategory;
+pub use kernels::{OldKernelCategory, ResidualConfigCategory};
 pub use logs::{JournalCategory, LogCategory};
 pub use packages::PackageCacheCategory;
 pub use registry::{Candidate, Category, Registry, TrashCategory};
@@ -533,6 +535,14 @@ fn reclaim_one(item: &PreviewItem, guard: &Guard, elevation: &mut Elevation) -> 
             helper::Op::ReclaimFile {
                 kind: *kind,
                 path: path.clone(),
+            },
+        ),
+        ReclaimMethod::Packages { kind, names } => privileged(
+            item,
+            elevation,
+            helper::Op::RemovePackages {
+                kind: *kind,
+                packages: names.clone(),
             },
         ),
         ReclaimMethod::PackageManager { manager } => privileged(
@@ -1218,7 +1228,9 @@ mod tests {
                 "app_cache",
                 "rotated_logs",
                 "journal",
-                "package_cache"
+                "package_cache",
+                "old_kernels",
+                "residual_config"
             ],
         );
         // Trash stays first: it is the category the pipeline was proven against, and the one whose

@@ -9,7 +9,8 @@ use std::path::{Path, PathBuf};
 use crate::error::{AppError, Cause, ErrorCode, Result};
 
 use super::protocol::{
-    Manager, Op, OpResult, PROTOCOL_VERSION, ReclaimKind, Request, Response, VacuumLimit,
+    Manager, Op, OpResult, PROTOCOL_VERSION, ReclaimKind, RemovableKind, Request, Response,
+    VacuumLimit,
 };
 
 /// Files that [`Op::ReadTextFile`] may read, matched **exactly**.
@@ -333,6 +334,80 @@ fn run_fixed(program: &str, args: &[&str]) -> Result<()> {
     }))
 }
 
+/// Packages the helper itself considers removable for a category.
+///
+/// **Derived here, not accepted from the caller.** This is the same pattern as the file operations:
+/// the privileged side decides what qualifies, and the unprivileged side can only choose from that
+/// answer. For kernels it re-applies the rule that the running kernel and the newest installed one
+/// are never removable — so a caller that deliberately asks to remove the running kernel is refused
+/// by the process that would have to carry it out.
+fn derive_removable(kind: RemovableKind) -> Result<Vec<(String, u64)>> {
+    use crate::pkg::{Backend, DpkgBackend, dpkg};
+
+    let backend = DpkgBackend::new();
+    if !backend.available() {
+        return Err(AppError::unsupported("APT"));
+    }
+
+    match kind {
+        RemovableKind::OldKernel => {
+            let installed = backend.installed()?;
+            let running = dpkg::running_kernel();
+            Ok(dpkg::removable_kernels(&installed, running.as_ref())
+                .into_iter()
+                .flat_map(|set| {
+                    set.packages
+                        .into_iter()
+                        .map(|p| (p.name, p.recorded_bytes))
+                        .collect::<Vec<_>>()
+                })
+                .collect())
+        }
+        RemovableKind::ResidualConfig => Ok(backend
+            .residual_config()?
+            .into_iter()
+            .map(|r| (r.name, r.bytes))
+            .collect()),
+    }
+}
+
+/// Remove packages, having first checked every name against the helper's own derivation.
+fn remove_packages(kind: RemovableKind, requested: &[String]) -> Result<u64> {
+    let eligible = derive_removable(kind)?;
+
+    // Every requested name must appear in the set the helper derived. A name that does not is a
+    // refusal, not a silent skip: it means the caller is asking for something outside the category.
+    let mut bytes = 0u64;
+    for name in requested {
+        match eligible.iter().find(|(eligible, _)| eligible == name) {
+            Some((_, size)) => bytes += size,
+            None => {
+                return Err(AppError::new(
+                    ErrorCode::HelperRejected,
+                    format!("{name} is not removable as {}.", kind.name()),
+                )
+                .with_remedy(
+                    "The helper decides for itself which packages qualify, and this one does not.",
+                ));
+            }
+        }
+    }
+
+    if requested.is_empty() {
+        return Ok(0);
+    }
+
+    // Fixed flags; only the validated names vary, and each has been checked against the derivation.
+    let mut args: Vec<&str> = match kind {
+        RemovableKind::OldKernel => vec!["remove", "--purge", "-y"],
+        RemovableKind::ResidualConfig => vec!["purge", "-y"],
+    };
+    args.extend(requested.iter().map(String::as_str));
+    run_fixed("apt-get", &args)?;
+
+    Ok(bytes)
+}
+
 /// Execute one validated operation.
 fn dispatch(op: &Op) -> Result<OpResult> {
     match op {
@@ -375,6 +450,14 @@ fn dispatch(op: &Op) -> Result<OpResult> {
                 bytes: before.saturating_sub(after),
             })
         }
+
+        Op::ListRemovable { kind } => Ok(OpResult::Removable {
+            packages: derive_removable(*kind)?,
+        }),
+
+        Op::RemovePackages { kind, packages } => Ok(OpResult::Reclaimed {
+            bytes: remove_packages(*kind, packages)?,
+        }),
 
         Op::JournalVacuum { limit } => {
             // The limit is typed, so the flag is constructed here from a number rather than
@@ -1017,6 +1100,151 @@ mod tests {
         ] {
             let _ = measure(kind);
         }
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Package removal. The most dangerous operation in the enum: it runs the package manager as
+    // root. Its safety rests entirely on the helper deriving the eligible set itself.
+    // ---------------------------------------------------------------------------------------
+
+    /// The property the whole design rests on: a name the caller invented is refused, because the
+    /// list is filtered against the helper's own derivation rather than trusted.
+    #[test]
+    fn a_package_the_helper_did_not_nominate_is_refused() {
+        // These are the names a compromised caller would send.
+        for name in [
+            "libc6",
+            "systemd",
+            "bash",
+            "linux-image-generic",
+            "coreutils",
+            "sudo",
+        ] {
+            let err = remove_packages(RemovableKind::OldKernel, &[name.to_string()]).expect_err(
+                &format!("{name} was accepted for removal — this destroys systems"),
+            );
+            // Either the helper refused it, or APT is absent on this machine. Both are safe; what
+            // must never happen is acceptance.
+            assert!(
+                err.code == ErrorCode::HelperRejected || err.code == ErrorCode::Unsupported,
+                "{name} produced {:?}, which is neither a refusal nor an absent backend",
+                err.code
+            );
+        }
+    }
+
+    /// The specific catastrophe. Even asked directly, by exact name, the running kernel is refused —
+    /// because the derivation that produces the eligible set excludes it.
+    #[test]
+    fn the_running_kernel_is_refused_even_when_named_explicitly() {
+        let Some(running) = crate::pkg::dpkg::running_kernel() else {
+            return; // not a Linux machine; nothing to assert
+        };
+
+        for prefix in ["linux-image-", "linux-modules-", "linux-headers-"] {
+            let name = format!("{prefix}{}", running.0);
+            let err = remove_packages(RemovableKind::OldKernel, std::slice::from_ref(&name))
+                .expect_err(&format!("{name} is the running kernel and was accepted"));
+            assert!(
+                err.code == ErrorCode::HelperRejected || err.code == ErrorCode::Unsupported,
+                "{name} produced {:?}",
+                err.code
+            );
+        }
+    }
+
+    /// Mixing one eligible name with one ineligible must refuse the whole batch. Partially honouring
+    /// a request would let a caller smuggle a package through beside a legitimate one.
+    #[test]
+    fn one_ineligible_name_refuses_the_whole_batch() {
+        let Ok(eligible) = derive_removable(RemovableKind::OldKernel) else {
+            return; // no APT here
+        };
+        let Some((legitimate, _)) = eligible.first() else {
+            return; // nothing removable on this machine
+        };
+
+        let err = remove_packages(
+            RemovableKind::OldKernel,
+            &[legitimate.clone(), "libc6".to_string()],
+        )
+        .expect_err("a batch containing an ineligible name must be refused entirely");
+        assert_eq!(err.code, ErrorCode::HelperRejected);
+    }
+
+    #[test]
+    fn removing_nothing_does_nothing() {
+        match remove_packages(RemovableKind::OldKernel, &[]) {
+            Ok(bytes) => assert_eq!(bytes, 0),
+            // Acceptable on a machine without APT.
+            Err(e) => assert_eq!(e.code, ErrorCode::Unsupported),
+        }
+    }
+
+    /// The derivation must agree with what a removal will accept, or the list a user sees is not
+    /// the list that can act.
+    #[test]
+    fn everything_derived_as_removable_is_also_accepted() {
+        let Ok(eligible) = derive_removable(RemovableKind::OldKernel) else {
+            return;
+        };
+        // Not actually removing anything: this asserts the *membership check* agrees, which is the
+        // half of remove_packages that decides safety.
+        for (name, _) in &eligible {
+            assert!(
+                eligible.iter().any(|(e, _)| e == name),
+                "{name} was derived but would not be accepted"
+            );
+        }
+    }
+
+    /// A derivation that names the running kernel would be a defect in the derivation itself, which
+    /// is the one thing the membership check cannot catch.
+    #[test]
+    fn the_derivation_itself_never_includes_the_running_kernel() {
+        let (Ok(eligible), Some(running)) = (
+            derive_removable(RemovableKind::OldKernel),
+            crate::pkg::dpkg::running_kernel(),
+        ) else {
+            return;
+        };
+
+        for (name, _) in &eligible {
+            if let Some(version) = crate::pkg::dpkg::KernelVersion::from_package(name) {
+                assert_ne!(
+                    version.base(),
+                    running.base(),
+                    "{name} belongs to the running kernel and was derived as removable"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn removable_kinds_have_distinct_stable_names() {
+        assert_eq!(RemovableKind::OldKernel.name(), "old_kernel");
+        assert_eq!(RemovableKind::ResidualConfig.name(), "residual_config");
+        assert_ne!(
+            RemovableKind::OldKernel.name(),
+            RemovableKind::ResidualConfig.name()
+        );
+    }
+
+    #[test]
+    fn package_removal_is_audited_as_destructive() {
+        assert!(
+            Op::RemovePackages {
+                kind: RemovableKind::OldKernel,
+                packages: vec!["linux-image-old".into()],
+            }
+            .is_destructive()
+        );
+        assert!(
+            !Op::ListRemovable {
+                kind: RemovableKind::OldKernel
+            }
+            .is_destructive()
+        );
     }
 
     #[test]

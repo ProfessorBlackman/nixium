@@ -48,6 +48,7 @@ pub mod helper;
 pub mod logging;
 pub mod op;
 pub mod paths;
+pub mod pkg;
 pub mod protect;
 pub mod reclaim;
 pub mod scan;

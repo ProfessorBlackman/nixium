@@ -9,12 +9,12 @@ use serde::{Deserialize, Serialize};
 use crate::error::AppError;
 // These describe *what* is reclaimed, not how it is transported, so they live in the domain
 // model. The protocol uses them; it does not own them.
-pub(crate) use crate::space::{Manager, ReclaimKind, VacuumLimit};
+pub(crate) use crate::space::{Manager, ReclaimKind, RemovableKind, VacuumLimit};
 
 /// Bumped whenever the message shape changes incompatibly. The client refuses to talk to a helper
 /// that reports a different version, because a version-skewed privileged process is exactly the
 /// thing not to guess about.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// The **allow-list**. This enum is the security boundary of the entire privileged surface.
 ///
@@ -62,6 +62,26 @@ pub enum Op {
     /// caller-supplied.
     PackageManagerClean { manager: Manager },
 
+    /// Remove packages the helper itself has determined are removable.
+    ///
+    /// The most dangerous operation in the enum, validated the same way as the others: the helper
+    /// **re-derives the eligible set** and refuses any name that is not in it. The caller cannot
+    /// nominate an arbitrary package, because its list is filtered against the helper's own answer
+    /// rather than trusted. For old kernels the helper independently reapplies the rule that the
+    /// running kernel and the newest installed one are never removable, so a caller that
+    /// deliberately asks to delete the running kernel is refused by the process that would have to
+    /// carry it out.
+    RemovePackages {
+        kind: RemovableKind,
+        packages: Vec<String>,
+    },
+
+    /// List the packages the helper considers removable for a category.
+    ///
+    /// The same derivation the removal uses, so the list a user sees is exactly the list that can
+    /// act.
+    ListRemovable { kind: RemovableKind },
+
     /// Vacuum the systemd journal.
     ///
     /// The limit is a **typed value**, not a string, so no caller-supplied text ever reaches
@@ -81,6 +101,8 @@ impl Op {
             Self::ReclaimFile { .. } => "reclaim_file",
             Self::PackageManagerClean { .. } => "package_manager_clean",
             Self::JournalVacuum { .. } => "journal_vacuum",
+            Self::RemovePackages { .. } => "remove_packages",
+            Self::ListRemovable { .. } => "list_removable",
         }
     }
 
@@ -95,6 +117,7 @@ impl Op {
             Self::ReclaimFile { .. }
                 | Self::PackageManagerClean { .. }
                 | Self::JournalVacuum { .. }
+                | Self::RemovePackages { .. }
         )
     }
 }
@@ -126,6 +149,8 @@ pub enum OpResult {
     Files { files: Vec<(PathBuf, u64)> },
     /// Reply to a destructive operation.
     Reclaimed { bytes: u64 },
+    /// Reply to [`Op::ListRemovable`]: package names with the bytes each holds.
+    Removable { packages: Vec<(String, u64)> },
 }
 
 /// One response.

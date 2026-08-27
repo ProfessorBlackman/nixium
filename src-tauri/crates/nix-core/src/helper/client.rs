@@ -256,6 +256,24 @@ impl Drop for Client {
 mod tests {
     use super::*;
 
+    /// Connect for a test, turning a stale-binary version mismatch into a clear instruction.
+    ///
+    /// The protocol version guard is doing its job when it refuses an old binary, but a raw panic
+    /// on an unwrap does not say so. `cargo test` does not rebuild the helper; `make test` does.
+    fn connect_for_test(transport: &Transport) -> Option<Client> {
+        match Client::connect(transport) {
+            Ok(client) => Some(client),
+            Err(e) if e.code == ErrorCode::VersionMismatch => {
+                panic!(
+                    "the helper binary is stale ({}). Run `make test`, or \
+                     `cargo build -p nix-helper` first — `cargo test` does not rebuild it.",
+                    e.message
+                );
+            }
+            Err(e) => panic!("handshake failed: {e}"),
+        }
+    }
+
     /// Path to the freshly built helper binary next to the test executable.
     fn built_helper() -> Option<PathBuf> {
         let exe = std::env::current_exe().ok()?;
@@ -274,7 +292,7 @@ mod tests {
         let transport = Transport::Direct {
             helper_path: helper,
         };
-        let mut client = Client::connect(&transport).expect("handshake should succeed");
+        let mut client = connect_for_test(&transport).expect("handshake should succeed");
 
         // Run as the current user in tests, so it must NOT claim elevation.
         assert!(!client.is_elevated(), "a direct-spawned helper is not root");
@@ -296,10 +314,10 @@ mod tests {
             eprintln!("skipping: nix-helper not built yet");
             return;
         };
-        let mut client = Client::connect(&Transport::Direct {
+        let mut client = connect_for_test(&Transport::Direct {
             helper_path: helper,
         })
-        .unwrap();
+        .expect("handshake should succeed");
         let err = client
             .request(&Op::ReadTextFile {
                 path: PathBuf::from("/home/someone/.ssh/id_rsa"),

@@ -250,6 +250,30 @@ impl ReclaimKind {
     }
 }
 
+/// A class of removable package.
+///
+/// Like [`ReclaimKind`], this names a derivation the privileged helper performs **itself**. Adding a
+/// variant widens the privileged surface and belongs in the same review as the feature that needs it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum RemovableKind {
+    /// Kernels older than both the running one and the newest installed one.
+    OldKernel,
+    /// Configuration left behind by packages already removed.
+    ResidualConfig,
+}
+
+impl RemovableKind {
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::OldKernel => "old_kernel",
+            Self::ResidualConfig => "residual_config",
+        }
+    }
+}
+
 /// Package managers whose cache the helper can clean.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
@@ -303,6 +327,14 @@ pub enum ReclaimMethod {
     PackageManager { manager: Manager },
     /// Vacuum the journal, by size or by age. Typed for the same reason.
     JournalVacuum { limit: VacuumLimit },
+    /// Remove packages through the privileged helper.
+    ///
+    /// The helper re-derives which packages qualify and refuses any name outside that set, so this
+    /// cannot be used to remove an arbitrary package — including the running kernel.
+    Packages {
+        kind: RemovableKind,
+        names: Vec<String>,
+    },
     /// Delete one system file through the privileged helper.
     ///
     /// The `kind` travels with the path, and the helper independently re-derives which roots that
