@@ -13,8 +13,9 @@ The spec says *what* and *why*. This says *in what order, and how we know it wor
 | **M1** Foundation complete (Phase 0, tasks 0.1–0.11) | **complete** |
 | **M2** "Where did my disk go?" (tasks 1.1–1.6, 1.15) | **complete** |
 | **M3** First safe reclaim (tasks 1.7–1.10) | **complete** |
-| M4 Storage core complete (tasks 1.11–1.14) | next |
-| M5 – M9 | not started |
+| **M4** Storage core complete (tasks 1.11–1.14) — **Phase 1 done** | **complete** |
+| M5 Storage depth (Phase 2) | next |
+| M6 – M9 | not started |
 
 Phase 0 shipped all eleven tasks: the three-crate workspace and quality gates, the error taxonomy,
 the IPC contract with its progress/cancellation primitive, the app shell with lazily-mounted views,
@@ -56,6 +57,21 @@ consequences the user has already accepted before anything irreversible is wired
 The gate that matters is enforced by the type system rather than by convention: `execute` requires a
 `Ticket` that only `preview` can mint, tied to the exact item set it described. A caller cannot
 construct one, reuse a superseded one, or widen the selection afterwards.
+
+M4 completed Phase 1. Five categories are registered — trash, application caches, rotated logs, the
+journal and package caches — and three of them go through the privileged helper. 289 tests, and CI
+green on all four jobs including the bundle.
+
+Growing the privileged surface was the substantial part, and the design decision worth carrying
+forward is that **an operation carries its category, and the helper re-derives which roots that
+category owns**. A caller cannot claim `/etc/shadow` is a rotated log, because `/etc` is not a root
+of any category. That is specification invariant 4 enforced on the privileged side rather than
+trusted from the unprivileged one. The reclaim methods were retyped at the same time: a manager is
+an enum and a vacuum limit is a number, so no caller-supplied text can reach a root command line.
+
+Task 1.14's harness now checks the specification's fourth success criterion — reported bytes within
+2% of the measured delta — end to end, rather than the claim being asserted in a document and never
+tested.
 
 Note also that §4's parallelisation advice no longer applies: this is a solo project, which is why
 **task 0.9 was completed within Phase 0 rather than deferred** — see §5.2 for why M2 is nonetheless

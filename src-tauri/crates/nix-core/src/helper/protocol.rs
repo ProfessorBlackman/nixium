@@ -7,11 +7,14 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
+// These describe *what* is reclaimed, not how it is transported, so they live in the domain
+// model. The protocol uses them; it does not own them.
+pub(crate) use crate::space::{Manager, ReclaimKind, VacuumLimit};
 
 /// Bumped whenever the message shape changes incompatibly. The client refuses to talk to a helper
 /// that reports a different version, because a version-skewed privileged process is exactly the
 /// thing not to guess about.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// The **allow-list**. This enum is the security boundary of the entire privileged surface.
 ///
@@ -32,6 +35,38 @@ pub enum Op {
     /// [`super::server`] — because "read any file as root" is not an operation, it is a
     /// vulnerability.
     ReadTextFile { path: PathBuf },
+
+    /// Total on-disk bytes under one reclaimable category's root.
+    ///
+    /// Read-only, and constrained to the same roots as [`Op::ReclaimFile`].
+    MeasureCategory { kind: ReclaimKind },
+
+    /// List the files that could be reclaimed for one category.
+    ///
+    /// The helper decides what qualifies, applying the same rules it will apply to a delete — so
+    /// the unprivileged side cannot manufacture a candidate the helper would refuse.
+    ListCategory { kind: ReclaimKind },
+
+    /// Delete **one file** that belongs to a reclaimable category.
+    ///
+    /// The `kind` is not advisory. The helper re-derives which roots that category owns and refuses
+    /// any path outside them — so a compromised caller cannot claim `/etc/shadow` is a rotated log.
+    /// This is specification invariant 4 ("`Unlink` is only emitted for a path inside its category's
+    /// declared root") enforced on the privileged side rather than trusted from the unprivileged one.
+    ReclaimFile { kind: ReclaimKind, path: PathBuf },
+
+    /// Ask a package manager to clean its own cache.
+    ///
+    /// The specification requires reclaiming through the owning tool rather than by unlinking cache
+    /// files. The argument vector is fixed inside the helper per manager; nothing here is
+    /// caller-supplied.
+    PackageManagerClean { manager: Manager },
+
+    /// Vacuum the systemd journal.
+    ///
+    /// The limit is a **typed value**, not a string, so no caller-supplied text ever reaches
+    /// `journalctl`'s argument vector.
+    JournalVacuum { limit: VacuumLimit },
 }
 
 impl Op {
@@ -41,7 +76,26 @@ impl Op {
         match self {
             Self::Ping => "ping",
             Self::ReadTextFile { .. } => "read_text_file",
+            Self::MeasureCategory { .. } => "measure_category",
+            Self::ListCategory { .. } => "list_category",
+            Self::ReclaimFile { .. } => "reclaim_file",
+            Self::PackageManagerClean { .. } => "package_manager_clean",
+            Self::JournalVacuum { .. } => "journal_vacuum",
         }
+    }
+
+    /// Whether this operation destroys data.
+    ///
+    /// Used by the audit log, which records destructive operations at a higher prominence: an
+    /// audit trail whose deletions look like its reads is not much of an audit trail.
+    #[must_use]
+    pub const fn is_destructive(&self) -> bool {
+        matches!(
+            self,
+            Self::ReclaimFile { .. }
+                | Self::PackageManagerClean { .. }
+                | Self::JournalVacuum { .. }
+        )
     }
 }
 
@@ -66,6 +120,12 @@ pub enum OpResult {
     },
     /// Reply to [`Op::ReadTextFile`].
     Text { content: String },
+    /// Reply to [`Op::MeasureCategory`].
+    Bytes { bytes: u64 },
+    /// Reply to [`Op::ListCategory`]: paths the helper is willing to delete, with their sizes.
+    Files { files: Vec<(PathBuf, u64)> },
+    /// Reply to a destructive operation.
+    Reclaimed { bytes: u64 },
 }
 
 /// One response.

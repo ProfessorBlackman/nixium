@@ -79,12 +79,17 @@ impl Registry {
 
     /// The categories implemented so far.
     ///
-    /// M3 registers **trash alone**, deliberately: the pipeline is proven against the one category
-    /// where a mistake is recoverable before anything irreversible is wired in.
+    /// M3 registered trash alone, so the pipeline was proven against the one category where a
+    /// mistake is recoverable. M4 adds the categories that actually hold space, three of which go
+    /// through the privileged helper.
     #[must_use]
     pub fn with_defaults() -> Self {
         let mut registry = Self::new();
         registry.register(Box::new(TrashCategory::new()));
+        registry.register(Box::new(super::AppCacheCategory::new()));
+        registry.register(Box::new(super::LogCategory::new()));
+        registry.register(Box::new(super::JournalCategory::new()));
+        registry.register(Box::new(super::PackageCacheCategory::new()));
         registry
     }
 

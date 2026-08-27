@@ -26,8 +26,14 @@
 //!   rather than acted on. This is also what makes it safe for the explorer to serve a cached tree
 //!   (decision D6): stale data can misinform a reader, but it cannot misdirect a deletion.
 
+mod caches;
+mod logs;
+mod packages;
 mod registry;
 
+pub use caches::AppCacheCategory;
+pub use logs::{JournalCategory, LogCategory};
+pub use packages::PackageCacheCategory;
 pub use registry::{Candidate, Category, Registry, TrashCategory};
 
 use std::path::PathBuf;
@@ -37,6 +43,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::error::{AppError, ErrorCode, Result};
+use crate::helper;
 use crate::op::CancelToken;
 use crate::protect::{Guard, Refusal};
 use crate::space::{ReclaimMethod, Safety};
@@ -367,6 +374,8 @@ impl Session {
         let mut outcomes = Vec::with_capacity(chosen.len());
         let total = chosen.len();
         let mut cancelled = false;
+        // One privileged session for the whole batch, opened only if something actually needs it.
+        let mut elevation = Elevation::default();
 
         for (index, item) in chosen.iter().enumerate() {
             if token.is_cancelled() {
@@ -374,7 +383,7 @@ impl Session {
                 break;
             }
             progress(index, total);
-            outcomes.push(reclaim_one(item, guard));
+            outcomes.push(reclaim_one(item, guard, &mut elevation));
         }
 
         let after = chosen.first().and_then(|item| filesystem_used(&item.path));
@@ -428,8 +437,38 @@ fn fingerprint(path: &std::path::Path) -> u64 {
         .unwrap_or(0)
 }
 
+/// A privileged session, opened lazily and kept for the whole execution.
+///
+/// **Opened once, not once per item.** Stacer re-ran every individual command under `pkexec`, so
+/// toggling five services meant five authentication dialogs; one session for a batch is the whole
+/// point of the helper's design.
+#[derive(Default)]
+struct Elevation {
+    client: Option<helper::Client>,
+    /// The failure that prevented elevation, so every item can report the same honest reason
+    /// instead of each retrying and prompting again.
+    failure: Option<AppError>,
+}
+
+impl Elevation {
+    /// The client, opening a session on first use.
+    fn client(&mut self) -> std::result::Result<&mut helper::Client, AppError> {
+        if self.client.is_none() && self.failure.is_none() {
+            match helper::Transport::production().and_then(|t| helper::Client::connect(&t)) {
+                Ok(client) => self.client = Some(client),
+                Err(e) => self.failure = Some(e),
+            }
+        }
+        match (&mut self.client, &self.failure) {
+            (Some(client), _) => Ok(client),
+            (None, Some(e)) => Err(e.clone()),
+            (None, None) => Err(AppError::internal("Elevation reached an impossible state.")),
+        }
+    }
+}
+
 /// Reclaim one item, with both guards applied.
-fn reclaim_one(item: &PreviewItem, guard: &Guard) -> ItemOutcome {
+fn reclaim_one(item: &PreviewItem, guard: &Guard, elevation: &mut Elevation) -> ItemOutcome {
     // Re-checked at execution time, because the user's exclusions may have changed since preview.
     if let Some(refusal) = guard.verdict(&item.path).refusal() {
         return ItemOutcome::Skipped {
@@ -486,8 +525,27 @@ fn reclaim_one(item: &PreviewItem, guard: &Guard) -> ItemOutcome {
                 },
             }
         }
-        // Every other method arrives with the category that needs it, each reviewed on its own.
-        // Refusing loudly is the correct behaviour for a method nothing has implemented yet.
+        // The three privileged methods. Each is a single typed helper operation — no path, name or
+        // limit assembled here becomes free-form text on a root command line.
+        ReclaimMethod::SystemFile { kind, path } => privileged(
+            item,
+            elevation,
+            helper::Op::ReclaimFile {
+                kind: *kind,
+                path: path.clone(),
+            },
+        ),
+        ReclaimMethod::PackageManager { manager } => privileged(
+            item,
+            elevation,
+            helper::Op::PackageManagerClean { manager: *manager },
+        ),
+        ReclaimMethod::JournalVacuum { limit } => {
+            privileged(item, elevation, helper::Op::JournalVacuum { limit: *limit })
+        }
+
+        // Methods that arrive with a later category. Refusing loudly is correct for something
+        // nothing has implemented yet.
         other => ItemOutcome::Failed {
             id: item.id,
             path: item.path.clone(),
@@ -497,6 +555,33 @@ fn reclaim_one(item: &PreviewItem, guard: &Guard) -> ItemOutcome {
             )
             .with_remedy(format!("Method: {other:?}")),
         },
+    }
+}
+
+/// Run one privileged operation and turn its answer into an outcome.
+fn privileged(item: &PreviewItem, elevation: &mut Elevation, op: helper::Op) -> ItemOutcome {
+    let failed = |error: AppError| ItemOutcome::Failed {
+        id: item.id,
+        path: item.path.clone(),
+        error,
+    };
+
+    let client = match elevation.client() {
+        Ok(client) => client,
+        Err(e) => return failed(e),
+    };
+
+    match client.request(&op) {
+        Ok(helper::OpResult::Reclaimed { bytes }) => ItemOutcome::Reclaimed {
+            id: item.id,
+            path: item.path.clone(),
+            // What the helper measured, not what the preview estimated.
+            bytes,
+        },
+        Ok(other) => failed(AppError::internal(format!(
+            "The helper answered a reclaim with {other:?}"
+        ))),
+        Err(e) => failed(e),
     }
 }
 
@@ -1124,13 +1209,37 @@ mod tests {
     }
 
     #[test]
-    fn the_default_registry_holds_only_trash_in_m3() {
+    fn the_default_registry_holds_every_implemented_category() {
         let registry = Registry::with_defaults();
         assert_eq!(
             registry.ids(),
-            vec!["trash"],
-            "the pipeline is proven against one recoverable category before anything irreversible"
+            vec![
+                "trash",
+                "app_cache",
+                "rotated_logs",
+                "journal",
+                "package_cache"
+            ],
         );
+        // Trash stays first: it is the category the pipeline was proven against, and the one whose
+        // consequences a user has already accepted.
+        assert_eq!(registry.ids().first(), Some(&"trash"));
+    }
+
+    /// Every registered category must be able to describe itself, or the UI has nothing to show.
+    #[test]
+    fn every_registered_category_is_self_describing() {
+        let registry = Registry::with_defaults();
+        let mut ids = std::collections::HashSet::new();
+        for id in registry.ids() {
+            assert!(!id.is_empty());
+            assert!(ids.insert(id), "duplicate category id {id}");
+            assert!(
+                id.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{id} should be a stable snake_case identifier"
+            );
+        }
+        assert_eq!(registry.len(), ids.len());
     }
 
     #[test]
@@ -1145,15 +1254,17 @@ mod tests {
             label: "x".into(),
             bytes: 4,
             safety: Safety::Safe,
-            method: ReclaimMethod::JournalVacuum {
-                limit: "100M".into(),
+            // A method that genuinely has no implementation yet: it arrives with STO-12 in Phase 2.
+            method: ReclaimMethod::SnapRevision {
+                package: "firefox".into(),
+                revision: "1234".into(),
             },
             cost: None,
             category: "test".into(),
             fingerprint: fingerprint(&file),
         };
 
-        match reclaim_one(&item, &guard()) {
+        match reclaim_one(&item, &guard(), &mut Elevation::default()) {
             ItemOutcome::Failed { error, .. } => {
                 assert_eq!(error.code, ErrorCode::Unsupported);
             }

@@ -99,6 +99,15 @@ Built in M3:
 | `trash` | 1.10 | the freedesktop trash specification |
 | `reclaim` | 1.8–1.9 | the preview pipeline and the category registry |
 
+Built in M4:
+
+| Module | Task | Contents |
+| --- | --- | --- |
+| `reclaim::caches` | 1.11 | application caches, attributed to the apps that own them |
+| `reclaim::logs` | 1.12 | rotated logs and the systemd journal |
+| `reclaim::packages` | 1.13 | package manager caches, cleaned through the owning tool |
+| `tests/reclaim_accuracy` | 1.14 | the specification's 2% criterion, verified end to end |
+
 ## How "nothing bypasses preview" is enforced
 
 Not by convention, and not by a code review rule that erodes. `reclaim::execute` requires a
@@ -116,6 +125,36 @@ Two guards then run again **at execution time**, per item:
 
 That second guard is also what makes decision D6 safe: the explorer may serve a cached tree because
 stale data can misinform a reader but cannot misdirect a deletion.
+
+## The privileged surface, and how it is kept small
+
+The helper's operation enum is the security boundary, and M4 grew it from two operations to seven.
+The rule that makes that growth safe:
+
+> **An operation carries its category, and the helper independently re-derives which roots that
+> category owns.**
+
+`ReclaimFile { kind: RotatedLog, path: "/etc/shadow" }` is refused, because `/etc` is not a root of
+any category. The unprivileged side cannot widen its own access by mislabelling a path — which is
+specification invariant 4 ("`Unlink` is only emitted for a path inside its category's declared
+root") enforced where it matters rather than trusted from the caller.
+
+Three further properties fall out of the same design:
+
+- **An active log cannot be deleted at all.** The helper checks the *filename shape*, so
+  `/var/log/syslog` is refused while `/var/log/syslog.1.gz` is not. Deleting a file a running
+  service holds open frees nothing until it restarts and breaks its logging meanwhile. The policy
+  check runs before any filesystem access, so the refusal does not depend on the file existing —
+  an earlier version returned `NotFound` on journald-only systems, making the guard's behaviour vary
+  by distribution.
+- **No caller-supplied text reaches a root command line.** `ReclaimMethod::PackageManager` carries
+  a `Manager` enum, not a command string; `JournalVacuum` carries a number, not a limit string. The
+  argument vectors are fixed inside the helper.
+- **Destructive operations are audited distinctly** from reads. An audit trail whose deletions look
+  like its reads is not much of an audit trail.
+
+One privileged session is opened per *batch*, not per item — Stacer re-ran every command under
+`pkexec`, so toggling five services meant five dialogs.
 
 ## The report checks its own arithmetic
 

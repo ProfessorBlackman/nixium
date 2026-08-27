@@ -222,15 +222,93 @@ impl Safety {
     }
 }
 
+/// A category of reclaimable system file.
+///
+/// Each names a fixed set of roots inside the helper. Adding a variant means widening the privileged
+/// surface, and belongs in the same review as the feature that needs it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ReclaimKind {
+    /// A package manager's downloaded-package cache.
+    PackageCache,
+    /// A **rotated** log. Never an active one: the helper checks the filename shape, so a live log
+    /// cannot be deleted through this operation even by a caller that asks for it.
+    RotatedLog,
+    /// A crash dump under `/var/crash`.
+    CrashDump,
+}
+
+impl ReclaimKind {
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::PackageCache => "package_cache",
+            Self::RotatedLog => "rotated_log",
+            Self::CrashDump => "crash_dump",
+        }
+    }
+}
+
+/// Package managers whose cache the helper can clean.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum Manager {
+    Apt,
+    Dnf,
+    Pacman,
+    Zypper,
+}
+
+impl Manager {
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Apt => "apt",
+            Self::Dnf => "dnf",
+            Self::Pacman => "pacman",
+            Self::Zypper => "zypper",
+        }
+    }
+}
+
+/// How much journal to keep. Typed rather than a string so nothing caller-supplied is interpolated
+/// into a command line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "by", rename_all = "snake_case")]
+#[ts(export)]
+pub enum VacuumLimit {
+    /// Keep at most this many mebibytes.
+    Size {
+        #[ts(type = "number")]
+        mebibytes: u64,
+    },
+    /// Keep at most this many days.
+    Age {
+        #[ts(type = "number")]
+        days: u64,
+    },
+}
+
 /// How space is actually reclaimed. Always prefers the owning tool over `unlink`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(tag = "method", rename_all = "snake_case")]
 #[ts(export)]
 pub enum ReclaimMethod {
     /// Delegate to the package manager: `apt-get clean`, `dnf clean packages`, and so on.
-    PackageManager { command: String },
-    /// `journalctl --vacuum-size=` or `--vacuum-time=`.
-    JournalVacuum { limit: String },
+    ///
+    /// Carries the manager as an **enum, not a command string**. The argument vector is fixed inside
+    /// the privileged helper, so there is no text here that could become part of a root command line.
+    PackageManager { manager: Manager },
+    /// Vacuum the journal, by size or by age. Typed for the same reason.
+    JournalVacuum { limit: VacuumLimit },
+    /// Delete one system file through the privileged helper.
+    ///
+    /// The `kind` travels with the path, and the helper independently re-derives which roots that
+    /// category owns and refuses anything outside them — so this cannot be used to delete an
+    /// arbitrary file even by a caller that constructs it deliberately.
+    SystemFile { kind: ReclaimKind, path: PathBuf },
     /// Drop a superseded snap revision.
     SnapRevision { package: String, revision: String },
     /// Prune container images or build caches.
@@ -732,10 +810,45 @@ mod tests {
         );
         assert!(
             ReclaimMethod::JournalVacuum {
-                limit: "500M".into()
+                limit: VacuumLimit::Size { mebibytes: 500 }
             }
             .is_irreversible(),
             "vacuuming the journal cannot be undone"
+        );
+        assert!(
+            ReclaimMethod::SystemFile {
+                kind: ReclaimKind::RotatedLog,
+                path: PathBuf::from("/var/log/x.1.gz")
+            }
+            .is_irreversible()
+        );
+    }
+
+    /// The privileged methods carry typed values, not text. If any of these becomes a `String`,
+    /// caller-supplied text can reach a root command line.
+    #[test]
+    fn privileged_methods_carry_no_free_form_text() {
+        // Constructing them requires an enum or a number — there is no string to smuggle.
+        let _ = ReclaimMethod::PackageManager {
+            manager: Manager::Apt,
+        };
+        let _ = ReclaimMethod::JournalVacuum {
+            limit: VacuumLimit::Age { days: 7 },
+        };
+        let _ = ReclaimMethod::SystemFile {
+            kind: ReclaimKind::PackageCache,
+            path: PathBuf::from("/var/cache/apt/archives/x.deb"),
+        };
+
+        // And the wire form keeps them typed rather than collapsing to text.
+        let json = serde_json::to_string(&ReclaimMethod::PackageManager {
+            manager: Manager::Pacman,
+        })
+        .unwrap();
+        assert!(json.contains("\"pacman\""), "{json}");
+        assert!(
+            !json.contains("-Sc"),
+            "no command text should cross the wire: {json}"
         );
     }
 
