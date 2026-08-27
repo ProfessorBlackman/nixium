@@ -87,6 +87,7 @@ in `PLAN.md` and `ARCHITECTURE.md`; this is the index.
 | --- | --- |
 | `cow` parsers for btrfs, ZFS, LVM | This machine is ext4 with none of those tools; parsers are written to documented output formats and have never seen real output |
 | `pkg::flatpak` runtime derivation | This machine has a flatpak installation with nothing installed in it |
-| The `pkexec` path | Every helper test spawns the binary directly. The real polkit path has never been exercised, and the helper now removes packages and snap revisions as root |
+| The `pkexec` path — **read operations verified** | Run for real on 2026-08-27 via `make install-helper && make helper-smoke`: helper starts as `uid=0`, protocol 4 handshake, an allow-listed read succeeds, `/etc/shadow` is refused, and three operations took **one** password prompt — `auth_admin_keep` working, which is the Stacer defect it exists to fix. The audit log landed at the root-owned `/var/log/nix/helper-audit.log`, world-readable so a user can inspect it and root-owned so they cannot edit it |
+| The helper's **destructive** operations | Still unexercised as root. `PackageManagerClean`, `JournalVacuum`, `ReclaimFile`, `RemovePackages` and `RemoveSnapRevision` have only ever run against a directly-spawned helper in tests. The safest first real test is `apt-get clean` — 985 MiB here, entirely regenerable |
 | Installing the growth-history systemd units | Would enable a daily job on the developer's own machine, which is not a side effect to create unasked. The unit text, orphan detection and the `nix snapshot` subcommand are all exercised; `systemctl enable` is not |
 | Dependency NOTICE attribution | Apache-2.0 §4(d); deferred to M9, recorded in `packaging/README.md` |

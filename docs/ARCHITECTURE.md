@@ -414,6 +414,36 @@ the helper **directly as the current user**, which exercises serialisation, disp
 rejection and auditing without root. The only path CI does not cover is escalation itself, which is
 a single `Command` invocation.
 
+### Verified against a real polkit prompt
+
+Run on 2026-08-27, installed as it ships — helper at `/usr/libexec/nix/nix-helper`, action at
+`/usr/share/polkit-1/actions/com.tlc.nix.policy`:
+
+```
+nix-helper: start version=0.1.0 protocol=4 uid=0
+nix-helper: ok id=1 op=ping
+nix-helper: ok id=2 op=read_text_file
+nix-helper: denied id=3 op=read_text_file code=helper_rejected
+```
+
+Four things that had until then only been reasoned about:
+
+1. The helper really runs as **root** through `pkexec`, and reports `uid=0` back across the handshake
+   so the client can confirm it rather than assume it.
+2. **Three operations, one password prompt.** That is `auth_admin_keep`, and it is the whole point of
+   the single-session design — Stacer re-ran `pkexec` per action, so toggling five services meant five
+   dialogs.
+3. The exact-path allow-list **refused `/etc/shadow`**. That check was a directory-prefix test in
+   Phase 0 and would have permitted it; see [issues §01](issues/01-privilege-and-security.md).
+4. The audit log went to the root-owned `/var/log/nix/helper-audit.log` rather than the per-user
+   fallback — world-readable, so a user can read what was done in their name, and root-owned, so they
+   cannot rewrite it.
+
+**Still unexercised:** every *destructive* operation. `PackageManagerClean`, `JournalVacuum`,
+`ReclaimFile`, `RemovePackages` and `RemoveSnapRevision` have only run against a directly-spawned
+helper in tests, which does not exercise `pkexec`, the session, or the re-derivation under root. Reads
+are the easy half.
+
 ## Generated TypeScript
 
 Rust types that cross the IPC boundary derive `ts_rs::TS`, and `.cargo/config.toml` — at the
