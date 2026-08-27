@@ -41,6 +41,10 @@ pub enum Capability {
     Pkexec,
     /// btrfs userspace tools, needed for honest accounting on btrfs (`STO-17`).
     BtrfsTools,
+    /// The Docker CLI (`STO-13`). Presence only — whether the daemon can actually be reached without
+    /// privilege is a separate question the category asks for itself, because it depends on group
+    /// membership rather than on anything installed.
+    Docker,
 }
 
 impl Capability {
@@ -58,6 +62,7 @@ impl Capability {
             Self::Journalctl,
             Self::Pkexec,
             Self::BtrfsTools,
+            Self::Docker,
         ]
     }
 
@@ -75,6 +80,7 @@ impl Capability {
             Self::Journalctl => "journalctl",
             Self::Pkexec => "pkexec",
             Self::BtrfsTools => "btrfs",
+            Self::Docker => "docker",
         }
     }
 
@@ -92,6 +98,7 @@ impl Capability {
             Self::Journalctl => "the systemd journal",
             Self::Pkexec => "polkit (pkexec)",
             Self::BtrfsTools => "btrfs tools",
+            Self::Docker => "Docker",
         }
     }
 }

@@ -371,6 +371,33 @@ impl Manager {
     }
 }
 
+/// What a container prune covers. `STO-13`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum PruneScope {
+    /// Layers belonging to no tagged image. The conservative default.
+    DanglingImages,
+    /// Every image no container uses — much larger, and means re-pulling.
+    UnusedImages,
+    /// Containers that have exited.
+    StoppedContainers,
+    /// The builder's layer cache.
+    BuildCache,
+}
+
+impl PruneScope {
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::DanglingImages => "dangling_images",
+            Self::UnusedImages => "unused_images",
+            Self::StoppedContainers => "stopped_containers",
+            Self::BuildCache => "build_cache",
+        }
+    }
+}
+
 /// How much journal to keep. Typed rather than a string so nothing caller-supplied is interpolated
 /// into a command line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -425,8 +452,17 @@ pub enum ReclaimMethod {
     /// Carries nothing at all: the command is fixed and the decision of what qualifies is flatpak's.
     /// One entry covers the whole operation, because that is the granularity flatpak offers.
     FlatpakUnused,
-    /// Prune container images or build caches.
-    ContainerPrune { scope: String },
+    /// Prune container images, stopped containers or build caches. `STO-13`.
+    ///
+    /// The scope is an **enum, not a string**, for the same reason [`Manager`] is: the argument vector
+    /// is fixed against the scope, so no caller-supplied text becomes part of a command line.
+    ContainerPrune { scope: PruneScope },
+    /// Remove one named container volume. `STO-13`.
+    ///
+    /// Volumes hold data nothing else does — a database's contents live in one — so they are `Risky`,
+    /// never bulk-selectable, and removed one at a time. The name is checked against the set of
+    /// unused volumes the container runtime itself reports before anything is run.
+    ContainerVolume { name: String },
     /// Empty a volume's trash.
     TrashEmpty { volume: PathBuf },
     /// Move to trash — **the default for user files**, because it is reversible.
@@ -469,7 +505,8 @@ impl ReclaimMethod {
             | Self::Packages { .. }
             | Self::SnapRevision { .. }
             | Self::FlatpakUnused
-            | Self::ContainerPrune { .. } => false,
+            | Self::ContainerPrune { .. }
+            | Self::ContainerVolume { .. } => false,
         }
     }
 }

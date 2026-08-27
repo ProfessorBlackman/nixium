@@ -315,7 +315,7 @@ with a reclaim method (§5.5 invariant 3); user exclusions survive a rescan.
 | STO-10 | Package storage attribution | P0 |
 | STO-11 | Removable system packages | P0 |
 | STO-12 | Snap & flatpak revisions | P1 |
-| STO-13 | Container & image storage | P1 |
+| STO-13 | Container & image storage | P1 — done |
 | STO-14 | Developer build artifacts | P1 — done |
 | STO-15 | Large files & duplicates | P1 |
 | STO-16 | Growth history | P2 |
@@ -341,6 +341,20 @@ tooling.
 **STO-13 Container & image storage.** Docker/podman images, stopped containers, dangling layers
 and build caches, with a prune preview. Volumes are `Risky` and never bulk-selected.
 *Accepts:* preview totals match `system df`; no volume is removed without per-item confirmation.
+
+**Met.** On the development machine `docker system df` reports 17.5 GB of reclaimable images, 3.04 GB
+of build cache, 1.49 GB of unused volumes and 94 kB of stopped containers. Each prune quotes Docker's
+own reclaimable figure, and every unused volume is its own `Risky` candidate rather than a single
+"prune volumes" button — which is what per-item confirmation means in practice.
+
+Docker formats sizes with Go's `units.HumanSize`, which is **decimal**: its `GB` is 10⁹. Verified
+rather than assumed — `docker images` reports an image as `314MB` where `docker image inspect` gives
+`314319387` bytes. Reading it as binary would overstate by 7%, more than three times the tolerance.
+This is the second tool whose own units were the trap; APT was the first.
+
+Docker is reached as the user's own account via `docker` group membership. Where that is absent the
+daemon needs root, and rather than ship a privileged Docker path that has never been exercised the
+category reports itself unavailable and explains why — the same line drawn for `ostree` in STO-12.
 
 **STO-14 Developer build artifacts.** `target/`, `node_modules/`, `.venv`, `__pycache__`,
 `build/`, plus package-manager caches for cargo, npm/pnpm, pip and Go — recognised by marker

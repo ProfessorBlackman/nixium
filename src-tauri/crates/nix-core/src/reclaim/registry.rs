@@ -120,6 +120,8 @@ impl Registry {
         // package stores on the development machine.
         registry.register(Box::new(super::BuildArtifactCategory::new()));
         registry.register(Box::new(super::PackageStoreCategory::new()));
+        // `STO-13`: 17.5 GB of images and 3 GB of build cache on the development machine.
+        registry.register(Box::new(super::ContainerCategory::new()));
         registry
     }
 

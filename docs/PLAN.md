@@ -218,7 +218,16 @@ the cached scan instead of walking `~/.cache` and the package stores, which are 
 The first attempt at that made it *slower* (7.5 s to 11 s) by reloading and deserialising the whole
 cached tree once per candidate instead of once per category.
 
-Remaining: STO-13, STO-15, STO-16.
+**STO-13 is done.** 17.5 GB of reclaimable images, 3.04 GB of build cache and 1.49 GB of unused
+volumes on the development machine. Volumes are the one `Risky` rating in the storage half of nix and
+get one candidate each — a volume holds the only copy of what is in it, so there is no "prune volumes"
+button to press by accident.
+
+Docker's sizes are powers of ten, verified against `docker image inspect` rather than assumed. That is
+the second tool to do this after APT, which suggests treating any human-formatted size from an external
+tool as decimal-until-proven.
+
+Remaining: STO-15, STO-16.
 
 Note also that §4's parallelisation advice no longer applies: this is a solo project, which is why
 **task 0.9 was completed within Phase 0 rather than deferred** — see §5.2 for why M2 is nonetheless

@@ -31,6 +31,7 @@
 
 mod artifacts;
 mod caches;
+mod containers;
 mod kernels;
 mod logs;
 mod packages;
@@ -39,6 +40,7 @@ mod snaps;
 
 pub use artifacts::{BuildArtifactCategory, PackageStoreCategory};
 pub use caches::AppCacheCategory;
+pub use containers::ContainerCategory;
 pub use kernels::{OldKernelCategory, ResidualConfigCategory};
 pub use logs::{JournalCategory, LogCategory};
 pub use packages::PackageCacheCategory;
@@ -708,6 +710,33 @@ fn reclaim_one(item: &PreviewItem, guard: &Guard, elevation: &mut Elevation) -> 
         ReclaimMethod::FlatpakUnused => {
             privileged(item, elevation, helper::Op::FlatpakUninstallUnused)
         }
+        // `STO-13`. Unprivileged: nix talks to Docker as the user, and refuses to run privileged
+        // Docker commands it has no way to exercise. So these do not go through the helper.
+        ReclaimMethod::ContainerPrune { scope } => match containers::prune(*scope) {
+            Ok(bytes) => ItemOutcome::Reclaimed {
+                id: item.id,
+                path: item.path.clone(),
+                // What Docker reports it reclaimed, not what the preview estimated.
+                bytes,
+            },
+            Err(error) => ItemOutcome::Failed {
+                id: item.id,
+                path: item.path.clone(),
+                error,
+            },
+        },
+        ReclaimMethod::ContainerVolume { name } => match containers::remove_volume(name) {
+            Ok(bytes) => ItemOutcome::Reclaimed {
+                id: item.id,
+                path: item.path.clone(),
+                bytes,
+            },
+            Err(error) => ItemOutcome::Failed {
+                id: item.id,
+                path: item.path.clone(),
+                error,
+            },
+        },
 
         // Methods that arrive with a later category. Refusing loudly is correct for something
         // nothing has implemented yet.
@@ -1515,7 +1544,8 @@ mod tests {
                 "snap_revisions",
                 "flatpak_unused",
                 "build_artifacts",
-                "package_stores"
+                "package_stores",
+                "containers"
             ],
         );
         // Trash stays first: it is the category the pipeline was proven against, and the one whose
@@ -1570,7 +1600,10 @@ mod tests {
                 limit: VacuumLimit::Size { mebibytes: 200 },
             },
             ReclaimMethod::ContainerPrune {
-                scope: "images".into(),
+                scope: crate::space::PruneScope::BuildCache,
+            },
+            ReclaimMethod::ContainerVolume {
+                name: "data".into(),
             },
         ] {
             assert!(
@@ -1706,10 +1739,8 @@ mod tests {
             label: "x".into(),
             bytes: 4,
             safety: Safety::Safe,
-            // A method that genuinely has no implementation yet: it arrives with STO-13.
-            method: ReclaimMethod::ContainerPrune {
-                scope: "images".into(),
-            },
+            // A method with no implementation: nothing emits `Unlink`, and the dispatch refuses it.
+            method: ReclaimMethod::Unlink { path: file.clone() },
             cost: None,
             category: "test".into(),
             reclaimable: Reclaimable::Exact,
