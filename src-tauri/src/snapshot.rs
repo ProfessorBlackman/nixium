@@ -13,16 +13,88 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Take one sample and exit, when invoked as `nix snapshot`.
+/// Handle a subcommand and exit, when invoked with one.
 ///
 /// Returns the process exit code to use, or `None` when this is an ordinary launch.
 pub(crate) fn run_if_requested() -> Option<i32> {
     let mut args = std::env::args().skip(1);
-    if args.next().as_deref() != Some("snapshot") {
-        return None;
+    match args.next().as_deref() {
+        Some("snapshot") => Some(take_sample(std::env::args().any(|a| a == "--quiet"))),
+        Some("helper-probe") => Some(probe_helper()),
+        _ => None,
     }
-    let quiet = std::env::args().any(|a| a == "--quiet");
-    Some(take_sample(quiet))
+}
+
+/// Start the helper under `pkexec`, complete a handshake, read one allow-listed file, and exit.
+///
+/// The same thing the About view's button does, reachable from a terminal — which matters because
+/// this is the one path the test suite cannot cover. Every helper test spawns the binary directly, so
+/// `pkexec` itself, the polkit policy's wording, and `auth_admin_keep`'s one-prompt-per-session are
+/// only ever exercised by a person.
+///
+/// Run from a terminal, `pkexec` uses its own text agent, so this needs no desktop session.
+fn probe_helper() -> i32 {
+    use nix_core::helper::{Client, Op, OpResult, Transport};
+
+    let transport = match Transport::production() {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("nix helper-probe: {e}");
+            if let Some(remedy) = e.remedy {
+                eprintln!("  {remedy}");
+            }
+            return 1;
+        }
+    };
+
+    println!("nix helper-probe: starting the helper under pkexec — expect one prompt");
+    let mut client = match Client::connect(&transport) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("nix helper-probe: {e}");
+            if let Some(remedy) = e.remedy {
+                eprintln!("  {remedy}");
+            }
+            return 1;
+        }
+    };
+
+    println!("  handshake ok");
+    println!("  helper uid: {}", client.helper_uid());
+    println!("  elevated:   {}", client.is_elevated());
+
+    // A read the helper's allow-list permits, so the whole request/response path is exercised.
+    match client.request(&Op::ReadTextFile {
+        path: std::path::PathBuf::from("/proc/sys/kernel/osrelease"),
+    }) {
+        Ok(OpResult::Text { content }) => println!("  kernel:     {}", content.trim()),
+        Ok(other) => {
+            eprintln!("nix helper-probe: unexpected answer {other:?}");
+            return 1;
+        }
+        Err(e) => {
+            eprintln!("nix helper-probe: {e}");
+            return 1;
+        }
+    }
+
+    // And one the allow-list must refuse, so the boundary is shown working rather than assumed.
+    match client.request(&Op::ReadTextFile {
+        path: std::path::PathBuf::from("/etc/shadow"),
+    }) {
+        Err(e) => println!("  refused /etc/shadow, as it must: {e}"),
+        Ok(_) => {
+            eprintln!("nix helper-probe: FAILED — the helper read /etc/shadow");
+            return 1;
+        }
+    }
+
+    if !client.is_elevated() {
+        eprintln!("nix helper-probe: the helper is not running as root");
+        return 1;
+    }
+    println!("nix helper-probe: ok");
+    0
 }
 
 /// Scan the home directory and record one sample.
