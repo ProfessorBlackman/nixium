@@ -31,7 +31,7 @@ use nix_core::op::{Completion, OperationId, Progress};
 use nix_core::protect::Refusal;
 use nix_core::reclaim::{Preview, Report, Ticket};
 use nix_core::settings::Settings;
-use nix_core::{fs as nixfs, scan};
+use nix_core::{find, fs as nixfs, scan};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -164,6 +164,95 @@ pub(crate) const EVENT_SCAN_DONE: &str = "scan://done";
 pub(crate) fn scan_cached(path: PathBuf, max_depth: Option<usize>) -> Option<CachedScan> {
     let options = scan::Options::new(path).max_depth(max_depth.or(Some(12)));
     Cache::discover().ok()?.load_for(&options)
+}
+
+/// The largest files in the cached scan. `STO-15`.
+///
+/// A projection, not a search. Stacer made the user fill in a `find` dialogue — path, pattern, size,
+/// unit — and then listed the results without their sizes. The scan already knows.
+#[tauri::command]
+pub(crate) fn largest_files(
+    path: PathBuf,
+    limit: Option<usize>,
+) -> Vec<nix_core::space::SpaceEntry> {
+    let Some(cached) = Cache::discover().ok().and_then(|c| c.load(&path)) else {
+        return Vec::new();
+    };
+    find::largest_files(&cached.result.tree, limit.unwrap_or(100))
+}
+
+/// Event carrying a finished duplicate search.
+pub(crate) const EVENT_DUPLICATES_DONE: &str = "duplicates://done";
+
+/// Search the cached scan for duplicate content. `STO-15`.
+///
+/// Returns immediately; the search runs on its own thread, reports progress on `op://progress`, and
+/// delivers its result on `duplicates://done`. Hashing is staged and cancellable between chunks, so a
+/// stop does not wait for a gigabyte to finish.
+#[tauri::command]
+pub(crate) fn duplicates_find(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: PathBuf,
+    minimum_bytes: Option<u64>,
+) -> OperationId {
+    let (id, token) = state.operations.start();
+    let minimum = minimum_bytes.unwrap_or(find::MIN_DUPLICATE_BYTES);
+
+    std::thread::spawn(move || {
+        let cached = Cache::discover().ok().and_then(|c| c.load(&path));
+        let Some(cached) = cached else {
+            let completion = Completion::Failed {
+                id,
+                error: AppError::new(
+                    ErrorCode::Unsupported,
+                    "There is no scan to search for duplicates in.",
+                )
+                .with_remedy("Scan a directory first, then look for duplicates in the result."),
+            };
+            if let Err(e) = app.emit(EVENT_DONE, &completion) {
+                tracing::warn!(error = %e, "could not emit duplicate completion");
+            }
+            return;
+        };
+
+        let progress_handle = app.clone();
+        let outcome = find::duplicates(&cached.result.tree, minimum, &token, move |done, total| {
+            let progress = Progress::new(id, done)
+                .with_total(total)
+                .with_message(format!("hashed {done} of {total} candidates"));
+            if let Err(e) = progress_handle.emit(EVENT_PROGRESS, &progress) {
+                tracing::warn!(error = %e, "could not emit duplicate progress");
+            }
+        });
+
+        let completion = match outcome {
+            Ok((groups, stats)) => {
+                let report = find::DuplicateReport {
+                    recoverable: groups.iter().map(|g| g.recoverable).sum(),
+                    cancelled: token.is_cancelled(),
+                    groups,
+                    stats,
+                };
+                let cancelled = report.cancelled;
+                if let Err(e) = app.emit(EVENT_DUPLICATES_DONE, &report) {
+                    tracing::warn!(error = %e, "could not emit duplicate report");
+                }
+                if cancelled {
+                    Completion::Cancelled { id }
+                } else {
+                    Completion::Done { id }
+                }
+            }
+            Err(error) if !error.is_fault() => Completion::Cancelled { id },
+            Err(error) => Completion::Failed { id, error },
+        };
+        if let Err(e) = app.emit(EVENT_DONE, &completion) {
+            tracing::warn!(error = %e, "could not emit duplicate completion");
+        }
+    });
+
+    id
 }
 
 /// Forget cached scans. Offered because a cache the user cannot clear is a cache they cannot trust.

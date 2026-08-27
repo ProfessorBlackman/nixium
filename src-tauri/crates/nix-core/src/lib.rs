@@ -47,6 +47,7 @@ pub mod cache;
 pub mod caps;
 pub mod cow;
 pub mod error;
+pub mod find;
 pub mod fixture;
 pub mod fs;
 pub mod helper;

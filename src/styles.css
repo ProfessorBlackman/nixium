@@ -1066,3 +1066,59 @@ button.danger:hover:not(:disabled) {
 /* Trashed is not freed. Coloured as a caution rather than a success, because the space has not
    actually come back until the trash is emptied. */
 .outcome-trashed .outcome-tag { background: var(--review-soft); color: var(--review); }
+
+/* Find: largest files and duplicate sets. Monospaced paths, right-aligned sizes, because both are
+   read by scanning down a column. */
+.find-list,
+.dup-list {
+  list-style: none;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.8125rem;
+}
+
+.find-list li {
+  display: grid;
+  grid-template-columns: 6.5rem minmax(0, 1fr);
+  gap: 0.6rem;
+  align-items: baseline;
+  padding: 0.15rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.find-list code,
+.dup-list code {
+  display: block;
+  font-family: var(--font-mono);
+  word-break: break-all;
+  color: var(--ink-mute);
+}
+
+.find-bytes {
+  font-family: var(--font-mono);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.dup-list {
+  gap: 0.6rem;
+}
+
+.dup-list li {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--surface-alt);
+}
+
+.dup-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: baseline;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}

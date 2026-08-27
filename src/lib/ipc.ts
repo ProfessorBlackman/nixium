@@ -28,9 +28,10 @@ import type { Filesystem } from "../bindings/Filesystem";
 import type { ScanResult } from "../bindings/ScanResult";
 import type { Settings } from "../bindings/Settings";
 import type { Capabilities } from "../bindings/Capabilities";
+import type { DuplicateReport } from "../bindings/DuplicateReport";
 import type { SpaceEntry } from "../bindings/SpaceEntry";
 
-export type { AppError, CachedScan, Completion, Diagnostics, Filesystem, Preview, PreviewItem, Progress, Refusal, Report, ScanResult, Settings, SpaceEntry, Ticket };
+export type { AppError, CachedScan, Completion, Diagnostics, DuplicateReport, Filesystem, Preview, PreviewItem, Progress, Refusal, Report, ScanResult, Settings, SpaceEntry, Ticket };
 export type { Capabilities };
 export type { CowSnapshot };
 export type { CowKind } from "../bindings/CowKind";
@@ -52,6 +53,8 @@ export type { Theme } from "../bindings/Theme";
 export const EVENT_PROGRESS = "op://progress";
 export const EVENT_DONE = "op://done";
 export const EVENT_SCAN_DONE = "scan://done";
+/** A finished duplicate search. `STO-15`. */
+export const EVENT_DUPLICATES_DONE = "duplicates://done";
 
 /** Whether a rejected value is one of our typed errors rather than an unexpected throw. */
 export function isAppError(value: unknown): value is AppError {
@@ -115,6 +118,10 @@ export const api = {
   protectedPaths: () => call<Refusal[]>("protected_paths"),
   scanCached: (path: string, maxDepth?: number) =>
     call<CachedScan | null>("scan_cached", { path, maxDepth: maxDepth ?? null }),
+  largestFiles: (path: string, limit?: number) =>
+    call<SpaceEntry[]>("largest_files", { path, limit: limit ?? null }),
+  duplicatesFind: (path: string, minimumBytes?: number) =>
+    call<OperationId>("duplicates_find", { path, minimumBytes: minimumBytes ?? null }),
   scanCacheClear: () => call<void>("scan_cache_clear"),
   scanCacheSize: () => call<number>("scan_cache_size"),
   scanStart: (path: string, maxDepth?: number, crossFilesystems?: boolean) =>
@@ -129,6 +136,11 @@ export const api = {
   /** Phase 0 scaffolding: fail on purpose, to exercise the error surface. */
   demoFailure: (code: string) => call<void>("demo_failure", { code }),
 };
+
+/** Subscribe to finished duplicate searches. */
+export function onDuplicatesDone(handler: (r: DuplicateReport) => void): Promise<UnlistenFn> {
+  return listen<DuplicateReport>(EVENT_DUPLICATES_DONE, (event) => handler(event.payload));
+}
 
 /** Subscribe to progress for all operations. */
 export function onProgress(handler: (p: Progress) => void): Promise<UnlistenFn> {

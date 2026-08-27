@@ -46,6 +46,8 @@ pub fn run() {
             commands::filesystems,
             commands::scan_start,
             commands::scan_cached,
+            commands::largest_files,
+            commands::duplicates_find,
             commands::scan_cache_clear,
             commands::scan_cache_size,
             commands::home_directory,
