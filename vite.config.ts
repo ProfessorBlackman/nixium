@@ -11,6 +11,16 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(() => ({
   plugins: [react()],
 
+  // Pre-bundle the Tauri API up front.
+  //
+  // Every view is lazily imported, so these are only reached after the first paint. Vite therefore
+  // discovered them mid-session, re-ran its optimiser and reloaded the page — the
+  // "optimized dependencies changed. reloading" line on a first `tauri dev`. Naming them here makes
+  // the pre-bundle deterministic instead of dependent on which view a developer happens to open first.
+  optimizeDeps: {
+    include: ["@tauri-apps/api/core", "@tauri-apps/api/event"],
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors

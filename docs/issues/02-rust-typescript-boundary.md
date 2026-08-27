@@ -103,7 +103,42 @@ field.
 
 ---
 
-## 6. `u64` crosses to TypeScript as `bigint`
+## 6. A build warning nobody could act on, on every single build
+
+**Phase 0, fixed in M5** · **Friction** · **Found by** the user running `pnpm tauri dev` and reading the output
+
+`OperationId` and `Ticket` are `u64` newtypes that cross the boundary as bare numbers, spelled with
+`#[serde(transparent)]` and `#[ts(export, type = "number")]`. ts-rs's attribute parser does not
+understand `transparent`, so every build printed:
+
+```
+warning: failed to parse serde attribute
+  | transparent
+  = note: ts-rs failed to parse this attribute. It will be ignored.
+```
+
+Twice, on every compile, for months. The behaviour was correct — the wire type is stated explicitly
+right underneath — and a comment said as much, so it was noise.
+
+Which is the problem. I had been filtering it out of my own command output with `grep -E "^error"` for
+the whole project, and that habit hides real warnings too. It took someone else reading a build log to
+raise it.
+
+**Resolved** by deleting the attribute, which turned out to be **redundant**: a single-field newtype
+already serialises as its inner value in JSON. Verified before and after rather than assumed —
+`OperationId(7)` encodes to `7` and `{"id":42}` nested, identically both ways — and the generated
+TypeScript is byte-for-byte unchanged.
+
+**Guard.** `an_operation_id_is_a_bare_number_on_the_wire` and `a_ticket_is_a_bare_number_on_the_wire`
+assert the encoding, because "redundant" is exactly the sort of claim that should not live only in a
+comment when the cost of being wrong is every id on the wire changing shape.
+
+After this the workspace builds with **zero warnings**, which is the state that makes the next one
+worth reading.
+
+---
+
+## 7. `u64` crosses to TypeScript as `bigint`
 
 **Phase 0** · **Friction** · **Found by** the first generated binding
 

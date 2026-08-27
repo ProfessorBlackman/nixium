@@ -66,7 +66,8 @@ use crate::trash;
 /// The only way to obtain one is [`preview`]. It carries the identity of the set it describes, so
 /// [`execute`] can refuse a selection the user was never shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(transparent)]
+// No `serde(transparent)`: a single-field newtype already serialises as its inner value in JSON, and
+// the attribute made ts-rs warn on every build without changing anything. See `op::OperationId`.
 #[ts(export, type = "number")]
 pub struct Ticket(u64);
 
@@ -853,6 +854,21 @@ fn privileged(item: &PreviewItem, elevation: &mut Elevation, op: helper::Op) -> 
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    /// A ticket travels as a bare number, for the same reason and with the same history as
+    /// [`crate::op::OperationId`]: `#[serde(transparent)]` was redundant and made ts-rs warn on every
+    /// build. Asserted rather than assumed, because the whole preview-to-execute handshake is carried
+    /// by this value.
+    #[test]
+    fn a_ticket_is_a_bare_number_on_the_wire() {
+        let ticket = Ticket::mint();
+        let encoded = serde_json::to_string(&ticket).unwrap();
+        assert!(
+            encoded.chars().all(|c| c.is_ascii_digit()),
+            "a ticket must be a bare number, got {encoded}"
+        );
+        assert_eq!(serde_json::from_str::<Ticket>(&encoded).unwrap(), ticket);
+    }
     use crate::trash::TrashDir;
 
     struct Sandbox {

@@ -1,6 +1,6 @@
 # What generalises
 
-Forty-six entries is enough to see structure. This is the part worth re-reading.
+Forty-seven entries is enough to see structure. This is the part worth re-reading.
 
 ---
 
@@ -172,7 +172,7 @@ it.
 
 ## 9. Encode the guard in the toolchain, not in memory
 
-Ten of forty-six entries were caught by a gate. Those cost minutes. The ones that cost hours were
+Ten of forty-seven entries were caught by a gate. Those cost minutes. The ones that cost hours were
 caught by reasoning, and the two worst were nearly not caught at all.
 
 Gates currently in force:
@@ -197,7 +197,25 @@ raising the ceiling"*, because a bare size assertion invites raising the number.
 
 ---
 
-## 10. Verify that the guard fires
+## 10. Do not filter your own build output
+
+For most of this project I read compiler output through `grep -E "^error"`, because the interesting
+line is usually an error and the rest is volume. The workspace was printing two ts-rs warnings on every
+single compile, and I never saw them. It took the user running `pnpm tauri dev` and reading the log to
+raise it.
+
+The warnings turned out to be harmless — and redundant, which meant they were free to remove. That is
+the worst possible outcome: months of a signal being trained out because it was never actionable, when
+one minute would have made it actionable *and* silenced it.
+
+**Generalisation.** A filter on build output is a decision to stop reading a channel. Check the
+unfiltered output periodically, and treat a warning that cannot be acted on as a bug in its own right —
+because the real cost is not the warning, it is that the next one will not be read either. Zero
+warnings is the state that makes a warning meaningful.
+
+---
+
+## 11. Verify that the guard fires
 
 Twice a guard was written and then confirmed by deliberately breaking the code:
 
@@ -219,7 +237,7 @@ takes a minute and it is the only evidence the test works.
 
 ---
 
-## 11. When a test fails unexpectedly, read the code before changing the test
+## 12. When a test fails unexpectedly, read the code before changing the test
 
 `candidates_are_ordered_largest_first` failed and looked like a comparator bug. It was not — the
 category was reaching for a hardcoded path rather than the one it had been given, so under test it

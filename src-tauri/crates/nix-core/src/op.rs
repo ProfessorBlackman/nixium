@@ -21,8 +21,10 @@ use crate::error::{AppError, Result};
 
 /// Identifies a running operation across the IPC boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
-#[serde(transparent)]
-// ts-rs does not understand `serde(transparent)`, so the wire type is stated explicitly.
+// A single-field newtype is *already* transparent in JSON: serde emits the inner value, and
+// `serde(transparent)` only restated that. It was removed because ts-rs's attribute parser does not
+// understand it and warned on every build — and a warning nobody can act on is a warning everyone
+// stops reading. The wire format is asserted by a test rather than left to this comment.
 #[ts(export, type = "number")]
 pub struct OperationId(pub u64);
 
@@ -240,6 +242,37 @@ impl Registry {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    /// # Regression
+    ///
+    /// `OperationId` and `Ticket` cross the IPC boundary as bare numbers, declared to TypeScript as
+    /// `number`. That used to be spelled with `#[serde(transparent)]`, which ts-rs cannot parse and
+    /// warned about on every single build — so the attribute was removed, having been redundant: a
+    /// single-field newtype already serialises as its inner value in JSON.
+    ///
+    /// "Redundant" is the kind of claim that should not live only in a comment, because the cost of
+    /// being wrong is every id on the wire changing shape. This asserts it.
+    #[test]
+    fn an_operation_id_is_a_bare_number_on_the_wire() {
+        assert_eq!(serde_json::to_string(&OperationId(7)).unwrap(), "7");
+        assert_eq!(
+            serde_json::from_str::<OperationId>("7").unwrap(),
+            OperationId(7)
+        );
+
+        // And nested in a struct, which is how it actually travels.
+        #[derive(serde::Serialize)]
+        struct Wrapper {
+            id: OperationId,
+        }
+        assert_eq!(
+            serde_json::to_string(&Wrapper {
+                id: OperationId(42)
+            })
+            .unwrap(),
+            r#"{"id":42}"#
+        );
+    }
 
     #[test]
     fn ids_are_unique_and_monotonic() {

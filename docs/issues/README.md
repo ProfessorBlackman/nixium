@@ -42,7 +42,7 @@ says so plainly rather than implying one.
 | File | Covers | Entries |
 | --- | --- | --- |
 | [01-privilege-and-security.md](01-privilege-and-security.md) | the privileged helper's boundary | 3 |
-| [02-rust-typescript-boundary.md](02-rust-typescript-boundary.md) | generated bindings and type drift | 6 |
+| [02-rust-typescript-boundary.md](02-rust-typescript-boundary.md) | generated bindings and type drift | 7 |
 | [03-reclaim-pipeline.md](03-reclaim-pipeline.md) | preview, guards and execution | 6 |
 | [04-measurement-accuracy.md](04-measurement-accuracy.md) | sizes, and not overstating them | 7 |
 | [05-concurrency-and-performance.md](05-concurrency-and-performance.md) | rayon, cancellation, scan cost, memory, attribution | 11 |
@@ -51,7 +51,7 @@ says so plainly rather than implying one.
 | [08-documentation-accuracy.md](08-documentation-accuracy.md) | claims about Stacer that were not true | 4 |
 | [09-patterns.md](09-patterns.md) | what generalises, and what to do about it | — |
 
-Forty-six entries: **5 critical, 13 serious, 17 moderate, 11 friction**.
+Forty-seven entries: **5 critical, 13 serious, 17 moderate, 12 friction**.
 
 ## The tally by finding mechanism
 
@@ -64,6 +64,7 @@ Forty-six entries: **5 critical, 13 serious, 17 moderate, 11 friction**.
 | Writing a test and finding it disagreed with the code | 5 | Three were the test's fault, two the code's |
 | Verifying a documented claim against the source, or proofreading | 4 | Every Stacer claim re-checked turned out wrong |
 | An external tool refusing what was written | 1 | The artifact skill's CSS rule |
+| The user reading output I had been filtering | 1 | A build warning on every compile for months |
 
 Two rows are worth dwelling on.
 
