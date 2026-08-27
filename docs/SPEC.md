@@ -318,7 +318,7 @@ with a reclaim method (§5.5 invariant 3); user exclusions survive a rescan.
 | STO-13 | Container & image storage | P1 — done |
 | STO-14 | Developer build artifacts | P1 — done |
 | STO-15 | Large files & duplicates | P1 — done |
-| STO-16 | Growth history | P2 |
+| STO-16 | Growth history | P2 — done |
 | STO-17 | btrfs, LVM & ZFS awareness | **P0** |
 | STO-18 | Incremental rescan | ~~P1~~ superseded |
 | STO-19 | Bounded scan memory | **P0** — done |
@@ -419,6 +419,33 @@ indefensible. *Accepts:* history survives restarts; the timer job completes in s
 runs on battery; disabling removes the unit and deletes collected data; an orphaned unit from a
 previous version is detected at startup and repairable; gaps in the series are rendered as gaps,
 never interpolated (§P8).
+
+**Met, with one requirement superseded and one criterion qualified.**
+
+*Superseded:* the job was specified as "an *incremental* refresh against the existing scan cache,
+never a fresh walk". That came from STO-18, which measurement retired — the scan is now about twice as
+fast with bounded memory, so a full walk of this machine's home directory takes 28 s and buys a correct
+answer without a second code path and a staleness model to be wrong about.
+
+*Qualified:* "completes in seconds" is 33 s here for 5.4 million files, not the near-instant the
+incremental design implied. Under `Nice=19` with `IOSchedulingClass=idle`, once a day, that is a
+defensible cost — but it is seconds plural and worth saying so rather than leaving the impression of
+something quicker.
+
+Verified end to end by running `nix snapshot` twice as separate processes: 307.3 GiB recorded across
+5,366,515 files, **3.1 KiB per sample**, so the 400-sample cap bounds the file at about 1.2 MiB.
+
+Attribution needed work the specification did not anticipate. A scan leaves every entry
+`Category::Unknown` — the scanner measures and does not judge — so "category totals" was one number
+called unknown. `history::attribute` walks the tree top-down using the signals the reclaim categories
+establish, and its output sums **exactly** to the scan total and independently agrees with what those
+categories find: build artifacts 68.3 GiB against STO-14's 71.1, package caches 48.4 against 48.1,
+application caches 36.3 against 36.3.
+
+Not verified: installing the systemd units. Doing so enables a daily job on the developer's own
+machine, which is not a side effect to create without being asked, so the install path is exercised
+only through its unit text and orphan detection. Recorded beside `pkexec` in
+[issues/README.md](issues/README.md).
 
 **STO-17 btrfs, LVM & ZFS awareness.** **P0, not P1** — Fedora is Tier 1 and Fedora
 Workstation is btrfs by default, so wrong numbers here are wrong numbers on a Tier-1 default.

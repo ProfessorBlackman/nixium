@@ -51,6 +51,7 @@ pub mod find;
 pub mod fixture;
 pub mod fs;
 pub mod helper;
+pub mod history;
 pub mod logging;
 pub mod op;
 pub mod paths;
@@ -60,6 +61,7 @@ pub mod reclaim;
 pub mod scan;
 pub mod settings;
 pub mod space;
+pub mod timer;
 pub mod trash;
 pub mod watch;
 

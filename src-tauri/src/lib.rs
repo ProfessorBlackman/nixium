@@ -8,6 +8,7 @@
 //! crate instead. See `docs/ARCHITECTURE.md`.
 
 mod commands;
+mod snapshot;
 mod state;
 
 use tauri::Manager;
@@ -21,6 +22,15 @@ use state::AppState;
 /// all; [`nix_core::logging::is_initialised`] exists to assert we have not repeated that.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // `STO-16`: the growth-history timer's `ExecStart` is a subcommand of this same binary rather
+    // than a second artefact — two executables is two things to version, package and sign, and an
+    // `ExecStart` naming something that no longer exists is a job that fails silently every day.
+    //
+    // Handled before Tauri is touched, because this path must never open a window.
+    if let Some(code) = snapshot::run_if_requested() {
+        std::process::exit(code);
+    }
+
     let app_state = AppState::load();
     let (_log_guard, log_problem) = nix_core::logging::init(app_state.settings().log_level);
 
@@ -47,6 +57,14 @@ pub fn run() {
             commands::scan_start,
             commands::scan_cached,
             commands::largest_files,
+            commands::history_samples,
+            commands::history_series,
+            commands::history_growth,
+            commands::history_clear,
+            commands::history_snapshot_now,
+            commands::timer_state,
+            commands::timer_install,
+            commands::timer_uninstall,
             commands::duplicates_find,
             commands::scan_cache_clear,
             commands::scan_cache_size,

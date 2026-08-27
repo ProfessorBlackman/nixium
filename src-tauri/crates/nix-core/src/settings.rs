@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::error::{AppError, Cause, ErrorCode, IoContext, Result};
+use crate::error::{AppError, Cause, ErrorCode, Result};
 use crate::paths;
 
 /// Format version. Bump when a change is not backward-compatible, and add a migration.
@@ -206,19 +206,12 @@ impl Store {
         }
     }
 
-    /// Save atomically: write a sibling temporary file, fsync it, then rename over the target.
+    /// Save atomically.
     ///
-    /// The temporary lives in the *same directory* so the rename cannot cross a filesystem — which
-    /// is exactly the mistake Stacer's hosts editor made by staging in `/tmp` and moving to `/etc`,
-    /// turning an atomic replace into a copy and opening a symlink race.
+    /// The atomicity lives in [`crate::fs::write_atomically`], which is shared with growth history —
+    /// one implementation rather than one per caller, because a second copy is a second chance to
+    /// stage in the wrong directory and turn an atomic replace into a copy.
     pub fn save(&self, settings: &Settings) -> Result<()> {
-        let dir = self.path.parent().ok_or_else(|| {
-            AppError::internal("Settings path has no parent directory.").with_path(&self.path)
-        })?;
-        std::fs::create_dir_all(dir)
-            .doing("create the settings directory")
-            .map_err(|e| e.with_path(dir))?;
-
         let mut to_write = settings.clone();
         to_write.version = CURRENT_VERSION;
         let json = serde_json::to_string_pretty(&to_write).map_err(|e| {
@@ -227,31 +220,9 @@ impl Store {
             })
         })?;
 
-        let tmp = self
-            .path
-            .with_extension(format!("json.tmp.{}", std::process::id()));
-        {
-            use std::io::Write;
-            let mut f = std::fs::File::create(&tmp)
-                .doing("write your settings")
-                .map_err(|e| e.with_path(&tmp))?;
-            f.write_all(json.as_bytes())
-                .doing("write your settings")
-                .map_err(|e| e.with_path(&tmp))?;
-            f.write_all(b"\n")
-                .doing("write your settings")
-                .map_err(|e| e.with_path(&tmp))?;
-            // Durability before the rename, so a crash cannot leave an empty file in place.
-            f.sync_all()
-                .doing("write your settings")
-                .map_err(|e| e.with_path(&tmp))?;
-        }
-
-        std::fs::rename(&tmp, &self.path).map_err(|e| {
-            // Leave no debris behind if the rename failed.
-            std::fs::remove_file(&tmp).ok();
-            AppError::from_io(&e, "save your settings").with_path(&self.path)
-        })
+        let mut body = json.into_bytes();
+        body.push(b'\n');
+        crate::fs::write_atomically(&self.path, &body)
     }
 }
 

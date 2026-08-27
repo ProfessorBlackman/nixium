@@ -1122,3 +1122,49 @@ button.danger:hover:not(:disabled) {
   font-weight: 600;
   margin-bottom: 0.25rem;
 }
+
+/* Trends: bars rather than a line, because a line has to decide what happens between points and the
+   honest answer for a missing sample is "nothing is known". A gap is drawn as an absence. */
+.trend-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 8rem;
+  margin: 0.8rem 0;
+  padding: 0.4rem;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--surface-alt);
+  overflow-x: auto;
+}
+
+.trend-bar {
+  flex: 1 0 6px;
+  min-width: 6px;
+  background: var(--accent);
+  border-radius: 1px 1px 0 0;
+}
+
+/* A gap is a dotted outline at the baseline: visibly present as an interval, visibly holding no
+   value. Filling it with any height at all would be a claim. */
+.trend-bar.is-gap {
+  align-self: stretch;
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--rule) 0 2px,
+    transparent 2px 6px
+  );
+  opacity: 0.7;
+}
+
+.delta-grew {
+  color: var(--risky);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.delta-shrank {
+  color: var(--safe);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}

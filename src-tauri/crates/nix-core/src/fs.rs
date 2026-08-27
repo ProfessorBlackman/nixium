@@ -428,6 +428,50 @@ pub fn containing(path: &Path) -> Result<Option<Filesystem>> {
         .find(|fs| fs.device_id == target))
 }
 
+/// Replace a file's contents atomically.
+///
+/// Writes a sibling temporary in the **same directory**, fsyncs it, then renames over the target. All
+/// three parts matter:
+///
+/// - *Same directory*, so the rename cannot cross a filesystem. Stacer's hosts editor staged in `/tmp`
+///   and moved to `/etc`, which turns an atomic replace into a copy — slow, non-atomic, and open to a
+///   symlink race.
+/// - *fsync before the rename*, so a crash cannot leave an empty file where the old one was.
+/// - *Rename*, because it is the only operation that replaces a file without a moment where it is
+///   half-written.
+///
+/// Extracted so there is one implementation rather than one per caller: settings and growth history
+/// both need it, and a second copy is a second chance to get it wrong.
+pub fn write_atomically(path: &Path, bytes: &[u8]) -> Result<()> {
+    use std::io::Write;
+
+    let dir = path
+        .parent()
+        .ok_or_else(|| AppError::internal("That path has no parent directory.").with_path(path))?;
+    std::fs::create_dir_all(dir)
+        .doing("create the directory")
+        .map_err(|e| e.with_path(dir))?;
+
+    let tmp = path.with_extension(format!("tmp.{}", std::process::id()));
+    {
+        let mut file = std::fs::File::create(&tmp)
+            .doing("write the file")
+            .map_err(|e| e.with_path(&tmp))?;
+        file.write_all(bytes)
+            .doing("write the file")
+            .map_err(|e| e.with_path(&tmp))?;
+        file.sync_all()
+            .doing("write the file")
+            .map_err(|e| e.with_path(&tmp))?;
+    }
+
+    std::fs::rename(&tmp, path).map_err(|e| {
+        // Leave no debris behind if the rename failed.
+        std::fs::remove_file(&tmp).ok();
+        AppError::from_io(&e, "replace the file").with_path(path)
+    })
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {

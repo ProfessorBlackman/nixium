@@ -29,9 +29,13 @@ import type { ScanResult } from "../bindings/ScanResult";
 import type { Settings } from "../bindings/Settings";
 import type { Capabilities } from "../bindings/Capabilities";
 import type { DuplicateReport } from "../bindings/DuplicateReport";
+import type { GrowthReport } from "../bindings/GrowthReport";
+import type { Sample } from "../bindings/Sample";
+import type { Series } from "../bindings/Series";
+import type { State as TimerState } from "../bindings/State";
 import type { SpaceEntry } from "../bindings/SpaceEntry";
 
-export type { AppError, CachedScan, Completion, Diagnostics, DuplicateReport, Filesystem, Preview, PreviewItem, Progress, Refusal, Report, ScanResult, Settings, SpaceEntry, Ticket };
+export type { AppError, CachedScan, Completion, Diagnostics, DuplicateReport, Filesystem, GrowthReport, Preview, PreviewItem, Progress, Refusal, Report, Sample, ScanResult, Series, Settings, SpaceEntry, Ticket, TimerState };
 export type { Capabilities };
 export type { CowSnapshot };
 export type { CowKind } from "../bindings/CowKind";
@@ -122,6 +126,16 @@ export const api = {
     call<SpaceEntry[]>("largest_files", { path, limit: limit ?? null }),
   duplicatesFind: (path: string, minimumBytes?: number) =>
     call<OperationId>("duplicates_find", { path, minimumBytes: minimumBytes ?? null }),
+  historySamples: () => call<Sample[]>("history_samples"),
+  historySeries: (intervalSeconds?: number) =>
+    call<Series>("history_series", { intervalSeconds: intervalSeconds ?? null }),
+  historyGrowth: (sinceSeconds: number, limit?: number) =>
+    call<GrowthReport>("history_growth", { sinceSeconds, limit: limit ?? null }),
+  historyClear: () => call<void>("history_clear"),
+  historySnapshotNow: (path: string) => call<Sample>("history_snapshot_now", { path }),
+  timerState: () => call<TimerState>("timer_state"),
+  timerInstall: () => call<TimerState>("timer_install"),
+  timerUninstall: () => call<TimerState>("timer_uninstall"),
   scanCacheClear: () => call<void>("scan_cache_clear"),
   scanCacheSize: () => call<number>("scan_cache_size"),
   scanStart: (path: string, maxDepth?: number, crossFilesystems?: boolean) =>

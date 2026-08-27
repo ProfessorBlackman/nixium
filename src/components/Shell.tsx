@@ -18,11 +18,12 @@ const Overview = lazy(() => import("../views/Overview"));
 const Explorer = lazy(() => import("../views/Explorer"));
 const Reclaim = lazy(() => import("../views/Reclaim"));
 const Find = lazy(() => import("../views/Find"));
+const Trends = lazy(() => import("../views/Trends"));
 const SettingsView = lazy(() => import("../views/SettingsView"));
 const About = lazy(() => import("../views/About"));
 
 /** A view's stable identifier. Never a display name — that is the Stacer bug. */
-export type ViewId = "overview" | "explorer" | "find" | "reclaim" | "settings" | "about";
+export type ViewId = "overview" | "explorer" | "find" | "trends" | "reclaim" | "settings" | "about";
 
 type ViewDef = { id: ViewId; title: string; hint: string };
 
@@ -30,6 +31,7 @@ const VIEWS: ViewDef[] = [
   { id: "overview", title: "Overview", hint: "Storage and system at a glance" },
   { id: "explorer", title: "Space explorer", hint: "Where your disk went" },
   { id: "find", title: "Find", hint: "Largest files and duplicates" },
+  { id: "trends", title: "Trends", hint: "What grew, and when" },
   { id: "reclaim", title: "Reclaim", hint: "Free space safely" },
   { id: "settings", title: "Settings", hint: "Preferences" },
   { id: "about", title: "About", hint: "Versions and diagnostics" },
@@ -43,6 +45,8 @@ function ViewBody({ id }: { id: ViewId }) {
       return <Explorer />;
     case "find":
       return <Find />;
+    case "trends":
+      return <Trends />;
     case "reclaim":
       return <Reclaim />;
     case "settings":

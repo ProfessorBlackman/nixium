@@ -234,7 +234,80 @@ tiny node budget, so most directories fold, and asserts every node is reachable 
 
 ---
 
-## 8. Test fixtures caused an I/O storm
+## 8. Category attribution reported 0.14 GiB of build artifacts on a machine holding 71
+
+**M5 / STO-16** · **Serious** · **Found by** reading the first real sample
+
+A growth sample is meant to carry category totals. A scan leaves every entry `Category::Unknown`,
+because the scanner's job is to measure and attribution is somebody else's — so the first samples had a
+single category called unknown, which is not a category total.
+
+The obvious fix classifies each **leaf** by its path. Run against this machine it reported:
+
+```
+  user_file            173.74 GiB
+  unknown               74.76 GiB
+  package_cache         34.05 GiB
+  app_cache             24.52 GiB
+  build_artifact         0.14 GiB   <- STO-14 finds 71 GiB of these
+```
+
+Two structural reasons, both invisible until real data went through it:
+
+- A `node_modules` directory is recognised by its own name plus a marker beside it. The files *inside*
+  it have ordinary names and match nothing, so classifying leaves finds the directory's contents and
+  attributes none of them.
+- An aggregate entry has no path at all — it stands for a set of them — and after `STO-19` those
+  entries hold most of the bytes of most directories. They could never be classified, which is the
+  74.76 GiB.
+
+**Resolved** by attributing **top-down**: descend from the root, and the first directory that
+classifies as something specific claims its whole subtree. Bytes are counted once because an
+attributed subtree is not descended into, and an entry with no path inherits the category of the
+directory it was found in.
+
+```
+  user_file            154.15 GiB
+  build_artifact        68.30 GiB
+  package_cache         48.44 GiB
+  app_cache             36.29 GiB
+  trash                  0.07 GiB
+  sum 307.24 GiB  ==  scan total 307.24 GiB
+```
+
+Nothing unattributed, and the figures independently agree with what the reclaim categories find —
+68.3 against STO-14's 71.1, 48.4 against 48.1, 36.3 against 36.3. Two separately-written mechanisms
+arriving at the same numbers is the most reassuring thing in this file.
+
+**Guard.** `attribution_accounts_for_every_byte_exactly_once` asserts the sum equals the root's total,
+which is the property that makes the list trustworthy at all. Two regression tests cover the specific
+failures, both **verified to fire**.
+
+---
+
+## 9. A test for that passed with the bug reintroduced
+
+**M5 / STO-16** · **Moderate** · **Found by** verifying the guard rather than trusting it
+
+The regression test for the aggregate half of entry 8 passed after the fix — and passed again with the
+fix removed.
+
+Its fixture put the aggregate inside a `target/` directory, which is a *recognised* category, so
+attribution claimed the whole subtree and never descended to the aggregate at all. The line under test
+never ran. The test was asserting something true for a reason unrelated to what it claimed to check.
+
+**Resolved** by putting the aggregate somewhere attribution actually descends into — a directory
+classified `UserFile`, which is deliberately not decisive. It then fails without the fix, with
+`{Unknown: 8000}`.
+
+This is [09-patterns.md §10](09-patterns.md) earning its place for the third time: a guard that has
+never failed is a guard that has never been tested. It is also the second instance in this project of a
+test passing because its *fixture had the wrong shape* — the first put plain files where production
+uses directories.
+
+---
+
+## 10. Test fixtures caused an I/O storm
 
 **M2** · **Friction** · **Found by** the diagnosis above
 
@@ -250,7 +323,7 @@ a correctness test does not need a performance fixture.
 
 ---
 
-## 9. Fixture temporary directories collided between parallel tests
+## 11. Fixture temporary directories collided between parallel tests
 
 **Phase 0** · **Moderate** · **Found by** intermittent test failures
 

@@ -1,6 +1,6 @@
 # What generalises
 
-Forty-four entries is enough to see structure. This is the part worth re-reading.
+Forty-six entries is enough to see structure. This is the part worth re-reading.
 
 ---
 
@@ -172,7 +172,7 @@ it.
 
 ## 9. Encode the guard in the toolchain, not in memory
 
-Ten of forty-four entries were caught by a gate. Those cost minutes. The ones that cost hours were
+Ten of forty-six entries were caught by a gate. Those cost minutes. The ones that cost hours were
 caught by reasoning, and the two worst were nearly not caught at all.
 
 Gates currently in force:
@@ -206,9 +206,13 @@ Twice a guard was written and then confirmed by deliberately breaking the code:
   of only the disabled ones — two tests failed with `bare revision 5 is active`, then the change was
   reverted.
 
-A guard that has never failed is a guard that has never been tested. [Entry 07-1](07-tests-that-were-wrong.md)
-is what that looks like when nobody checks: a test that scanned its own list of banned words and
-therefore could not fail on a real occurrence.
+A guard that has never failed is a guard that has never been tested. Two entries show what that looks
+like when nobody checks: [07-1](07-tests-that-were-wrong.md), a test that scanned its own list of
+banned words and so could not fail on a real occurrence, and
+[05-9](05-concurrency-and-performance.md), a regression test whose fixture put its subject somewhere
+the code under test never reached.
+
+Checking is also how three of this project's tests were found to be wrong at all. It costs a minute.
 
 **Generalisation.** After writing a test for a specific defect, break the code and watch it fail. It
 takes a minute and it is the only evidence the test works.

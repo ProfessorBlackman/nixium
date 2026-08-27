@@ -31,7 +31,7 @@ use nix_core::op::{Completion, OperationId, Progress};
 use nix_core::protect::Refusal;
 use nix_core::reclaim::{Preview, Report, Ticket};
 use nix_core::settings::Settings;
-use nix_core::{find, fs as nixfs, scan};
+use nix_core::{find, fs as nixfs, history, scan, timer};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -253,6 +253,94 @@ pub(crate) fn duplicates_find(
     });
 
     id
+}
+
+// ---- Growth history. `STO-16` ----
+
+/// Every stored sample, oldest first.
+#[tauri::command]
+pub(crate) fn history_samples() -> Vec<history::Sample> {
+    history::History::discover()
+        .map(|h| h.samples())
+        .unwrap_or_default()
+}
+
+/// Samples bucketed onto an interval, with gaps left as gaps.
+///
+/// `interval_seconds` defaults to a day. Nothing here interpolates: a missing interval means the
+/// machine was off, on battery, or nix was not running, and inventing a point would turn "we do not
+/// know" into a number someone might act on (§P8).
+#[tauri::command]
+pub(crate) fn history_series(interval_seconds: Option<i64>) -> history::Series {
+    let samples = history_samples();
+    history::series(&samples, interval_seconds.unwrap_or(86_400))
+}
+
+#[tauri::command]
+pub(crate) fn history_growth(since_seconds: i64, limit: Option<usize>) -> history::GrowthReport {
+    let samples = history_samples();
+    history::GrowthReport {
+        total: history::growth(&samples, since_seconds),
+        directories: history::fastest_growing(&samples, since_seconds, limit.unwrap_or(10)),
+    }
+}
+
+/// Delete all collected history. Offered because data a user cannot delete is data taken from them.
+#[tauri::command]
+pub(crate) fn history_clear() -> Result<()> {
+    history::History::discover()?.clear()
+}
+
+/// Take a sample now, from the cached scan rather than by walking.
+///
+/// The timer's job does a full scan; this exists so a user can seed a series without waiting for
+/// tomorrow, and so the feature can be seen working. It refuses rather than guessing when there is no
+/// scan to sample.
+#[tauri::command]
+pub(crate) fn history_snapshot_now(path: PathBuf) -> Result<history::Sample> {
+    let cached = Cache::discover()?.load(&path).ok_or_else(|| {
+        AppError::new(
+            ErrorCode::Unsupported,
+            "There is no scan to take a sample from.",
+        )
+        .with_remedy("Scan a directory first, then record a sample of it.")
+    })?;
+
+    let at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let sample = history::Sample::from_scan(at, &cached.result, 40);
+    history::History::discover()?.record(&sample)?;
+    Ok(sample)
+}
+
+// ---- The collection timer. `STO-16`, decision D5 ----
+
+/// The path of the running executable, which is what a unit's `ExecStart` has to name.
+fn executable() -> PathBuf {
+    std::env::current_exe().unwrap_or_else(|_| PathBuf::from("nix"))
+}
+
+/// What is installed, and whether it is current.
+///
+/// Called at startup so an orphaned unit from a previous version is *detected* rather than left
+/// failing silently every day.
+#[tauri::command]
+pub(crate) fn timer_state() -> timer::State {
+    timer::state(&executable())
+}
+
+/// Install the units and enable the timer. Installing over an orphan is how an orphan is repaired.
+#[tauri::command]
+pub(crate) fn timer_install() -> Result<timer::State> {
+    timer::install(&executable())
+}
+
+/// Disable the timer, remove the units, and delete the collected data.
+#[tauri::command]
+pub(crate) fn timer_uninstall() -> Result<timer::State> {
+    timer::uninstall(&executable())
 }
 
 /// Forget cached scans. Offered because a cache the user cannot clear is a cache they cannot trust.

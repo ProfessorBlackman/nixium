@@ -602,6 +602,76 @@ impl Elevation {
     }
 }
 
+/// Attribute a directory to a space category from its path. `STO-16`.
+///
+/// # Why this exists separately from the reclaim categories
+///
+/// A scan leaves every entry as [`crate::space::Category::Unknown`], because the scanner's job is to
+/// measure and attribution is somebody else's. The reclaim categories know better, but they only run
+/// when a user asks to reclaim — so a growth *sample* taken from a scan had category totals consisting
+/// of one number called "unknown", which is not the "category totals" the specification asked for.
+///
+/// This reuses the signals the reclaim categories already establish, in the same order of confidence:
+/// a corroborated build-artifact marker first, then known locations. It is a *best effort* by design.
+/// Anything unrecognised stays `Unknown` rather than being guessed into a bucket, because a trend built
+/// on invented attribution is worse than an honest "unattributed" line.
+#[must_use]
+pub fn classify(path: &std::path::Path) -> crate::space::Category {
+    use crate::space::Category;
+
+    // Strongest signal: a marker file a build tool must have written.
+    if artifacts::corroborate(path).is_some() {
+        return Category::BuildArtifact;
+    }
+
+    let under = |root: Option<PathBuf>| -> bool {
+        root.is_some_and(|r| path.starts_with(&r) && path != r.as_path())
+    };
+    let home_relative = |relative: &str| -> bool {
+        crate::paths::home_dir().is_some_and(|h| path.starts_with(h.join(relative)))
+    };
+
+    if under(crate::paths::cache_dir().and_then(|c| c.parent().map(std::path::Path::to_path_buf))) {
+        return Category::AppCache;
+    }
+    if home_relative(".local/share/Trash") {
+        return Category::Trash;
+    }
+    // Package stores that live outside the cache directory, which `STO-14` enumerates.
+    for store in [
+        ".npm",
+        ".cargo",
+        ".m2",
+        ".gradle",
+        "go/pkg/mod",
+        ".local/share/pnpm",
+    ] {
+        if home_relative(store) {
+            return Category::PackageCache;
+        }
+    }
+    if path.starts_with("/var/log/journal") {
+        return Category::Journal;
+    }
+    if path.starts_with("/var/log") {
+        return Category::Log;
+    }
+    if path.starts_with("/var/cache") {
+        return Category::PackageCache;
+    }
+    if path.starts_with("/var/lib/docker") || path.starts_with("/var/lib/containers") {
+        return Category::ContainerImage;
+    }
+    if path.starts_with("/var/lib/snapd") || path.starts_with("/var/lib/flatpak") {
+        return Category::PackagePayload;
+    }
+    if crate::paths::home_dir().is_some_and(|h| path.starts_with(&h)) {
+        return Category::UserFile;
+    }
+
+    Category::Unknown
+}
+
 /// Reclaim one item, with both guards applied.
 fn reclaim_one(item: &PreviewItem, guard: &Guard, elevation: &mut Elevation) -> ItemOutcome {
     // Re-checked at execution time, because the user's exclusions may have changed since preview.

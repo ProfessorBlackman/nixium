@@ -236,7 +236,30 @@ a filter and never the verdict, so it needs no cryptographic strength and no new
 are excluded because two names for one inode share their blocks; verified by removing the guard, which
 made the tool claim 2 MiB recoverable from a link that frees nothing.
 
-Remaining: STO-16.
+**STO-16 is done, and Phase 2 with it.** A `Trends` view answers "what grew" rather than "what is
+big", collected by an opt-in systemd user timer that is off by default.
+
+Two things the specification did not anticipate:
+
+1. **The job is a full scan, not an incremental refresh.** That requirement came from STO-18, which
+   measurement retired. A full walk of this machine's home directory takes 28 s, and at `Nice=19` with
+   idle I/O once a day that buys a correct answer for less than a second code path and a staleness
+   model would cost. The criterion "completes in seconds" is met literally — 33 s — but not in the
+   spirit the incremental design implied, and PLAN says so rather than rounding it favourably.
+2. **Category totals needed attribution that did not exist.** A scan leaves everything
+   `Category::Unknown`, so the first samples had a single category. `history::attribute` walks the tree
+   top-down using the reclaim categories' own signals; its output sums exactly to the scan total and
+   independently matches what those categories find, which is a useful cross-check on both.
+
+Two of my own attempts at that attribution were wrong and measured wrong: classifying leaves reported
+**0.14 GiB** of build artifacts on a machine holding 71 (a file inside `node_modules` has an ordinary
+name), and aggregates having no path put **31 GiB** into "unattributed" that was really small files in
+known places. The test for the second passed with the bug reintroduced, because its fixture put the
+aggregate inside a directory whose whole subtree was already claimed — so the aggregate was never
+reached. Fixed, and verified to fire.
+
+**M5 complete. Phase 2 (Storage depth) is finished**: STO-10 through STO-19, one superseded, one added
+at P0 mid-phase.
 
 Note also that §4's parallelisation advice no longer applies: this is a solo project, which is why
 **task 0.9 was completed within Phase 0 rather than deferred** — see §5.2 for why M2 is nonetheless
