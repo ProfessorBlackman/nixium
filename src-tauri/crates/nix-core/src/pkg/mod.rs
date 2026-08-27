@@ -24,6 +24,8 @@
 //! the measured figure never silently replaces the recorded one.
 
 pub mod dpkg;
+pub mod flatpak;
+pub mod snap;
 
 pub use dpkg::DpkgBackend;
 

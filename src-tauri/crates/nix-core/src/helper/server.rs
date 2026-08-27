@@ -411,6 +411,174 @@ fn remove_packages(kind: RemovableKind, requested: &[String]) -> Result<u64> {
     Ok(bytes)
 }
 
+/// Where snapd keeps its download cache. Mode 0700 and root-owned, so only the helper can see it.
+const SNAPD_CACHE: &str = "/var/lib/snapd/cache";
+
+/// Snap revisions the helper itself considers removable.
+///
+/// **Derived here, not accepted from the caller** — the same pattern as [`derive_removable`]. The
+/// rule it enforces is that only a revision snapd reports as `disabled` may go, which is the
+/// equivalent of never removing the running kernel: the active revision is what is running.
+fn derive_snap_revisions() -> Result<Vec<crate::pkg::snap::Revision>> {
+    if !crate::caps::registry().has(crate::caps::Capability::Snap) {
+        return Err(AppError::unsupported("snap"));
+    }
+    let all = crate::pkg::snap::revisions()?;
+    Ok(crate::pkg::snap::removable(&all))
+}
+
+/// A snap revision string, as a shape check independent of the derivation.
+///
+/// snapd numbers revisions, and prefixes locally installed ones with `x`. The value has already been
+/// matched against snapd's own output by the time this runs, so this is a second, cheaper guard
+/// against a parsing surprise turning into an argument on a root command line — not the primary
+/// defence.
+fn is_revision_shaped(revision: &str) -> bool {
+    !revision.is_empty()
+        && revision.len() <= 16
+        && revision
+            .strip_prefix('x')
+            .unwrap_or(revision)
+            .bytes()
+            .all(|b| b.is_ascii_digit())
+}
+
+/// Remove one superseded snap revision, and the cache link that would otherwise hold its space.
+///
+/// # Why the cache link is removed too
+///
+/// snapd hard-links every downloaded blob into `/var/lib/snapd/cache`, so dropping the revision
+/// leaves the blocks allocated until snapd's own cache pruning gets around to them. Reporting "3.3
+/// GiB reclaimed" when the disk has not changed would be a lie, and reporting "0 bytes reclaimed"
+/// after removing 3.3 GiB of revisions is useless. Removing the second link makes the honest answer
+/// and the useful answer the same one.
+///
+/// # Why this is safe
+///
+/// The cache entry is selected **by inode**, matched against the blob's inode recorded before
+/// removal — never by name, never by pattern. So the only file that can be unlinked is one that was
+/// the very blob snapd has just been told to drop. The cost of being wrong about snapd's intent is a
+/// re-download, because that directory is a download cache and nothing else.
+///
+/// If no cache link is found, only the proven bytes are reported and nothing else is touched.
+fn remove_snap_revision(package: &str, revision: &str) -> Result<u64> {
+    use std::os::unix::fs::MetadataExt;
+
+    let eligible = derive_snap_revisions()?;
+    let Some(target) = eligible
+        .iter()
+        .find(|r| r.name == package && r.revision == revision)
+    else {
+        return Err(AppError::new(
+            ErrorCode::HelperRejected,
+            format!("{package} revision {revision} is not a removable snap revision."),
+        )
+        .with_remedy(
+            "The helper decides for itself which revisions qualify: only ones snapd has marked disabled, and never the active revision.",
+        ));
+    };
+
+    if !is_revision_shaped(revision) {
+        return Err(AppError::new(
+            ErrorCode::HelperRejected,
+            format!("{revision} is not shaped like a snap revision."),
+        ));
+    }
+
+    // Recorded before removal, because afterwards there is nothing left to stat.
+    let blob_identity = target
+        .blob
+        .as_ref()
+        .and_then(|p| std::fs::symlink_metadata(p).ok())
+        .map(|m| (m.dev(), m.ino(), m.blocks() * 512, m.nlink()));
+
+    run_fixed(
+        "snap",
+        &["remove", &format!("--revision={revision}"), package],
+    )?;
+
+    let Some((dev, ino, bytes, links)) = blob_identity else {
+        // Removal succeeded but the blob could not be measured, so nothing is claimed.
+        return Ok(0);
+    };
+
+    if links <= 1 {
+        // Nothing else referenced it: the space is already back.
+        return Ok(bytes);
+    }
+
+    // `snap remove` accounted for one link; the cache may hold more than one.
+    let removed = 1 + unlink_cache_links(std::path::Path::new(SNAPD_CACHE), dev, ino);
+    if removed >= links {
+        Ok(bytes)
+    } else {
+        // Something outside snapd's cache still references the blob, so the blocks are still
+        // allocated and are not claimed as reclaimed. Reporting `bytes` here would be the exact
+        // overstatement this project exists to avoid.
+        tracing::info!(
+            package,
+            revision,
+            links,
+            removed,
+            "snap revision removed, but another link to its blob remains; the space returns when that goes"
+        );
+        Ok(0)
+    }
+}
+
+/// Unlink every entry in snapd's download cache that *is* this inode. Returns how many went.
+///
+/// Selected by identity, not resemblance: a name or size match would not be good enough for a
+/// privileged unlink, and a hard link has no name worth trusting anyway.
+fn unlink_cache_links(cache: &std::path::Path, dev: u64, ino: u64) -> u64 {
+    use std::os::unix::fs::MetadataExt;
+
+    let Ok(entries) = std::fs::read_dir(cache) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let Ok(meta) = entry.metadata() else { continue };
+        if meta.dev() == dev && meta.ino() == ino && std::fs::remove_file(entry.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
+/// Ask flatpak to drop its unused runtimes, and measure what that actually returned.
+///
+/// flatpak does not report the freed bytes in any machine-readable form, and guessing would be
+/// exactly the overstatement this project exists to avoid. So the installation tree is measured
+/// either side of the command and the **difference** is reported: a real measurement rather than an
+/// estimate. It can be disturbed by another process writing to the installation at the same moment,
+/// which is why it is clamped at zero rather than allowed to go negative.
+fn flatpak_uninstall_unused() -> Result<u64> {
+    use crate::pkg::flatpak;
+
+    if !crate::caps::registry().has(crate::caps::Capability::Flatpak) {
+        return Err(AppError::unsupported("flatpak"));
+    }
+
+    let root = std::path::Path::new(flatpak::SYSTEM_ROOT);
+    let before = flatpak::measure_tree(root).bytes;
+
+    // Wholly fixed: which runtimes count as unused is flatpak's judgement, not ours.
+    run_fixed(
+        "flatpak",
+        &[
+            "uninstall",
+            "--unused",
+            "--system",
+            "--assumeyes",
+            "--noninteractive",
+        ],
+    )?;
+
+    let after = flatpak::measure_tree(root).bytes;
+    Ok(before.saturating_sub(after))
+}
+
 /// Execute one validated operation.
 fn dispatch(op: &Op) -> Result<OpResult> {
     match op {
@@ -460,6 +628,21 @@ fn dispatch(op: &Op) -> Result<OpResult> {
 
         Op::RemovePackages { kind, packages } => Ok(OpResult::Reclaimed {
             bytes: remove_packages(*kind, packages)?,
+        }),
+
+        Op::ListSnapRevisions => Ok(OpResult::SnapRevisions {
+            revisions: derive_snap_revisions()?
+                .into_iter()
+                .map(|r| (r.name, r.revision, r.bytes, r.links > 1))
+                .collect(),
+        }),
+
+        Op::RemoveSnapRevision { package, revision } => Ok(OpResult::Reclaimed {
+            bytes: remove_snap_revision(package, revision)?,
+        }),
+
+        Op::FlatpakUninstallUnused => Ok(OpResult::Reclaimed {
+            bytes: flatpak_uninstall_unused()?,
         }),
 
         Op::JournalVacuum { limit } => {
@@ -1271,5 +1454,121 @@ mod tests {
         );
         assert!(audit.0.iter().any(|l| l.contains("ok id=1")));
         assert!(audit.0.iter().any(|l| l.contains("denied id=2")));
+    }
+
+    // ---- `STO-12`: snap revisions ----
+
+    #[test]
+    fn revision_shapes_are_checked_independently_of_the_derivation() {
+        for good in ["1", "3499", "x1", "27710"] {
+            assert!(is_revision_shaped(good), "{good} is a snap revision");
+        }
+        for bad in [
+            "",
+            "3499; rm -rf /",
+            "--purge",
+            "../../etc",
+            "3499 4000",
+            "xx1",
+            "99999999999999999999",
+        ] {
+            assert!(
+                !is_revision_shaped(bad),
+                "{bad} must not pass the shape check"
+            );
+        }
+    }
+
+    /// Selection is by inode, so a file that merely looks similar is never unlinked.
+    #[test]
+    fn cache_links_are_matched_by_inode_and_not_by_name() {
+        use std::os::unix::fs::MetadataExt;
+
+        let dir = std::env::temp_dir().join(format!("nix-snapcache-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let blob = dir.join("blob");
+        std::fs::write(&blob, vec![b'x'; 4096]).unwrap();
+        // Two cache links to the same inode, plus a decoy of identical size and a similar name.
+        std::fs::hard_link(&blob, dir.join("cache-a")).unwrap();
+        std::fs::hard_link(&blob, dir.join("cache-b")).unwrap();
+        let decoy = dir.join("blob-decoy");
+        std::fs::write(&decoy, vec![b'x'; 4096]).unwrap();
+
+        let meta = std::fs::symlink_metadata(&blob).unwrap();
+        let removed = unlink_cache_links(&dir, meta.dev(), meta.ino());
+
+        assert_eq!(
+            removed, 3,
+            "every link to that inode goes, including the blob itself here"
+        );
+        assert!(
+            decoy.exists(),
+            "a same-size, similarly named file is a different inode"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_missing_cache_directory_removes_nothing_rather_than_failing() {
+        assert_eq!(
+            unlink_cache_links(std::path::Path::new("/definitely/not/here"), 1, 1),
+            0
+        );
+    }
+
+    /// The rule that matters, checked against real snapd output: the helper refuses a revision it
+    /// did not derive as removable — including the active one.
+    #[test]
+    fn the_helper_refuses_a_revision_it_did_not_derive() {
+        if !crate::caps::registry().has(crate::caps::Capability::Snap) {
+            return;
+        }
+        let Ok(all) = crate::pkg::snap::revisions() else {
+            return;
+        };
+        let Some(active) = all.iter().find(|r| !r.disabled) else {
+            return;
+        };
+
+        // Not run as root, so this must fail before any command is spawned. What is asserted is the
+        // *reason*: rejection by the helper's own derivation, not a privilege error.
+        let error = remove_snap_revision(&active.name, &active.revision)
+            .expect_err("an active revision must never be accepted");
+        assert_eq!(
+            error.code,
+            ErrorCode::HelperRejected,
+            "an active revision must be refused by the derivation, not by anything downstream: {error:?}"
+        );
+    }
+
+    #[test]
+    fn the_helper_refuses_an_invented_snap() {
+        if !crate::caps::registry().has(crate::caps::Capability::Snap) {
+            return;
+        }
+        let error = remove_snap_revision("definitely-not-a-snap", "1")
+            .expect_err("a snap that is not installed must be refused");
+        assert_eq!(error.code, ErrorCode::HelperRejected);
+    }
+
+    /// Every derived revision must be one snapd marked disabled — the helper's independent copy of
+    /// the rule the category also enforces.
+    #[test]
+    fn the_helpers_own_derivation_offers_only_disabled_revisions() {
+        if !crate::caps::registry().has(crate::caps::Capability::Snap) {
+            return;
+        }
+        let Ok(derived) = derive_snap_revisions() else {
+            return;
+        };
+        for revision in &derived {
+            assert!(
+                revision.disabled,
+                "{} revision {} is active",
+                revision.name, revision.revision
+            );
+        }
     }
 }

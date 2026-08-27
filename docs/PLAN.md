@@ -84,7 +84,43 @@ both a stated total and a *promisable* one. The parsers for btrfs, ZFS and LVM a
 are labelled as such: the development machine has none of those filesystems, so they are tested
 against documented formats rather than captured output.
 
-Remaining: STO-12, STO-18, STO-14, STO-13, STO-15, STO-16.
+**STO-12** followed, and produced the largest single figure the project has found: **3.3 GiB of
+superseded snap revisions** across eighteen blobs — more than every removable kernel put together,
+and completely invisible in Stacer, which listed snaps by name with neither revisions nor sizes.
+
+Two things came out of it that were not planned for.
+
+The first is that `space::Reclaimable`, built in STO-17 for copy-on-write filesystems, turns out not
+to be about copy-on-write at all. Fifteen of those eighteen snap blobs have a link count above one,
+because snapd hard-links every download into its own cache — so the sharing problem exists on plain
+ext4. It appears a third time in flatpak, whose ostree deployments are hard links into a repository
+that outlives them. One type covers all three.
+
+For snaps that qualification was then *eliminated* rather than merely reported: the helper removes
+snapd's cache link along with the blob, selected by inode so the only file it can touch is the one
+snapd was just told to drop. That turns "up to 3.3 GiB, we cannot say how much" into an exact figure.
+
+The second was a defect, found by running the whole pipeline against this machine rather than each
+category in isolation. Every **logical** entry — one whose path is a description like
+`kernel 6.8.0-136-generic` rather than a file — was being refused at preview by the *path* protection
+rules, with the reason "only absolute paths can be checked". Both kernels, the residual-config set
+and all eighteen snap revisions, about 4.5 GiB, never reached the user; and had they reached
+execution, the time-of-check guard would have skipped them all as "already gone". So STO-11's headline
+result was real as a measurement and inert as a feature.
+
+`ReclaimMethod::acts_on_path` now separates the two cases: path rules and fingerprints apply to
+paths, while a logical entry is guarded by the helper re-deriving its own eligible set at the moment
+it acts — a stronger check, not a weaker one. Regression tests cover the classification, the
+execution path and the preview stage. What surfaced this was the refusal list being *shown* rather
+than swallowed, which is the argument for that design in one sentence.
+
+STO-12 also added `space::Advisory`, for space nix can measure but should not act on. The case that
+forced it: **699 MiB of unreferenced objects** in this machine's flatpak ostree repository, with no
+`ostree` binary present to prune them. Hiding those bytes would be the failure this project exists
+to avoid; shipping an automated privileged prune never once executed would be worse. An advisory
+reports the size, the reason and the command, and is deliberately excluded from both preview totals.
+
+Remaining: STO-18, STO-14, STO-13, STO-15, STO-16.
 
 Note also that §4's parallelisation advice no longer applies: this is a solo project, which is why
 **task 0.9 was completed within Phase 0 rather than deferred** — see §5.2 for why M2 is nonetheless
@@ -268,7 +304,8 @@ Ordered by reclaim value per unit of effort, which is roughly the reverse of the
 2. **STO-10 package storage attribution** — feeds STO-11 and PKG-1, and turns directories into
    named owners.
 3. **STO-17 btrfs, LVM, ZFS** (remainder) — P0. Without it the numbers are wrong on Fedora.
-4. **STO-12 snap and flatpak revisions** — second-largest Ubuntu win, small effort.
+4. **STO-12 snap and flatpak revisions** — done. Turned out to be the *largest* Ubuntu win, not
+   the second: 3.3 GiB of snap revisions on the development machine.
 5. **STO-18 incremental rescan** — unlocks STO-16's daily job being cheap enough to exist.
 6. **STO-14 developer build artifacts** — large wins on developer machines specifically.
 7. **STO-13 container storage** — large wins, narrower audience.

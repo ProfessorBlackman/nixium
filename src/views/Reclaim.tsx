@@ -222,6 +222,35 @@ export default function Reclaim() {
             ))}
           </ul>
 
+          {preview.advisories.length > 0 && (
+            <div className="card">
+              <h2>Worth knowing about</h2>
+              <p className="muted">
+                Space nix can measure but will not reclaim for you. Each one says why, and the
+                command you can run yourself if you want to.
+              </p>
+              <ul className="advisory-list">
+                {preview.advisories.map((a) => (
+                  <li key={`${a.category}-${a.label}`}>
+                    <div className="advisory-head">
+                      <span className="advisory-label">{a.label}</span>
+                      <span className="advisory-bytes">{formatBytes(a.bytes)}</span>
+                    </div>
+                    {a.path !== null && <code className="advisory-path">{a.path}</code>}
+                    <p className="muted">{a.why_manual}</p>
+                    <pre className="advisory-remedy">
+                      <code>{a.remedy}</code>
+                    </pre>
+                  </li>
+                ))}
+              </ul>
+              <p className="muted">
+                These are not counted in the totals above, because those totals are what this
+                preview would actually reclaim.
+              </p>
+            </div>
+          )}
+
           {preview.refused.length > 0 && (
             <div className="card">
               <h2>Not touched</h2>

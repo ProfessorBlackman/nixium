@@ -993,3 +993,65 @@ button.danger:hover:not(:disabled) {
   font-size: 0.8125rem;
   color: var(--review);
 }
+
+/* Advisories: space nix can measure but deliberately will not act on. Styled as information
+   rather than as an offer — no checkbox, no accent border, nothing that reads as a button. */
+.advisory-list {
+  list-style: none;
+  margin: 0.5rem 0 0.9rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  font-size: 0.8125rem;
+}
+
+.advisory-list li {
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--surface-alt);
+}
+
+.advisory-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: baseline;
+}
+
+.advisory-label {
+  font-weight: 600;
+}
+
+.advisory-bytes {
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.advisory-path {
+  display: block;
+  margin: 0.2rem 0;
+  word-break: break-all;
+  color: var(--ink-mute);
+}
+
+.advisory-list p {
+  margin: 0.35rem 0 0;
+}
+
+/* The command is shown so it can be read before it is run, never executed by nix. */
+.advisory-remedy {
+  margin: 0.45rem 0 0;
+  padding: 0.4rem 0.55rem;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  overflow-x: auto;
+  font-size: 0.75rem;
+}
+
+.advisory-remedy code {
+  font-family: var(--font-mono);
+  white-space: pre;
+}

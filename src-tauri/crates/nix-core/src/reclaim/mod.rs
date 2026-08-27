@@ -34,12 +34,14 @@ mod kernels;
 mod logs;
 mod packages;
 mod registry;
+mod snaps;
 
 pub use caches::AppCacheCategory;
 pub use kernels::{OldKernelCategory, ResidualConfigCategory};
 pub use logs::{JournalCategory, LogCategory};
 pub use packages::PackageCacheCategory;
 pub use registry::{Candidate, Category, Registry, TrashCategory};
+pub use snaps::{FlatpakUnusedCategory, SnapRevisionCategory};
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -52,7 +54,7 @@ use crate::error::{AppError, ErrorCode, Result};
 use crate::helper;
 use crate::op::CancelToken;
 use crate::protect::{Guard, Refusal};
-use crate::space::{ReclaimMethod, Reclaimable, Safety};
+use crate::space::{Advisory, ReclaimMethod, Reclaimable, Safety};
 use crate::trash;
 
 /// Proof that a preview was computed and shown.
@@ -132,6 +134,10 @@ pub struct Preview {
     /// Things a category proposed that the protection rules refused. Shown, not hidden: a user
     /// should be able to see that nix declined to touch something.
     pub refused: Vec<Refusal>,
+    /// Space nix can account for but will not act on. Deliberately **not** part of
+    /// [`Preview::total_bytes`] or [`Preview::promisable_bytes`]: those are promises about what this
+    /// preview would reclaim, and an advisory is by definition something it will not.
+    pub advisories: Vec<Advisory>,
 }
 
 impl Preview {
@@ -307,13 +313,19 @@ impl Session {
         for candidate in registry.collect(token)? {
             token.check()?;
 
-            // The protection rules get the first word, before anything is offered.
-            match guard.verdict(&candidate.path) {
-                crate::protect::Verdict::Protected(r) => {
-                    refused.push(r);
-                    continue;
+            // The protection rules get the first word, before anything is offered — for anything
+            // that names a path. A logical entry's path is a description like
+            // `kernel 6.8.0-136-generic`, and asking the path rules about it produces a refusal
+            // about relative paths rather than a judgement about safety. What protects those is the
+            // helper re-deriving its own eligible set; see [`ReclaimMethod::acts_on_path`].
+            if candidate.method.acts_on_path() {
+                match guard.verdict(&candidate.path) {
+                    crate::protect::Verdict::Protected(r) => {
+                        refused.push(r);
+                        continue;
+                    }
+                    crate::protect::Verdict::Allowed => {}
                 }
-                crate::protect::Verdict::Allowed => {}
             }
 
             // Invariant 3 of the space model, enforced here rather than trusted: a `Never` rating
@@ -371,6 +383,7 @@ impl Session {
                 .sum(),
             items,
             refused,
+            advisories: registry.collect_advisories(),
         };
 
         if let Ok(mut outstanding) = self.outstanding.lock() {
@@ -527,30 +540,40 @@ impl Elevation {
 /// Reclaim one item, with both guards applied.
 fn reclaim_one(item: &PreviewItem, guard: &Guard, elevation: &mut Elevation) -> ItemOutcome {
     // Re-checked at execution time, because the user's exclusions may have changed since preview.
-    if let Some(refusal) = guard.verdict(&item.path).refusal() {
-        return ItemOutcome::Skipped {
-            id: item.id,
-            path: item.path.clone(),
-            reason: refusal.reason.clone(),
-        };
+    // Path rules apply to paths; a logical entry is guarded by the helper instead.
+    if item.method.acts_on_path() {
+        if let Some(refusal) = guard.verdict(&item.path).refusal() {
+            return ItemOutcome::Skipped {
+                id: item.id,
+                path: item.path.clone(),
+                reason: refusal.reason.clone(),
+            };
+        }
     }
 
     // Time-of-check/time-of-use: a path that changed since the preview is not the thing the user
     // agreed to.
-    let current = fingerprint(&item.path);
-    if current == 0 {
-        return ItemOutcome::Skipped {
-            id: item.id,
-            path: item.path.clone(),
-            reason: "It is already gone.".to_string(),
-        };
-    }
-    if current != item.fingerprint {
-        return ItemOutcome::Skipped {
-            id: item.id,
-            path: item.path.clone(),
-            reason: "It changed since the preview, so it was left alone.".to_string(),
-        };
+    //
+    // Only meaningful when the path is the target. A logical entry — a kernel, a snap revision — has
+    // a descriptive path that was never on disk, and re-checking it would find nothing and skip
+    // every such item as "already gone". Those are guarded by the helper re-deriving its eligible
+    // set at the moment it acts, which is a stronger check than this one.
+    if item.method.acts_on_path() {
+        let current = fingerprint(&item.path);
+        if current == 0 {
+            return ItemOutcome::Skipped {
+                id: item.id,
+                path: item.path.clone(),
+                reason: "It is already gone.".to_string(),
+            };
+        }
+        if current != item.fingerprint {
+            return ItemOutcome::Skipped {
+                id: item.id,
+                path: item.path.clone(),
+                reason: "It changed since the preview, so it was left alone.".to_string(),
+            };
+        }
     }
 
     match &item.method {
@@ -607,6 +630,20 @@ fn reclaim_one(item: &PreviewItem, guard: &Guard, elevation: &mut Elevation) -> 
         ),
         ReclaimMethod::JournalVacuum { limit } => {
             privileged(item, elevation, helper::Op::JournalVacuum { limit: *limit })
+        }
+        // `STO-12`. The helper re-derives snapd's disabled set and refuses anything outside it, so
+        // naming the active revision here achieves nothing.
+        ReclaimMethod::SnapRevision { package, revision } => privileged(
+            item,
+            elevation,
+            helper::Op::RemoveSnapRevision {
+                package: package.clone(),
+                revision: revision.clone(),
+            },
+        ),
+        // Carries nothing, because the command is fixed and the decision is flatpak's.
+        ReclaimMethod::FlatpakUnused => {
+            privileged(item, elevation, helper::Op::FlatpakUninstallUnused)
         }
 
         // Methods that arrive with a later category. Refusing loudly is correct for something
@@ -1411,7 +1448,9 @@ mod tests {
                 "journal",
                 "package_cache",
                 "old_kernels",
-                "residual_config"
+                "residual_config",
+                "snap_revisions",
+                "flatpak_unused"
             ],
         );
         // Trash stays first: it is the category the pipeline was proven against, and the one whose
@@ -1435,6 +1474,159 @@ mod tests {
         assert_eq!(registry.len(), ids.len());
     }
 
+    /// # Regression
+    ///
+    /// Every category that removes a *logical* object — a kernel, a snap revision — carries a
+    /// descriptive path like `kernel 6.8.0-136-generic` that is not meant to exist on disk. The
+    /// execution stage re-checked that path and, finding nothing, skipped the item as "already
+    /// gone". So old-kernel removal silently did nothing, and nothing noticed because the path needs
+    /// root and had only ever been exercised as far as the preview.
+    ///
+    /// This asserts the classification directly, and the test below asserts the behaviour.
+    #[test]
+    fn a_logical_method_is_not_guarded_by_a_path_that_never_existed() {
+        use crate::space::{Manager, RemovableKind, VacuumLimit};
+
+        // Logical: the path is a description, and the helper's re-derivation is the real guard.
+        for method in [
+            ReclaimMethod::Packages {
+                kind: RemovableKind::OldKernel,
+                names: vec!["linux-image-6.8.0-136-generic".into()],
+            },
+            ReclaimMethod::SnapRevision {
+                package: "chromium".into(),
+                revision: "3499".into(),
+            },
+            ReclaimMethod::FlatpakUnused,
+            ReclaimMethod::PackageManager {
+                manager: Manager::Apt,
+            },
+            ReclaimMethod::JournalVacuum {
+                limit: VacuumLimit::Size { mebibytes: 200 },
+            },
+            ReclaimMethod::ContainerPrune {
+                scope: "images".into(),
+            },
+        ] {
+            assert!(
+                !method.acts_on_path(),
+                "{method:?} acts on a logical object, so a path fingerprint would skip it"
+            );
+        }
+
+        // Path-based: the path *is* the target, so re-checking it is the whole point.
+        for method in [
+            ReclaimMethod::MoveToTrash {
+                path: "/home/u/x".into(),
+            },
+            ReclaimMethod::Unlink {
+                path: "/home/u/x".into(),
+            },
+            ReclaimMethod::SystemFile {
+                kind: crate::space::ReclaimKind::RotatedLog,
+                path: "/var/log/x.1".into(),
+            },
+            ReclaimMethod::TrashEmpty {
+                volume: "/home/u".into(),
+            },
+        ] {
+            assert!(
+                method.acts_on_path(),
+                "{method:?} names the thing being removed, so it must be re-checked"
+            );
+        }
+    }
+
+    /// # Regression
+    ///
+    /// The same root cause as the test below, one stage earlier and with a wider blast radius: the
+    /// preview asked the *path* protection rules about a logical entry, and they answered "only
+    /// absolute paths can be checked". So every kernel, every residual-config set and all eighteen
+    /// snap revisions on the development machine — 4.5 GiB — were refused before a user could see
+    /// them, with a reason about relative paths that means nothing to anyone.
+    ///
+    /// The refusal list did its job and showed them, which is how this was found. Guarded here so a
+    /// future logical category cannot reintroduce it.
+    #[test]
+    fn a_logical_candidate_is_not_refused_for_having_a_descriptive_path() {
+        let mut registry = Registry::new();
+        registry.register(Box::new(LogicalOnly));
+
+        let session = Session::new();
+        let preview = session
+            .preview(&registry, &guard(), &CancelToken::new())
+            .unwrap();
+
+        assert!(
+            preview.refused.is_empty(),
+            "a logical entry has no path for the path rules to judge: {:?}",
+            preview.refused
+        );
+        assert_eq!(preview.items.len(), 1, "the candidate must be offered");
+        assert_eq!(preview.total_bytes, 1024);
+    }
+
+    /// A category shaped exactly like `OldKernelCategory`: a logical entry whose path is a label.
+    struct LogicalOnly;
+
+    impl Category for LogicalOnly {
+        fn id(&self) -> &'static str {
+            "logical_only"
+        }
+        fn label(&self) -> &'static str {
+            "Logical only"
+        }
+        fn space_category(&self) -> crate::space::Category {
+            crate::space::Category::PackagePayload
+        }
+        fn candidates(&self, _token: &CancelToken) -> Result<Vec<Candidate>> {
+            Ok(vec![Candidate {
+                path: std::path::PathBuf::from("kernel 6.8.0-136-generic"),
+                label: "Linux 6.8.0-136-generic".into(),
+                bytes: 1024,
+                safety: Safety::Review,
+                method: ReclaimMethod::Packages {
+                    kind: crate::space::RemovableKind::OldKernel,
+                    names: vec!["linux-image-6.8.0-136-generic".into()],
+                },
+                cost: Some("You could not boot into it.".into()),
+                category: self.id().to_string(),
+                reclaimable: Reclaimable::Exact,
+            }])
+        }
+    }
+
+    /// The behaviour, not just the classification: a logical item must reach its method.
+    #[test]
+    fn a_logical_item_reaches_its_method_rather_than_being_skipped_as_missing() {
+        let item = PreviewItem {
+            id: 0,
+            // Exactly what `OldKernelCategory` produces: a description, not a path.
+            path: std::path::PathBuf::from("kernel 6.8.0-136-generic"),
+            label: "Linux 6.8.0-136-generic".into(),
+            bytes: 634_600_000,
+            safety: Safety::Review,
+            method: ReclaimMethod::Packages {
+                kind: crate::space::RemovableKind::OldKernel,
+                names: vec!["linux-image-6.8.0-136-generic".into()],
+            },
+            cost: Some("cost".into()),
+            category: "old_kernels".into(),
+            reclaimable: Reclaimable::Exact,
+            fingerprint: 0,
+        };
+
+        // No helper is available in a test, so the attempt must fail at *elevation* — proving it got
+        // as far as trying. A `Skipped { "It is already gone." }` here is the bug this guards.
+        match reclaim_one(&item, &guard(), &mut Elevation::default()) {
+            ItemOutcome::Failed { .. } => {}
+            ItemOutcome::Skipped { reason, .. } => panic!(
+                "a kernel removal must reach the helper, not be skipped because its label is not a file: {reason}"
+            ),
+            ItemOutcome::Reclaimed { .. } => panic!("nothing should succeed without a helper"),
+        }
+    }
+
     #[test]
     fn an_unimplemented_method_fails_loudly_rather_than_silently() {
         let sandbox = Sandbox::new("unimpl");
@@ -1447,10 +1639,9 @@ mod tests {
             label: "x".into(),
             bytes: 4,
             safety: Safety::Safe,
-            // A method that genuinely has no implementation yet: it arrives with STO-12 in Phase 2.
-            method: ReclaimMethod::SnapRevision {
-                package: "firefox".into(),
-                revision: "1234".into(),
+            // A method that genuinely has no implementation yet: it arrives with STO-13.
+            method: ReclaimMethod::ContainerPrune {
+                scope: "images".into(),
             },
             cost: None,
             category: "test".into(),

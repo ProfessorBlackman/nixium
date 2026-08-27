@@ -17,7 +17,7 @@ pub(crate) use crate::space::{Manager, ReclaimKind, RemovableKind, VacuumLimit};
 /// Bumped whenever the message shape changes incompatibly. The client refuses to talk to a helper
 /// that reports a different version, because a version-skewed privileged process is exactly the
 /// thing not to guess about.
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// The **allow-list**. This enum is the security boundary of the entire privileged surface.
 ///
@@ -90,6 +90,31 @@ pub enum Op {
     /// The limit is a **typed value**, not a string, so no caller-supplied text ever reaches
     /// `journalctl`'s argument vector.
     JournalVacuum { limit: VacuumLimit },
+
+    /// List the snap revisions the helper considers removable.
+    ///
+    /// Derived inside the helper from `snap list --all`, so the list a user is shown is exactly the
+    /// list the helper is willing to act on.
+    ListSnapRevisions,
+
+    /// Drop one superseded snap revision. `STO-12`.
+    ///
+    /// The helper re-derives the disabled set and refuses anything outside it — so the **active**
+    /// revision cannot be removed even by a caller that names it deliberately. This is the same
+    /// rule, and the same two-sided enforcement, as never removing the running kernel.
+    ///
+    /// Both fields are validated against snapd's own output before either reaches a command line:
+    /// `package` must be a snap snapd reports as installed, and `revision` must be one snapd reports
+    /// as `disabled` for that snap.
+    RemoveSnapRevision { package: String, revision: String },
+
+    /// Ask flatpak to uninstall the runtimes it considers unused. `STO-12`.
+    ///
+    /// A fixed command with no caller-supplied text at all. Which runtimes qualify is **flatpak's**
+    /// decision, not nix's: flatpak resolves runtime extensions and dependencies, and delegating
+    /// that judgement is safer than reproducing it. nix's own derivation is used only to show the
+    /// user what to expect, and is qualified as an upper bound because of exactly this.
+    FlatpakUninstallUnused,
 }
 
 impl Op {
@@ -106,6 +131,9 @@ impl Op {
             Self::JournalVacuum { .. } => "journal_vacuum",
             Self::RemovePackages { .. } => "remove_packages",
             Self::ListRemovable { .. } => "list_removable",
+            Self::ListSnapRevisions => "list_snap_revisions",
+            Self::RemoveSnapRevision { .. } => "remove_snap_revision",
+            Self::FlatpakUninstallUnused => "flatpak_uninstall_unused",
         }
     }
 
@@ -121,6 +149,8 @@ impl Op {
                 | Self::PackageManagerClean { .. }
                 | Self::JournalVacuum { .. }
                 | Self::RemovePackages { .. }
+                | Self::RemoveSnapRevision { .. }
+                | Self::FlatpakUninstallUnused
         )
     }
 }
@@ -154,6 +184,11 @@ pub enum OpResult {
     Reclaimed { bytes: u64 },
     /// Reply to [`Op::ListRemovable`]: package names with the bytes each holds.
     Removable { packages: Vec<(String, u64)> },
+    /// Reply to [`Op::ListSnapRevisions`]: snap name, revision, bytes, and whether the blob is
+    /// shared with snapd's download cache.
+    SnapRevisions {
+        revisions: Vec<(String, String, u64, bool)>,
+    },
 }
 
 /// One response.

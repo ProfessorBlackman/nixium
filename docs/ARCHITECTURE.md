@@ -109,6 +109,8 @@ Built in M4:
 | `pkg` | STO-10 | package database queries; parsers tested against real captured output |
 | `reclaim::kernels` | STO-11 | superseded kernels and residual configuration |
 | `cow` | STO-17 | copy-on-write sharing, so an estimate is never overstated |
+| `pkg::snap` | STO-12 | snap revisions, with hard-link-aware sizing |
+| `pkg::flatpak` | STO-12 | flatpak refs, unused runtimes, ostree repository |
 | `tests/reclaim_accuracy` | 1.14 | the specification's 2% criterion, verified end to end |
 
 ## How "nothing bypasses preview" is enforced
@@ -197,6 +199,61 @@ that documentation — not against captured output. The package parsers found tw
 *because* they ran against a live database, and these have had no equivalent exposure. **They need
 re-verifying on a real btrfs and ZFS system before their numbers are trusted.** What is fully tested
 is the suppression logic, because that is pure and runs everywhere.
+
+`pkg::flatpak`'s runtime listing is in the same position for the same reason: this machine has a
+flatpak installation but nothing installed in it, so the unused-runtime derivation and the
+extension-matching rule are tested against fixtures rather than captured output. The repository
+measurement *is* exercised against real data, because 699 MiB of orphaned objects are sitting there.
+
+`pkg::snap` needs no such caveat — every parser and the hard-link accounting run against live snapd
+output on each test run.
+
+### Sharing is not a copy-on-write problem
+
+`space::Reclaimable` was built for btrfs and ZFS snapshots, on the assumption that shared extents
+were a filesystem-specific concern. They are not. The same problem turned up twice more on plain
+ext4:
+
+| Where | What shares the blocks | What that means |
+| --- | --- | --- |
+| btrfs, ZFS, LVM | snapshots holding old extents | freeing a file may free nothing |
+| snapd | every blob hard-linked into `/var/lib/snapd/cache` | removing a revision frees nothing until snapd prunes |
+| flatpak | deployments hard-linked out of the ostree repository | uninstalling frees nothing until the repository is pruned |
+
+One type expresses all three, which is a reasonable sign it models something real. Where the sharing
+can be *removed* it is removed rather than reported: the helper unlinks snapd's cache entry along with
+the blob, matched by inode, so a snap revision's figure is exact instead of qualified.
+
+### Paths and logical entries
+
+Not everything reclaimable is a file. A kernel, a snap revision, a package manager's cache — these are
+logical objects, and the `Candidate` for one carries a descriptive path like
+`kernel 6.8.0-136-generic` that was never meant to exist on disk.
+
+Two guards assume otherwise: the path protection rules, and the time-of-check fingerprint. Applied to
+a logical entry the first refuses it ("only absolute paths can be checked") and the second concludes
+it is already gone. Both fired silently, and between them they made every kernel and snap-revision
+candidate inert — measured correctly, then discarded before the user saw it.
+
+`ReclaimMethod::acts_on_path` is the distinction those guards were missing. Path rules and
+fingerprints apply where the path *is* the target. A logical entry is guarded instead by the
+privileged helper re-deriving its own eligible set at the moment it acts, which is stronger than a
+fingerprint: a kernel that stopped qualifying between preview and execution is refused by the process
+that would carry out the removal.
+
+### Advisories: measured, not automated
+
+`space::Advisory` covers space nix can account for but will not act on itself. There are two failure
+modes to avoid and they pull in opposite directions — hiding real space is the failure this project
+exists to correct, and automating an untested destructive operation is worse. An advisory is the third
+answer: report the bytes, name the remedy as a command the user can read, and say plainly why nix is
+not running it.
+
+Advisories are deliberately excluded from `Preview::total_bytes` and `promisable_bytes`, because those
+figures are promises about what the preview would reclaim.
+
+The case that forced the type: 699 MiB of unreferenced objects in this machine's flatpak ostree
+repository, and no `ostree` binary installed to prune them.
 
 ## The report checks its own arithmetic
 

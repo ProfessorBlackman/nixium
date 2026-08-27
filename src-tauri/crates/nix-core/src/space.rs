@@ -416,7 +416,15 @@ pub enum ReclaimMethod {
     /// arbitrary file even by a caller that constructs it deliberately.
     SystemFile { kind: ReclaimKind, path: PathBuf },
     /// Drop a superseded snap revision.
+    ///
+    /// The helper re-derives which revisions snapd has marked disabled and refuses anything outside
+    /// that set, so the active revision cannot be removed even if named deliberately.
     SnapRevision { package: String, revision: String },
+    /// Ask flatpak to uninstall the runtimes it considers unused.
+    ///
+    /// Carries nothing at all: the command is fixed and the decision of what qualifies is flatpak's.
+    /// One entry covers the whole operation, because that is the granularity flatpak offers.
+    FlatpakUnused,
     /// Prune container images or build caches.
     ContainerPrune { scope: String },
     /// Empty a volume's trash.
@@ -433,6 +441,73 @@ impl ReclaimMethod {
     pub const fn is_irreversible(&self) -> bool {
         !matches!(self, Self::MoveToTrash { .. })
     }
+
+    /// Whether the entry's path **is** the thing being removed.
+    ///
+    /// # Why this distinction has to exist
+    ///
+    /// Reclaiming re-checks a path immediately before acting on it, so that something which changed
+    /// since the preview is left alone. That check only means anything when the path is the target.
+    ///
+    /// Several methods act on a *logical* object instead — a kernel, a snap revision, a package
+    /// manager's cache — and carry a descriptive path like `kernel 6.8.0-136-generic` that was never
+    /// meant to exist on disk. Re-checking those would find nothing and conclude the item was
+    /// "already gone", silently skipping every one of them.
+    ///
+    /// For those, the guard is stronger than a fingerprint rather than weaker: the privileged helper
+    /// re-derives the eligible set at the moment it acts, so a kernel that stopped qualifying between
+    /// preview and execution is refused by the process carrying out the removal.
+    #[must_use]
+    pub const fn acts_on_path(&self) -> bool {
+        match self {
+            Self::MoveToTrash { .. }
+            | Self::Unlink { .. }
+            | Self::SystemFile { .. }
+            | Self::TrashEmpty { .. } => true,
+            Self::PackageManager { .. }
+            | Self::JournalVacuum { .. }
+            | Self::Packages { .. }
+            | Self::SnapRevision { .. }
+            | Self::FlatpakUnused
+            | Self::ContainerPrune { .. } => false,
+        }
+    }
+}
+
+/// Space nix can **see and account for but will not act on itself**.
+///
+/// # Why this exists
+///
+/// The failure mode this project exists to avoid is space that is real, large, and invisible. But
+/// there is a second failure mode just as bad: automating a destructive operation that has never
+/// been exercised. Some findings sit between the two — the bytes are certain, the remedy is known,
+/// and the tool that would carry it out is either absent or unverified on this machine.
+///
+/// Hiding those bytes would repeat the first mistake; offering a button would commit the second. An
+/// advisory is the honest third answer: report the size, name the remedy, and say plainly why nix is
+/// not doing it. The user keeps the information and the decision.
+///
+/// The concrete case that prompted it: 701 MiB of unreferenced objects in this machine's flatpak
+/// ostree repository, with no `ostree` binary installed to prune them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Advisory {
+    /// Where it is, when it is a place.
+    pub path: Option<PathBuf>,
+    /// What the user sees.
+    pub label: String,
+    /// On-disk bytes, measured the same way a candidate's are.
+    #[ts(type = "number")]
+    pub bytes: u64,
+    /// How much of `bytes` would actually come back, qualified as honestly as a candidate's.
+    pub reclaimable: Reclaimable,
+    /// Why nix will not do this itself. Required, because an advisory without this is just a
+    /// refusal with no explanation.
+    pub why_manual: String,
+    /// What the user can run instead. A command they can read before they run it.
+    pub remedy: String,
+    /// Which category reported it.
+    pub category: String,
 }
 
 /// How nix concluded what an entry is. Shown in the UI, so a user can judge our reasoning.

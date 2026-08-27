@@ -16,7 +16,7 @@ use std::path::PathBuf;
 
 use crate::error::Result;
 use crate::op::CancelToken;
-use crate::space::{Category as SpaceCategory, ReclaimMethod, Reclaimable, Safety};
+use crate::space::{Advisory, Category as SpaceCategory, ReclaimMethod, Reclaimable, Safety};
 
 /// Something a category proposes reclaiming.
 ///
@@ -63,6 +63,15 @@ pub trait Category: Send + Sync {
         true
     }
 
+    /// Space this category can see but will not act on itself.
+    ///
+    /// Defaults to none. A category overrides it when it can measure something real whose remedy is
+    /// a tool nix does not have, or has not exercised — see [`Advisory`] for why that is reported
+    /// rather than hidden.
+    fn advisories(&self) -> Vec<Advisory> {
+        Vec::new()
+    }
+
     /// Find what could be reclaimed. Must honour cancellation.
     fn candidates(&self, token: &CancelToken) -> Result<Vec<Candidate>>;
 }
@@ -103,6 +112,10 @@ impl Registry {
         // Phase 2 opens with the largest real-world win: old kernels.
         registry.register(Box::new(super::OldKernelCategory::new()));
         registry.register(Box::new(super::ResidualConfigCategory::new()));
+        // `STO-12`: the largest single figure found so far on this machine — 3.3 GiB of superseded
+        // snap revisions.
+        registry.register(Box::new(super::SnapRevisionCategory::new()));
+        registry.register(Box::new(super::FlatpakUnusedCategory::new()));
         registry
     }
 
@@ -149,6 +162,19 @@ impl Registry {
             }
         }
         Ok(all)
+    }
+
+    /// Every category's advisories.
+    ///
+    /// Unlike [`Registry::collect`] this does not take a cancellation token: an advisory is derived
+    /// from figures a category already has, so there is nothing long-running to cancel.
+    #[must_use]
+    pub fn collect_advisories(&self) -> Vec<Advisory> {
+        self.categories
+            .iter()
+            .filter(|c| c.available())
+            .flat_map(|c| c.advisories())
+            .collect()
     }
 }
 
