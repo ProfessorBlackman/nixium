@@ -16,8 +16,9 @@ followed — is in [issues/](issues/README.md).
 | **M2** "Where did my disk go?" (tasks 1.1–1.6, 1.15) | **complete** |
 | **M3** First safe reclaim (tasks 1.7–1.10) | **complete** |
 | **M4** Storage core complete (tasks 1.11–1.14) — **Phase 1 done** | **complete** |
-| **M5** Storage depth (Phase 2) | **in progress** — STO-10, STO-11, STO-17 done; 6 remain |
-| M6 – M9 | not started |
+| **M5** Storage depth (Phase 2) — **Phase 2 done** | **complete** |
+| M6 Monitoring (Phase 3) | not started — **next** |
+| M7 – M9 | not started |
 
 Phase 0 shipped all eleven tasks: the three-crate workspace and quality gates, the error taxonomy,
 the IPC contract with its progress/cancellation primitive, the app shell with lazily-mounted views,
