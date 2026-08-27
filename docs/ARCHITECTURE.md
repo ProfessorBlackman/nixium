@@ -285,6 +285,54 @@ those same threads. In isolation it measured 35 ms for 2,590 files; with concurr
 collapsed to fifteen seconds, and cancellation could not unwind through the blocked scopes.
 `par_iter` is built on `join` and nests correctly.
 
+## Where scan time actually goes
+
+Worth writing down, because it was assumed wrong twice. Measured on `/usr` — 422,330 files, 45,488
+directories, eight cores:
+
+| | |
+| --- | --- |
+| parallel `readdir` + `stat`, accumulating only a byte total | **344 ms** — the floor |
+| the scan as it now stands, 454,129 nodes | **759 ms** |
+| the scan before this was measured | 1.5 s |
+
+**The scan is not filesystem-bound.** It never was. Two thirds of the original 1.5 s went on building
+tree nodes, one `Mutex<SpaceTree>` acquisition per entry at roughly 2 µs each.
+
+Three rules follow, and the module documentation in `scan.rs` records why each is not negotiable:
+
+1. **Nodes are batched, one append per directory** — 45,488 lock acquisitions rather than 454,129.
+2. **Only ids travel up the recursion.** A `SpaceEntry` is 200 bytes and an `EntryId` is eight. An
+   attempt at merging node vectors upward copied every node once per level of tree above it, so a node
+   twelve deep was copied twelve times; it bought 13% where 3× was expected.
+3. **The map is built once, pre-sized, outside the lock.** Writing into it *under* the lock made the
+   scan slower than the original — 2.3 s — because a map growing to 454,129 entries rehashes about
+   nineteen times and each rehash blocks every other thread.
+
+This is possible only because `EntryId::for_path` is a pure function of the path. There is no central
+id allocator to serialise on, so a node built on any thread has the id it would have had in a shared
+tree.
+
+`budget::SCAN_PER_FILE` guards the result at 10 µs per file, against a measured 1.59 µs.
+
+### The memory cost is not yet bounded
+
+The same measurements against a real home directory — 5,406,062 files, 782,107 directories — take
+34.7 s and peak at **4.2 GiB resident**, because the model materialises a node per file: 5,454,451
+nodes at 200 bytes, plus each node's heap-allocated path and label, plus the staging vector alive
+alongside the finished map.
+
+`Options::max_depth` was meant to bound this and does not: at its default of 12, almost every file in
+a home directory is still inside the cap.
+
+The accounting itself is right — 307.2 GiB against `du`'s 310.4 GiB, the gap being 427 permission
+errors and not crossing filesystem boundaries. Nothing is miscounted; there is simply a node for every
+file when what a user needs is to know where the bytes are.
+
+Raised as **STO-19** at P0. The likely shape is bounding the tree by *significance* instead of depth —
+individual nodes for children that matter and one honest "*n* smaller items" node for the remainder,
+which is decision D8's pixel-level aggregation applied at the model level.
+
 ## The privileged helper
 
 Stacer escalated by re-running individual commands under `pkexec`: one authentication prompt *per

@@ -146,20 +146,47 @@ struct Counters {
 }
 
 /// The summary of one directory, rolled up from its contents.
-#[derive(Debug, Default, Clone, Copy)]
+///
+/// # Why the nodes travel with the totals
+///
+/// The tree used to be built through a shared `Mutex<SpaceTree>`, one lock acquisition per entry.
+/// Measured on `/usr` — 422,330 files, 45,488 directories, eight cores — that cost about **2 µs per
+/// node**, which for 454,129 nodes is roughly **1.0 s of a 1.5 s scan**: two thirds of the work was
+/// threads queueing behind each other, not filesystem access. The parallel syscall floor for the
+/// same tree is 344 ms.
+///
+/// So each thread accumulates its own fragment and fragments are merged as the recursion unwinds.
+/// This is only possible because [`EntryId::for_path`] is a pure function of the path — there is no
+/// central allocator to serialise on, and a node built in isolation has the same id it would have
+/// had in a shared tree.
+#[derive(Debug, Default)]
 struct Rollup {
     apparent: u64,
     allocated: u64,
     files: u64,
     dirs: u64,
+    /// Ids of the *direct* children of the directory this rollup describes, in discovery order.
+    ///
+    /// Only **ids** travel up the recursion, never the nodes themselves. A [`SpaceEntry`] is 200
+    /// bytes and an [`EntryId`] is eight, and an earlier version of this merged whole node vectors
+    /// upward — which memcpy'd every node once per level of tree above it, so a node twelve deep was
+    /// copied twelve times. The nodes go straight into a shared sink instead, one batch per
+    /// directory.
+    direct: Vec<EntryId>,
+    /// Nodes for this directory's *subdirectories*, which only the parent can build because only it
+    /// has their rolled-up totals. At most one per subdirectory, so this stays small.
+    subdir_nodes: Vec<SpaceEntry>,
 }
 
 impl Rollup {
-    fn merge(&mut self, other: Self) {
+    /// Merge a sibling subtree.
+    fn merge(&mut self, mut other: Self) {
         self.apparent += other.apparent;
         self.allocated += other.allocated;
         self.files += other.files;
         self.dirs += other.dirs;
+        self.direct.append(&mut other.direct);
+        self.subdir_nodes.append(&mut other.subdir_nodes);
     }
 }
 
@@ -167,7 +194,21 @@ impl Rollup {
 struct Shared {
     counters: Counters,
     errors: Mutex<Vec<ScanError>>,
-    tree: Mutex<SpaceTree>,
+    /// Every node the walk has built, appended **one directory at a time**.
+    ///
+    /// Batching is the point. Inserting each node individually into a shared tree cost about 2 µs
+    /// per node under contention — for `/usr`'s 454,129 nodes, roughly 1.0 s of a 1.5 s scan. One
+    /// append per directory is 45,488 acquisitions rather than 454,129, and each holds the lock only
+    /// long enough to move a `Vec`'s buffer.
+    ///
+    /// A staging vector rather than the finished map, because inserting into the map *under the
+    /// lock* was measured at 2.3 s — worse than the original — since the map's rehashing then
+    /// happens with every other thread waiting on it. The map is built once, pre-sized, at the end.
+    ///
+    /// The cost of staging is that the vector and the map are both alive during the transfer. That
+    /// is fine for a system directory and not fine for a large home directory; see the memory note
+    /// on [`scan`].
+    nodes: Mutex<Vec<SpaceEntry>>,
     /// `(device, inode)` of every hard-linked file already counted, so its blocks are counted once.
     seen_links: Mutex<std::collections::HashSet<(u64, u64)>>,
     token: CancelToken,
@@ -224,7 +265,7 @@ const fn allocated_bytes(meta_blocks: u64) -> u64 {
 /// pool with threads waiting on children that need the very threads that are waiting. In isolation
 /// it looked fine — 35 ms for 2,590 files — but with several scans running concurrently it
 /// collapsed to fifteen seconds, and cancellation could not unwind through the blocked scopes.
-fn walk(dir: &Path, depth: usize, shared: &Shared, parent: Option<EntryId>) -> Rollup {
+fn walk(dir: &Path, depth: usize, shared: &Shared) -> Rollup {
     let mut rollup = Rollup::default();
 
     if shared.token.is_cancelled() {
@@ -242,6 +283,9 @@ fn walk(dir: &Path, depth: usize, shared: &Shared, parent: Option<EntryId>) -> R
     // Subdirectories are collected first so they can be walked after this directory's files are
     // accounted for, which keeps the rollup arithmetic simple.
     let mut subdirs: Vec<PathBuf> = Vec::new();
+    // Nodes for the files directly in this directory, handed to the shared sink in one batch once
+    // the whole directory has been read.
+    let mut mine: Vec<SpaceEntry> = Vec::new();
 
     for entry in reader {
         if shared.token.is_cancelled() {
@@ -311,10 +355,9 @@ fn walk(dir: &Path, depth: usize, shared: &Shared, parent: Option<EntryId>) -> R
             // Only entries within the depth cap become nodes. Beyond it their bytes still roll up
             // into an ancestor, so totals stay complete while the payload stays bounded.
             if shared.options.max_depth.is_none_or(|max| depth < max) {
-                if let (Ok(mut tree), Some(parent)) = (shared.tree.lock(), parent) {
-                    let id = tree.insert(SpaceEntry::walked(path, apparent, allocated, false));
-                    tree.attach(parent, id);
-                }
+                let node = SpaceEntry::walked(path, apparent, allocated, false);
+                rollup.direct.push(node.id);
+                mine.push(node);
             }
         }
     }
@@ -326,34 +369,31 @@ fn walk(dir: &Path, depth: usize, shared: &Shared, parent: Option<EntryId>) -> R
     let children = subdirs
         .par_iter()
         .map(|subdir| {
-            let node = if within_depth {
-                shared.tree.lock().ok().map(|mut tree| {
-                    let id = tree.insert(SpaceEntry::walked(subdir.clone(), 0, 0, true));
-                    if let Some(parent) = parent {
-                        tree.attach(parent, id);
-                    }
-                    id
-                })
-            } else {
-                None
+            let child = walk(subdir, depth + 1, shared);
+
+            let mut acc = Rollup {
+                apparent: child.apparent,
+                allocated: child.allocated,
+                files: child.files,
+                dirs: child.dirs + 1,
+                direct: Vec::new(),
+                subdir_nodes: Vec::new(),
             };
 
-            let child = walk(subdir, depth + 1, shared, node.or(parent));
-
-            // Write the rolled-up totals back onto the directory's own node, so a directory's size
-            // is the size of its contents.
-            if let (Some(id), Ok(mut tree)) = (node, shared.tree.lock()) {
-                if let Some(entry) = tree.entries.get_mut(&id) {
-                    entry.apparent_size = child.apparent;
-                    entry.allocated = child.allocated;
-                }
+            // The directory's own node carries its contents' rolled-up totals, so a directory's
+            // size is the size of what is inside it. Built *after* the walk, because only then are
+            // those totals known — the previous version inserted a zeroed node first and patched it
+            // afterwards, which needed two more lock acquisitions per directory.
+            if within_depth {
+                let mut node =
+                    SpaceEntry::walked(subdir.clone(), child.apparent, child.allocated, true);
+                node.children = child.direct;
+                acc.direct.push(node.id);
+                acc.subdir_nodes.push(node);
             }
 
             shared.counters.dirs.fetch_add(1, Ordering::Relaxed);
-            Rollup {
-                dirs: child.dirs + 1,
-                ..child
-            }
+            acc
         })
         .reduce(Rollup::default, |mut a, b| {
             a.merge(b);
@@ -361,6 +401,15 @@ fn walk(dir: &Path, depth: usize, shared: &Shared, parent: Option<EntryId>) -> R
         });
 
     rollup.merge(children);
+
+    // One acquisition for this whole directory: its files, and the nodes for its subdirectories.
+    if !mine.is_empty() || !rollup.subdir_nodes.is_empty() {
+        if let Ok(mut sink) = shared.nodes.lock() {
+            sink.append(&mut mine);
+            sink.append(&mut rollup.subdir_nodes);
+        }
+    }
+
     rollup
 }
 
@@ -384,13 +433,10 @@ pub fn scan(
         );
     }
 
-    let mut tree = SpaceTree::new();
-    let root_id = tree.insert_root(SpaceEntry::walked(root.clone(), 0, 0, true));
-
     let shared = Shared {
         counters: Counters::default(),
         errors: Mutex::new(Vec::new()),
-        tree: Mutex::new(tree),
+        nodes: Mutex::new(Vec::new()),
         seen_links: Mutex::new(std::collections::HashSet::new()),
         token: token.clone(),
         root_device: meta.dev(),
@@ -398,16 +444,27 @@ pub fn scan(
         progress: Box::new(progress),
     };
 
-    let total = walk(&root, 0, &shared, Some(root_id));
+    let total = walk(&root, 0, &shared);
 
-    let mut tree = shared
-        .tree
+    // The tree is assembled once, here, from nodes the walk accumulated thread-locally. Sized up
+    // front so the map never rehashes: 454,129 nodes for `/usr`, and a growing `HashMap` would
+    // rebuild its table a dozen times on the way there.
+    let nodes = shared
+        .nodes
         .into_inner()
-        .map_err(|_| AppError::internal("The scan's tree lock was poisoned."))?;
-    if let Some(entry) = tree.entries.get_mut(&root_id) {
-        entry.apparent_size = total.apparent;
-        entry.allocated = total.allocated;
+        .map_err(|_| AppError::internal("The scan's node sink lock was poisoned."))?;
+
+    // Pre-sized so the map never rehashes on the way to its final size: 454,129 nodes for `/usr`,
+    // and a growing map would rebuild its table nineteen times getting there.
+    let mut tree = SpaceTree::new();
+    tree.entries.reserve(nodes.len() + 1);
+    for node in nodes {
+        tree.entries.insert(node.id, node);
     }
+
+    let mut root_node = SpaceEntry::walked(root.clone(), total.apparent, total.allocated, true);
+    root_node.children = total.direct;
+    tree.insert_root(root_node);
 
     let errors = shared
         .errors
@@ -480,6 +537,93 @@ mod tests {
 
     fn scan_fixture(fx: &Fixture) -> ScanResult {
         scan_quiet(Options::new(fx.root()).max_depth(None), CancelToken::new()).unwrap()
+    }
+
+    /// # Regression
+    ///
+    /// The tree used to be built by inserting each node into a shared `Mutex<SpaceTree>` as the walk
+    /// went, with parent ids threaded down the recursion. It is now assembled from nodes each
+    /// directory accumulates locally, with only ids travelling upward — a change made for speed
+    /// (1.5 s to 759 ms on `/usr`) that touched every structural relationship in the tree at once.
+    ///
+    /// Counts alone would not have caught a mistake there: a tree can have exactly the right number
+    /// of nodes and attach half of them to the wrong parent. So this checks the relationships.
+    #[test]
+    fn the_assembled_tree_is_fully_connected_and_rolls_up_correctly() {
+        use std::collections::HashSet;
+
+        let fixture = Fixture::create(&Spec::default()).unwrap();
+        let result = scan_quiet(
+            Options::new(fixture.root()).max_depth(None),
+            CancelToken::new(),
+        )
+        .unwrap();
+
+        assert_eq!(result.tree.roots.len(), 1, "one scan, one root");
+        let root_id = result.tree.roots[0];
+
+        // 1. Every node is reachable from the root exactly once. An orphan would be invisible in the
+        //    UI while still counting towards totals; a node reached twice would be double-counted.
+        let mut seen: HashSet<EntryId> = HashSet::new();
+        let mut stack = vec![root_id];
+        while let Some(id) = stack.pop() {
+            assert!(seen.insert(id), "{id} is reachable by more than one path");
+            let entry = result
+                .tree
+                .get(id)
+                .unwrap_or_else(|| panic!("{id} is referenced as a child but has no node"));
+            stack.extend(entry.children.iter().copied());
+        }
+        assert_eq!(
+            seen.len(),
+            result.tree.entries.len(),
+            "{} nodes are not reachable from the root",
+            result.tree.entries.len() - seen.len()
+        );
+
+        // 2. Every directory's children are exactly what is on disk at that path, so nothing was
+        //    attached to the wrong parent.
+        for entry in result.tree.entries.values().filter(|e| e.is_dir) {
+            let Some(path) = entry.path.as_ref() else {
+                continue;
+            };
+            let Ok(actual) = std::fs::read_dir(path) else {
+                continue;
+            };
+            let on_disk: HashSet<EntryId> = actual
+                .flatten()
+                .map(|e| EntryId::for_path(&e.path()))
+                .collect();
+            let in_tree: HashSet<EntryId> = entry.children.iter().copied().collect();
+            assert_eq!(
+                in_tree,
+                on_disk,
+                "{}'s children do not match its contents",
+                path.display()
+            );
+        }
+
+        // 3. A directory's size is the size of what is inside it. `check_invariants` only asserts
+        //    children *fit*; this asserts they add up.
+        for entry in result.tree.entries.values().filter(|e| e.is_dir) {
+            let children: u64 = entry
+                .children
+                .iter()
+                .filter_map(|c| result.tree.get(*c))
+                .map(|c| c.allocated)
+                .sum();
+            assert_eq!(
+                entry.allocated, children,
+                "{} claims {} but its children hold {children}",
+                entry.label, entry.allocated
+            );
+        }
+
+        assert!(
+            result.tree.check_invariants().is_empty(),
+            "{:?}",
+            result.tree.check_invariants()
+        );
     }
 
     #[test]

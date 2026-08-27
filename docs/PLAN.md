@@ -122,7 +122,47 @@ forced it: **699 MiB of unreferenced objects** in this machine's flatpak ostree 
 to avoid; shipping an automated privileged prune never once executed would be worse. An advisory
 reports the size, the reason and the command, and is deliberately excluded from both preview totals.
 
-Remaining: STO-18, STO-14, STO-13, STO-15, STO-16.
+**STO-18 was superseded rather than built**, on the evidence of measuring it first.
+
+The plan called for an incremental rescan keyed by (path, mtime, size), accepting at "under 10% of
+the initial scan time". Probing before designing showed that criterion is unreachable for any
+*correct* rescan: a directory's mtime does not move when a file inside it grows in place, so nothing
+stat-based can prove a subtree unchanged without walking it; `readdir` alone is 47% of a full scan;
+and complete inotify coverage of this machine's home directory would need 782,060 watches against a
+kernel ceiling of 524,228.
+
+The same probes found something better. On `/usr` — 422,330 files, 45,488 directories, eight cores —
+the parallel syscall floor is **344 ms** while the scan took **1.5 s**. The scan was never
+filesystem-bound; it was spending two thirds of its time building 454,129 tree nodes, one mutex
+acquisition at a time. Fixing that helps the *first* scan as much as the tenth, and needs no cache,
+no staleness tracking and no second code path to keep correct.
+
+Two wrong turns on the way, both measured rather than assumed — the first "fix" moved nodes up the
+recursion and copied 200 bytes per node per level (1.5 s → 1.3 s only); a later attempt wrote
+straight into the map under the lock and made it *worse* than the original at 2.3 s, because the
+map's rehashing then blocked every thread. The version that landed batches one append per directory
+and builds the map once, pre-sized:
+
+| | before | after |
+| --- | --- | --- |
+| `/usr` scan | 1.5 s | **759 ms** |
+| throughput | 447,687 files/sec | **628,637 files/sec** |
+| per file | 3.55 µs | **1.59 µs** |
+| tree nodes | 454,129 | 454,129 (identical, 0 invariant violations) |
+
+`budget::SCAN_PER_FILE` was tightened from 30 µs to 10 µs so the gain cannot silently regress. The
+30 µs figure came from the throughput requirement in SPEC §8 and had three orders of magnitude of
+slack, which guards nothing.
+
+**STO-19 was added at P0 as a result.** Scanning a real home directory — 5,406,062 files, 782,107
+directories — takes 34.7 s and peaks at **4.2 GiB resident**, because it materialises 5,454,451 nodes
+of 200 bytes each. The depth cap was supposed to bound this and does not, since depth 12 still reaches
+almost every file. Its byte accounting is *correct* (307.2 GiB against `du`'s 310.4 GiB, the gap being
+427 permission errors and not crossing filesystems) — the problem is purely that the model holds a
+node per file. That has to be bounded by significance before the explorer can be pointed at a home
+directory.
+
+Remaining: STO-19 (new, P0), STO-14, STO-13, STO-15, STO-16.
 
 Note also that §4's parallelisation advice no longer applies: this is a solo project, which is why
 **task 0.9 was completed within Phase 0 rather than deferred** — see §5.2 for why M2 is nonetheless

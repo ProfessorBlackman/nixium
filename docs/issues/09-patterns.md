@@ -1,6 +1,6 @@
 # What generalises
 
-Thirty-six entries is enough to see structure. This is the part worth re-reading.
+Thirty-nine entries is enough to see structure. This is the part worth re-reading.
 
 ---
 
@@ -52,7 +52,32 @@ they have not had this exposure.
 
 ---
 
-## 3. Testing components in isolation hid a whole milestone being inert
+## 3. Measure before designing, because the premise is the thing most likely to be wrong
+
+STO-18 specified an incremental rescan, on the reasonable-sounding premise that a scan's cost is
+filesystem access. Half a day of probing before writing any feature code established that the scan was
+running at **4.3× its own syscall floor**, that two thirds of its time went on building tree nodes, and
+that the feature's acceptance criterion was arithmetically unreachable for any correct implementation.
+
+The feature was replaced by a change that made every scan twice as fast — including the first, which no
+incremental scheme can help — and the probing also turned up a 4.2 GiB memory peak that had gone
+unnoticed through three milestones of scanner work.
+
+The probes were four throwaway test files, each about thirty lines, deleted afterwards. Nothing about
+them was clever; they just measured the thing rather than reasoning about it.
+
+**Generalisation.** Before building an optimisation, measure the cost you intend to remove and the
+floor you cannot go below. If the gap between them is small, the optimisation is not worth building
+whatever the plan says. Two of the three most valuable findings in this project came from measuring
+something the plan had already decided.
+
+The corollary, from the same episode: **measure each attempted fix too.** The diagnosis was right and
+the first two implementations were both wrong — one gave 13% where 3× was predicted, and one made
+things *worse than the original*. Neither would have been noticed without a number.
+
+---
+
+## 4. Testing components in isolation hid a whole milestone being inert
 
 STO-11 was tested by calling `OldKernelCategory::candidates()` and checking the result: 1.2 GiB, both
 kernels correct, running kernel excluded. Every one of those assertions was true. The feature did
@@ -68,7 +93,7 @@ consequential defects in the project.
 
 ---
 
-## 4. Show refusals, and the refusals will tell you what is broken
+## 5. Show refusals, and the refusals will tell you what is broken
 
 The inert-pipeline defect surfaced because M3 decided that candidates rejected by the protection rules
 are **listed, not dropped**. That was a product decision about honesty: a user should be able to see
@@ -83,7 +108,7 @@ bugs live undisturbed, and the cost of surfacing them is usually one list in the
 
 ---
 
-## 5. Eliminate a caveat where you can, rather than reporting it
+## 6. Eliminate a caveat where you can, rather than reporting it
 
 Snap revisions were initially reported as `AtMost { exclusive: None }` — honest, and useless: "we can
 free somewhere between nothing and 3.3 GiB".
@@ -99,7 +124,7 @@ case became an [advisory](../ARCHITECTURE.md) rather than a button.
 
 ---
 
-## 6. A prefix is a set; an exact list is a list
+## 7. A prefix is a set; an exact list is a list
 
 The helper's read allow-list used directory prefixes, and `/etc` as a prefix admits `/etc/shadow`.
 Separately, widening `fuse.` to `fuse` would have hidden every NTFS and exFAT volume, because
@@ -119,9 +144,9 @@ it.
 
 ---
 
-## 7. Encode the guard in the toolchain, not in memory
+## 8. Encode the guard in the toolchain, not in memory
 
-Ten of thirty-six entries were caught by a gate. Those cost minutes. The ones that cost hours were
+Ten of thirty-nine entries were caught by a gate. Those cost minutes. The ones that cost hours were
 caught by reasoning, and the two worst were nearly not caught at all.
 
 Gates currently in force:
@@ -146,7 +171,7 @@ raising the ceiling"*, because a bare size assertion invites raising the number.
 
 ---
 
-## 8. Verify that the guard fires
+## 9. Verify that the guard fires
 
 Twice a guard was written and then confirmed by deliberately breaking the code:
 
@@ -164,7 +189,7 @@ takes a minute and it is the only evidence the test works.
 
 ---
 
-## 9. When a test fails unexpectedly, read the code before changing the test
+## 10. When a test fails unexpectedly, read the code before changing the test
 
 `candidates_are_ordered_largest_first` failed and looked like a comparator bug. It was not — the
 category was reaching for a hardcoded path rather than the one it had been given, so under test it

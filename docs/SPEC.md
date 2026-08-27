@@ -309,7 +309,8 @@ with a reclaim method (§5.5 invariant 3); user exclusions survive a rescan.
 | STO-15 | Large files & duplicates | P1 |
 | STO-16 | Growth history | P2 |
 | STO-17 | btrfs, LVM & ZFS awareness | **P0** |
-| STO-18 | Incremental rescan | P1 |
+| STO-18 | Incremental rescan | ~~P1~~ superseded |
+| STO-19 | Bounded scan memory | **P0** |
 
 **STO-10 Package storage attribution.** Installed size per package, joined into the space model
 so a directory can name the package that owns it. This is what makes an uninstaller a storage
@@ -376,10 +377,37 @@ snapper or Timeshift snapshot can destroy a user's only rollback point.
 *Accepts:* free space matches `btrfs filesystem usage`, not `df`; no reclaim estimate is shown
 for extents nix cannot prove are exclusive; nix never claims space it cannot free.
 
-**STO-18 Incremental rescan.** The optimisation half of the cache STO-2 already owns: keyed by
-(path, mtime, size) so a rescan only walks what changed. Also what makes STO-16's timer job cheap
-enough to run daily. *Accepts:* a rescan of an unchanged tree completes in under 10% of the
-initial scan time.
+**STO-18 Incremental rescan.** *Superseded — see below.* Originally: the optimisation half of the
+cache STO-2 already owns, keyed by (path, mtime, size) so a rescan only walks what changed, and what
+makes STO-16's timer job cheap enough to run daily.
+
+Measurement showed the premise was wrong, so the feature was replaced by a direct optimisation of the
+scan itself. Three findings, all on `/usr` (422,330 files, 45,488 directories, eight cores):
+
+1. **The original criterion — under 10% of initial scan time — is unreachable for any *correct*
+   rescan.** A directory's mtime does not change when a file inside it is modified in place, so no
+   stat-based summary can prove a subtree unchanged without walking it; `readdir` alone is 47% of a
+   full scan; and complete inotify coverage would need 782,060 watches for this machine's home
+   directory against a kernel ceiling of 524,228. A ratio criterion is also the wrong shape, because
+   it rewards a slow baseline.
+2. **The scan was not filesystem-bound at all.** The parallel syscall floor for `/usr` is 344 ms; the
+   scan took 1.5 s. The difference was building 454,129 tree nodes — first through a per-node mutex,
+   then, after a first attempt at fixing it, by copying 200-byte nodes up every level of the
+   recursion.
+3. **Fixing that was worth more than the feature would have been**, and applies to the *first* scan
+   as well as later ones, with no cache to invalidate and no staleness to trust.
+
+*Accepts:* a filesystem scan sustains **under 10 µs per file**, asserted in CI by
+`budget::SCAN_PER_FILE` against a generated fixture. Measured 1.59–1.80 µs per file, ~629,000
+files/sec, against the 30 µs the throughput requirement in §8 implies.
+
+**STO-19 Bounded scan memory.** *New, found while measuring STO-18.* Scan memory currently scales
+with file count rather than with anything the user can see: a real home directory here produces
+5,454,451 nodes at 200 bytes each and peaks at **4.2 GiB** resident, which is not shippable. The depth
+cap was meant to bound the payload and does not, because depth 12 still reaches almost every file.
+
+*Accepts:* a scan of a 5-million-file tree peaks under 500 MiB; the tree the UI receives is bounded by
+significance rather than by file count, and says plainly how many entries it aggregated.
 
 ---
 
@@ -696,6 +724,7 @@ Re-open D8 if the team turns out to have no React familiarity; that is the one i
 | STO-17 raised P1 → **P0** | D3 |
 | STO-16 respecified: user timer, opt-in, bounded job, fallback tier | D5 |
 | Scan **persistence** moved from STO-18 into STO-2 (Phase 1), so cached-first works without depending on a Phase 2 feature; STO-18 keeps the incremental-rescan optimisation | D6 |
+| STO-18 superseded by a direct scan optimisation (2x, measured); its ratio criterion replaced by an absolute one; **STO-19 bounded scan memory** added at P0 | measurement, see STO-18 |
 | SYS-3 cut; Phase 6 (System tools) folded into Phase 5; Release readiness renumbered 7 → 6 | D7 |
 | SYS-2 reframed as a filter over the storage index rather than a standalone search tool | D7 |
 | Non-goal reworded from "always-on daemon" to "resident daemon or system service" | D5 |
