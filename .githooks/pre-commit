@@ -22,7 +22,12 @@ fi
 
 # Every source file carries its licence. Generated bindings are excluded: ts-rs rewrites them on
 # each build, so a header there would be lost — they are covered by the repository LICENSE.
-missing=$(staged | grep -E '\.(rs|ts|tsx|css)$' | grep -v '^src/bindings/' | while read -r f; do
+# `|| true` on both greps is load-bearing: under `pipefail`, a grep that matches nothing exits 1 and
+# `set -e` then aborts the hook. Without it, any commit touching no source files at all — a
+# documentation-only commit, for instance — failed with no output and no explanation.
+sources=$(staged | grep -E '\.(rs|ts|tsx|css)$' | grep -v '^src/bindings/' || true)
+missing=$(printf '%s\n' "$sources" | while read -r f; do
+    [ -n "$f" ] || continue
     [ -f "$f" ] || continue
     head -c 400 "$f" | grep -q 'SPDX-License-Identifier: GPL-3.0-or-later' || echo "  $f"
 done)

@@ -3,7 +3,9 @@
 **Status:** v0.1 · **Companion to:** [SPEC.md](SPEC.md) (draft v0.2, all decisions resolved) ·
 **Last updated:** 2026-08-26
 
-The spec says *what* and *why*. This says *in what order, and how we know it works*.
+The spec says *what* and *why*. This says *in what order, and how we know it works*. What actually
+went wrong along the way — thirty-six defects and obstacles, with resolutions and the guards that
+followed — is in [issues/](issues/README.md).
 
 ## Progress
 

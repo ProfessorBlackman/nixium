@@ -1,7 +1,9 @@
 # Architecture
 
 Living document. Records structural decisions and the rules that keep them from eroding.
-Feature-level detail belongs in [SPEC.md](SPEC.md); sequencing belongs in [PLAN.md](PLAN.md).
+Feature-level detail belongs in [SPEC.md](SPEC.md); sequencing belongs in [PLAN.md](PLAN.md); the
+defects that produced several of the rules below are logged in
+[issues/](issues/README.md), which also lists what is known to be unverified.
 
 ## Crate layout
 
