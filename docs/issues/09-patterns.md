@@ -1,6 +1,6 @@
 # What generalises
 
-Forty-two entries is enough to see structure. This is the part worth re-reading.
+Forty-three entries is enough to see structure. This is the part worth re-reading.
 
 ---
 
@@ -95,7 +95,25 @@ consequential defects in the project.
 
 ---
 
-## 5. Show refusals, and the refusals will tell you what is broken
+## 5. A test can validate a weaker property than the one you are claiming
+
+Five tests checked that reclaim figures were accurate to within 2%, and all five passed while nix was
+reporting 9.8 GiB freed for a cache it had only moved to the trash. The tests compared against a
+**directory-tree** measurement; the claim was about **free space**. Trashing satisfies the first and
+not the second.
+
+Nothing about the tests was sloppy. They measured carefully, to a stated tolerance, against an
+independent implementation. They just measured the wrong noun — and being rigorous about the wrong
+quantity is a very comfortable place to be, because everything passes.
+
+**Generalisation.** For each test, write down the sentence it is supposed to prove, then ask whether a
+plausible wrong implementation could pass it. Here, "the bytes left the directory" and "the user got
+the space back" differ by exactly one design decision, and the harness never named which one it meant.
+Naming it — the helper is now called `left_the_tree` — makes the gap visible in the source.
+
+---
+
+## 6. Show refusals, and the refusals will tell you what is broken
 
 The inert-pipeline defect surfaced because M3 decided that candidates rejected by the protection rules
 are **listed, not dropped**. That was a product decision about honesty: a user should be able to see
@@ -110,7 +128,7 @@ bugs live undisturbed, and the cost of surfacing them is usually one list in the
 
 ---
 
-## 6. Eliminate a caveat where you can, rather than reporting it
+## 7. Eliminate a caveat where you can, rather than reporting it
 
 Snap revisions were initially reported as `AtMost { exclusive: None }` — honest, and useless: "we can
 free somewhere between nothing and 3.3 GiB".
@@ -126,7 +144,7 @@ case became an [advisory](../ARCHITECTURE.md) rather than a button.
 
 ---
 
-## 7. A prefix is a set; an exact list is a list
+## 8. A prefix is a set; an exact list is a list
 
 The helper's read allow-list used directory prefixes, and `/etc` as a prefix admits `/etc/shadow`.
 Separately, widening `fuse.` to `fuse` would have hidden every NTFS and exFAT volume, because
@@ -146,9 +164,9 @@ it.
 
 ---
 
-## 8. Encode the guard in the toolchain, not in memory
+## 9. Encode the guard in the toolchain, not in memory
 
-Ten of forty-two entries were caught by a gate. Those cost minutes. The ones that cost hours were
+Ten of forty-three entries were caught by a gate. Those cost minutes. The ones that cost hours were
 caught by reasoning, and the two worst were nearly not caught at all.
 
 Gates currently in force:
@@ -173,7 +191,7 @@ raising the ceiling"*, because a bare size assertion invites raising the number.
 
 ---
 
-## 9. Verify that the guard fires
+## 10. Verify that the guard fires
 
 Twice a guard was written and then confirmed by deliberately breaking the code:
 
@@ -191,7 +209,7 @@ takes a minute and it is the only evidence the test works.
 
 ---
 
-## 10. When a test fails unexpectedly, read the code before changing the test
+## 11. When a test fails unexpectedly, read the code before changing the test
 
 `candidates_are_ordered_largest_first` failed and looked like a comparator bug. It was not — the
 category was reaching for a hardcoded path rather than the one it had been given, so under test it

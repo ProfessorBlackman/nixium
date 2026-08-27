@@ -127,7 +127,55 @@ beside the target and asserts the decoy survives.
 
 ---
 
-## 4. Claiming the full size after removing two of three links
+## 4. nix reported space it had not freed
+
+**M3–M4, found in M5** · **Critical** · **Found by** asking how a 71 GiB category would report itself
+
+The default way to reclaim a user's file is to move it to the trash, because that is reversible. The
+freedesktop trash has to live on the **same filesystem** as what it holds — the move is a rename, and a
+rename cannot cross a filesystem.
+
+So trashing frees nothing. Free space does not change until the trash is emptied.
+
+`Report::freed` counted trashed bytes anyway. Emptying 9.8 GiB of Yarn cache reported *"Freed
+9.8 GiB"* while the user's available space had not moved at all. That is the precise claim this project
+exists not to make, and STO-17's own acceptance criterion forbids it in as many words: *nix never
+claims space it cannot free.*
+
+The pipeline was not blind to it. `Report::measured_delta` takes `statvfs` either side of a batch, so it
+would have reported ~0 against a claimed 9.8 GiB and set `measurement_agrees: false`. The headline
+figure was still wrong, and the caveat blamed copy-on-write filesystems for what was actually a rename.
+
+**Why five tests missed it.** `crates/nix-core/tests/reclaim_accuracy.rs` was written to check the 2%
+criterion end to end, and it compared against a **directory-tree** measurement. Trashing removes a file
+from the tree, so the tree measurement dutifully confirmed the bytes had "left". Every test passed while
+validating a weaker property than the one being claimed — and a weaker one than the production code was
+already checking with `statvfs`.
+
+Found while designing `STO-14`, by asking what a category holding 71 GiB of build artifacts would say
+when the user pressed the button.
+
+**Resolved** by separating the two facts rather than changing the method — reversibility is still right
+for a user's files; the wording was what was wrong.
+
+- `ItemOutcome::Trashed` is now its own variant beside `Reclaimed`, so every match site has to decide
+  which it means.
+- `Report::freed` counts only what was removed outright. `Report::trashed` carries the staged bytes.
+- The UI leads with what actually happened and says plainly that emptying the trash is what reclaims
+  the rest. A trashed row is tagged as a caution, not a success.
+- `measurement_agrees` now compares `freed` against the filesystem, which is finally an apples-to-apples
+  check.
+
+**Guard.** Three tests, and the harness itself was fixed rather than worked around.
+`trashing_stages_bytes_without_freeing_them` asserts `freed == 0` and that no outcome claims to be
+reclaimed. `emptying_the_trash_frees_what_trashing_only_staged` measures `statvfs` either side of a
+trash-then-empty and asserts the space genuinely comes back. The tree-level tests now compare against
+an explicitly named `left_the_tree`, so nobody mistakes them for a claim about free space again.
+**Verified to fire** by reporting trashed items as reclaimed once more: three tests failed.
+
+---
+
+## 5. Claiming the full size after removing two of three links
 
 **M5 / STO-12** · **Moderate** · **Found by** re-reading the code I had just written
 

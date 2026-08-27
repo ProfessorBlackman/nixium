@@ -1062,3 +1062,7 @@ button.danger:hover:not(:disabled) {
   font-style: italic;
   color: var(--ink-mute);
 }
+
+/* Trashed is not freed. Coloured as a caution rather than a success, because the space has not
+   actually come back until the trash is emptied. */
+.outcome-trashed .outcome-tag { background: var(--review-soft); color: var(--review); }

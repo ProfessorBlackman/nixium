@@ -82,6 +82,17 @@ Absent polkit, nix runs read-only and says so.
 
 ## 5. The space model
 
+### Trashing is not freeing
+
+An invariant the model has to state, because it was got wrong: **moving a file to the trash frees no
+space.** The freedesktop trash must live on the same filesystem as its contents, since the move is a
+rename, so free space does not change until the trash is emptied.
+
+A report therefore carries two figures — `freed` for what was removed outright and `trashed` for what
+is staged and recoverable — and never adds them together. Reversibility remains the default for a
+user's files; what is not permitted is calling it a reclaim. See
+[issues §03](issues/03-reclaim-pipeline.md) for the version that did.
+
 The spec's core. Everything in Phase 1 and 2 is a producer or a consumer of this model.
 
 ### 5.1 `SpaceEntry`

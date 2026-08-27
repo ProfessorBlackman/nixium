@@ -113,7 +113,13 @@ export default function Reclaim() {
           "The report below says which, and why.",
         );
       } else {
-        notify.success(`Freed ${formatBytes(result.freed)}.`);
+        // Trashed bytes are not freed bytes: the trash is on the same filesystem by necessity, so
+        // the move is a rename and free space does not change until it is emptied.
+        notify.success(
+          result.trashed > 0
+            ? `Freed ${formatBytes(result.freed)}. ${formatBytes(result.trashed)} moved to the trash — empty it to reclaim that too.`
+            : `Freed ${formatBytes(result.freed)}.`,
+        );
       }
     } catch (thrown) {
       notify.error(toAppError(thrown));
@@ -332,9 +338,15 @@ export default function Reclaim() {
                 <span className="summary-figure">{formatBytes(report.freed)}</span>
                 <span className="muted">freed</span>
               </div>
+              {report.trashed > 0 && (
+                <div>
+                  <span className="summary-figure">{formatBytes(report.trashed)}</span>
+                  <span className="muted">in the trash</span>
+                </div>
+              )}
               <div>
                 <span className="summary-figure">{report.reclaimed_count}</span>
-                <span className="muted">reclaimed</span>
+                <span className="muted">acted on</span>
               </div>
               {report.skipped_count > 0 && (
                 <div>
@@ -354,8 +366,15 @@ export default function Reclaim() {
             {report.measured_delta !== null && (
               <p className={report.measurement_agrees === false ? "caveat" : "muted"}>
                 {report.measurement_agrees === false
-                  ? `nix counted ${formatBytes(report.freed)} but the filesystem moved by ${formatBytes(report.measured_delta)}. The difference is worth knowing about — copy-on-write filesystems and snapshots can hold onto space that looks freed.`
+                  ? `nix counted ${formatBytes(report.freed)} freed but the filesystem moved by ${formatBytes(report.measured_delta)}. The difference is worth knowing about — copy-on-write filesystems and snapshots can hold onto space that looks freed.`
                   : `The filesystem confirms it: ${formatBytes(report.measured_delta)} came back.`}
+              </p>
+            )}
+            {report.trashed > 0 && (
+              <p className="caveat">
+                {formatBytes(report.trashed)} was moved to the trash, which sits on the same
+                filesystem — so that space has not come back yet. Emptying the trash is what reclaims
+                it, and nix offers that as its own item.
               </p>
             )}
             {report.cancelled && <p className="caveat">Stopped early, so not everything was done.</p>}
@@ -374,6 +393,7 @@ export default function Reclaim() {
                   <code>{o.path}</code>
                   <span className="muted">
                     {o.outcome === "reclaimed" && formatBytes(o.bytes)}
+                    {o.outcome === "trashed" && `${formatBytes(o.bytes)} — recoverable from the trash`}
                     {o.outcome === "skipped" && o.reason}
                     {o.outcome === "failed" && o.error.message}
                   </span>

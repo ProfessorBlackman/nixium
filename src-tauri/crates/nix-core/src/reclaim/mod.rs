@@ -174,11 +174,33 @@ impl Preview {
 #[serde(tag = "outcome", rename_all = "snake_case")]
 #[ts(export)]
 pub enum ItemOutcome {
-    /// Reclaimed, freeing this many bytes.
+    /// Removed outright. These bytes are back.
     Reclaimed {
         #[ts(type = "number")]
         id: u64,
         path: PathBuf,
+        #[ts(type = "number")]
+        bytes: u64,
+    },
+    /// Moved to the trash. Recoverable, and **not yet freed**.
+    ///
+    /// # Why this is a separate outcome
+    ///
+    /// The trash lives on the same filesystem as what it holds — it has to, because the move is a
+    /// rename and a rename cannot cross a filesystem. So trashing a 9.8 GiB cache changes the user's
+    /// free space by nothing at all.
+    ///
+    /// Counting that as "freed" is precisely the claim this project exists not to make, and it was
+    /// being made: `Report::freed` included trashed bytes, so nix reported 9.8 GiB reclaimed while
+    /// `measured_delta` — taken from `statvfs` either side — reported approximately zero.
+    ///
+    /// Reversibility is still the right default for a user's files. What was wrong was the wording,
+    /// not the method.
+    Trashed {
+        #[ts(type = "number")]
+        id: u64,
+        path: PathBuf,
+        /// Bytes now sitting in the trash, waiting to be emptied.
         #[ts(type = "number")]
         bytes: u64,
     },
@@ -199,12 +221,28 @@ pub enum ItemOutcome {
 }
 
 impl ItemOutcome {
+    /// Bytes genuinely returned to the filesystem. Trashed bytes are **not** counted.
     #[must_use]
     pub const fn bytes_freed(&self) -> u64 {
         match self {
             Self::Reclaimed { bytes, .. } => *bytes,
             _ => 0,
         }
+    }
+
+    /// Bytes moved to the trash and recoverable, which the filesystem has not given back.
+    #[must_use]
+    pub const fn bytes_trashed(&self) -> u64 {
+        match self {
+            Self::Trashed { bytes, .. } => *bytes,
+            _ => 0,
+        }
+    }
+
+    /// Whether the item was acted on at all, however it was accounted for.
+    #[must_use]
+    pub const fn acted(&self) -> bool {
+        matches!(self, Self::Reclaimed { .. } | Self::Trashed { .. })
     }
 }
 
@@ -213,9 +251,17 @@ impl ItemOutcome {
 #[ts(export)]
 pub struct Report {
     pub outcomes: Vec<ItemOutcome>,
-    /// Sum of what was reclaimed, as nix counted it.
+    /// Sum of what was actually removed. **Excludes anything moved to the trash**, which is still on
+    /// the filesystem and so has not been freed.
     #[ts(type = "number")]
     pub freed: u64,
+    /// Sum of what was moved to the trash: recoverable, and not yet freed.
+    ///
+    /// Reported separately rather than added to [`Report::freed`] because the trash is on the same
+    /// filesystem as its contents by necessity, so trashing changes free space by nothing. Emptying
+    /// the trash is what reclaims it, and the UI says so whenever this is non-zero.
+    #[ts(type = "number")]
+    pub trashed: u64,
     /// Change in the filesystem's used bytes, measured independently before and after.
     ///
     /// This is how the specification's "within 2%" criterion is *checked* rather than asserted: nix
@@ -243,8 +289,10 @@ impl Report {
     /// Build a report from what happened, deriving the counts once.
     fn new(outcomes: Vec<ItemOutcome>, measured_delta: Option<u64>, cancelled: bool) -> Self {
         let freed = outcomes.iter().map(ItemOutcome::bytes_freed).sum();
+        let trashed = outcomes.iter().map(ItemOutcome::bytes_trashed).sum();
         Self {
-            reclaimed_count: Self::count(&outcomes, |o| matches!(o, ItemOutcome::Reclaimed { .. })),
+            trashed,
+            reclaimed_count: Self::count(&outcomes, ItemOutcome::acted),
             skipped_count: Self::count(&outcomes, |o| matches!(o, ItemOutcome::Skipped { .. })),
             failed_count: Self::count(&outcomes, |o| matches!(o, ItemOutcome::Failed { .. })),
             measurement_agrees: measured_delta.map(|measured| agrees(freed, measured)),
@@ -578,7 +626,7 @@ fn reclaim_one(item: &PreviewItem, guard: &Guard, elevation: &mut Elevation) -> 
 
     match &item.method {
         ReclaimMethod::MoveToTrash { path } => match trash::trash(path) {
-            Ok(trashed) => ItemOutcome::Reclaimed {
+            Ok(trashed) => ItemOutcome::Trashed {
                 id: item.id,
                 path: item.path.clone(),
                 // What the trash reports, not what the preview guessed.
@@ -1623,7 +1671,9 @@ mod tests {
             ItemOutcome::Skipped { reason, .. } => panic!(
                 "a kernel removal must reach the helper, not be skipped because its label is not a file: {reason}"
             ),
-            ItemOutcome::Reclaimed { .. } => panic!("nothing should succeed without a helper"),
+            ItemOutcome::Reclaimed { .. } | ItemOutcome::Trashed { .. } => {
+                panic!("nothing should succeed without a helper")
+            }
         }
     }
 

@@ -118,7 +118,7 @@ staged, and still rejects a deliberately header-less `.rs` file naming it in the
 equivalent CI job does not share the bug — it uses `git ls-files`, which always matches, and GitHub
 Actions does not set `pipefail` by default.
 
-Worth noting against [09-patterns.md §8](09-patterns.md): a gate that fails closed with no
+Worth noting against [09-patterns.md §9](09-patterns.md): a gate that fails closed with no
 explanation is only marginally better than no gate. The message matters as much as the check.
 
 ---

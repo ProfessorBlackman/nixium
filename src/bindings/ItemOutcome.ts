@@ -4,4 +4,8 @@ import type { AppError } from "./AppError";
 /**
  * What happened to one item.
  */
-export type ItemOutcome = { "outcome": "reclaimed", id: number, path: string, bytes: number, } | { "outcome": "skipped", id: number, path: string, reason: string, } | { "outcome": "failed", id: number, path: string, error: AppError, };
+export type ItemOutcome = { "outcome": "reclaimed", id: number, path: string, bytes: number, } | { "outcome": "trashed", id: number, path: string, 
+/**
+ * Bytes now sitting in the trash, waiting to be emptied.
+ */
+bytes: number, } | { "outcome": "skipped", id: number, path: string, reason: string, } | { "outcome": "failed", id: number, path: string, error: AppError, };

@@ -6,9 +6,18 @@ import type { ItemOutcome } from "./ItemOutcome";
  */
 export type Report = { outcomes: Array<ItemOutcome>, 
 /**
- * Sum of what was reclaimed, as nix counted it.
+ * Sum of what was actually removed. **Excludes anything moved to the trash**, which is still on
+ * the filesystem and so has not been freed.
  */
 freed: number, 
+/**
+ * Sum of what was moved to the trash: recoverable, and not yet freed.
+ *
+ * Reported separately rather than added to [`Report::freed`] because the trash is on the same
+ * filesystem as its contents by necessity, so trashing changes free space by nothing. Emptying
+ * the trash is what reclaims it, and the UI says so whenever this is non-zero.
+ */
+trashed: number, 
 /**
  * Change in the filesystem's used bytes, measured independently before and after.
  *
