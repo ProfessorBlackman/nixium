@@ -25,7 +25,7 @@ use std::path::PathBuf;
 
 use crate::error::Result;
 use crate::op::CancelToken;
-use crate::space::{Category as SpaceCategory, ReclaimMethod, Safety};
+use crate::space::{Category as SpaceCategory, ReclaimMethod, Reclaimable, Safety};
 
 use super::registry::{Candidate, Category};
 
@@ -306,6 +306,7 @@ impl Category for AppCacheCategory {
                 method: ReclaimMethod::MoveToTrash { path: path.clone() },
                 cost: cost.map(str::to_string),
                 category: self.id().to_string(),
+                reclaimable: Reclaimable::Exact,
                 path,
             });
         }

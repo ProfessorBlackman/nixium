@@ -21,16 +21,21 @@ import type { CachedScan } from "../bindings/CachedScan";
 import type { Preview } from "../bindings/Preview";
 import type { PreviewItem } from "../bindings/PreviewItem";
 import type { Refusal } from "../bindings/Refusal";
+import type { Snapshot as CowSnapshot } from "../bindings/Snapshot";
 import type { Report } from "../bindings/Report";
 import type { Ticket } from "../bindings/Ticket";
 import type { Filesystem } from "../bindings/Filesystem";
 import type { ScanResult } from "../bindings/ScanResult";
 import type { Settings } from "../bindings/Settings";
-import type { Snapshot } from "../bindings/Snapshot";
+import type { Capabilities } from "../bindings/Capabilities";
 import type { SpaceEntry } from "../bindings/SpaceEntry";
 
-export type { AppError, CachedScan, Completion, Diagnostics, Filesystem, Preview, PreviewItem, Progress, Refusal, Report, ScanResult, Settings, Snapshot, SpaceEntry, Ticket };
+export type { AppError, CachedScan, Completion, Diagnostics, Filesystem, Preview, PreviewItem, Progress, Refusal, Report, ScanResult, Settings, SpaceEntry, Ticket };
+export type { Capabilities };
+export type { CowSnapshot };
+export type { CowKind } from "../bindings/CowKind";
 export type { ItemOutcome } from "../bindings/ItemOutcome";
+export type { Reclaimable } from "../bindings/Reclaimable";
 export type { ReclaimMethod } from "../bindings/ReclaimMethod";
 export type { Accounting } from "../bindings/Accounting";
 export type { Category } from "../bindings/Category";
@@ -92,8 +97,8 @@ export type HelperProbe = { uid: number; elevated: boolean; kernel: string };
 export const api = {
   versions: () => call<Versions>("versions"),
   diagnostics: () => call<Diagnostics>("diagnostics"),
-  capabilities: () => call<Snapshot>("capabilities"),
-  capabilitiesRefresh: () => call<Snapshot>("capabilities_refresh"),
+  capabilities: () => call<Capabilities>("capabilities"),
+  capabilitiesRefresh: () => call<Capabilities>("capabilities_refresh"),
   settingsGet: () => call<Settings>("settings_get"),
   settingsSave: (settings: Settings) => call<Settings>("settings_save", { settings }),
   startupWarning: () => call<AppError | null>("startup_warning"),
@@ -102,6 +107,7 @@ export const api = {
   helperProbe: () => call<HelperProbe>("helper_probe"),
   filesystems: () => call<Filesystem[]>("filesystems"),
   homeDirectory: () => call<string>("home_directory"),
+  snapshots: () => call<CowSnapshot[]>("snapshots"),
   reclaimPreview: () => call<Preview>("reclaim_preview"),
   reclaimExecute: (ticket: Ticket, selection: number[]) =>
     call<Report>("reclaim_execute", { ticket, selection }),

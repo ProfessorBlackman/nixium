@@ -28,7 +28,9 @@ use std::path::PathBuf;
 use crate::caps::{self, Capability};
 use crate::error::Result;
 use crate::op::CancelToken;
-use crate::space::{Category as SpaceCategory, ReclaimKind, ReclaimMethod, Safety, VacuumLimit};
+use crate::space::{
+    Category as SpaceCategory, ReclaimKind, ReclaimMethod, Reclaimable, Safety, VacuumLimit,
+};
 
 use super::registry::{Candidate, Category};
 
@@ -171,6 +173,7 @@ impl Category for LogCategory {
                 },
                 cost: None,
                 category: "rotated_logs".to_string(),
+                reclaimable: Reclaimable::Exact,
                 path,
             });
         }
@@ -287,6 +290,7 @@ impl Category for JournalCategory {
             method: ReclaimMethod::JournalVacuum { limit: self.keep },
             cost: Some(cost),
             category: self.id().to_string(),
+            reclaimable: Reclaimable::Exact,
         }])
     }
 }

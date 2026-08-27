@@ -16,7 +16,7 @@ use std::path::PathBuf;
 
 use crate::error::Result;
 use crate::op::CancelToken;
-use crate::space::{Category as SpaceCategory, ReclaimMethod, Safety};
+use crate::space::{Category as SpaceCategory, ReclaimMethod, Reclaimable, Safety};
 
 /// Something a category proposes reclaiming.
 ///
@@ -37,6 +37,13 @@ pub struct Candidate {
     pub cost: Option<String>,
     /// Which category proposed this.
     pub category: String,
+    /// How much of `bytes` will actually come back, when the category knows better than the
+    /// filesystem-level guess the preview would otherwise make.
+    ///
+    /// Defaults to [`Reclaimable::Exact`]; the preview downgrades it on a copy-on-write filesystem.
+    /// A category that understands its own sharing — a snapshot-aware one — sets it here and its
+    /// judgement wins.
+    pub reclaimable: Reclaimable,
 }
 
 /// One kind of reclaimable space.
@@ -221,6 +228,7 @@ impl Category for TrashCategory {
                 if count == 1 { "" } else { "s" }
             )),
             category: self.id().to_string(),
+            reclaimable: Reclaimable::Exact,
         }])
     }
 }

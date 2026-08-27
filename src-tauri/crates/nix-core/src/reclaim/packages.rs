@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 use crate::caps::{self, Capability};
 use crate::error::Result;
 use crate::op::CancelToken;
-use crate::space::{Category as SpaceCategory, Manager, ReclaimMethod, Safety};
+use crate::space::{Category as SpaceCategory, Manager, ReclaimMethod, Reclaimable, Safety};
 
 use super::registry::{Candidate, Category};
 
@@ -188,6 +188,7 @@ fn candidate(manager: Manager, label: &str, path: Option<PathBuf>, bytes: u64) -
             manager.name()
         )),
         category: "package_cache".to_string(),
+        reclaimable: Reclaimable::Exact,
     }
 }
 

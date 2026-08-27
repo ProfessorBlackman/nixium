@@ -23,6 +23,7 @@ use std::path::PathBuf;
 
 use nix_core::cache::{Cache, CachedScan};
 use nix_core::caps;
+use nix_core::cow::{self, Snapshot};
 use nix_core::error::{AppError, ErrorCode, Result};
 use nix_core::helper::{self, Op, OpResult};
 use nix_core::logging::{self, Diagnostics};
@@ -64,13 +65,13 @@ pub(crate) fn diagnostics() -> Result<Diagnostics> {
 
 /// What this host can do. Drives which features the UI offers (`FND-7`).
 #[tauri::command]
-pub(crate) fn capabilities() -> caps::Snapshot {
+pub(crate) fn capabilities() -> caps::Capabilities {
     caps::registry().snapshot()
 }
 
 /// Re-probe capabilities. Call after anything that could install or remove a tool.
 #[tauri::command]
-pub(crate) fn capabilities_refresh() -> caps::Snapshot {
+pub(crate) fn capabilities_refresh() -> caps::Capabilities {
     caps::registry().invalidate();
     caps::registry().snapshot()
 }
@@ -255,6 +256,18 @@ pub(crate) fn home_directory() -> Result<PathBuf> {
         )
         .with_remedy("Set HOME and try again.")
     })
+}
+
+/// Snapshots holding space on copy-on-write filesystems. `STO-17`.
+///
+/// **Attribution only.** These are reported so their space lands in a named category rather than in
+/// `Unknown` — a user should be able to see that 40 GiB is held by snapper. nix does not offer to
+/// delete them: a snapper or Timeshift snapshot may be somebody's only route back from a bad
+/// upgrade, and that decision is not one to make on their behalf. Deleting them is backlog, behind
+/// explicit opt-in and its own design review.
+#[tauri::command]
+pub(crate) fn snapshots() -> Vec<Snapshot> {
+    cow::snapshots()
 }
 
 /// What could be reclaimed, and at what cost. `STO-3`.

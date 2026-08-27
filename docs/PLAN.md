@@ -14,7 +14,7 @@ The spec says *what* and *why*. This says *in what order, and how we know it wor
 | **M2** "Where did my disk go?" (tasks 1.1–1.6, 1.15) | **complete** |
 | **M3** First safe reclaim (tasks 1.7–1.10) | **complete** |
 | **M4** Storage core complete (tasks 1.11–1.14) — **Phase 1 done** | **complete** |
-| **M5** Storage depth (Phase 2) | **in progress** — STO-10, STO-11 done; 7 features remain |
+| **M5** Storage depth (Phase 2) | **in progress** — STO-10, STO-11, STO-17 done; 6 remain |
 | M6 – M9 | not started |
 
 Phase 0 shipped all eleven tasks: the three-crate workspace and quality gates, the error taxonomy,
@@ -78,7 +78,13 @@ M5 is under way. §6 orders Phase 2 by reclaim value, and the first two are done
 layer underneath it. On this development machine the result is **1.2 GiB of removable kernels**,
 correctly excluding the running one.
 
-Remaining: STO-17 (btrfs, **P0**), STO-12, STO-18, STO-14, STO-13, STO-15, STO-16.
+STO-17 followed, completing the P0 items. Its acceptance criterion — no reclaim estimate for extents
+nix cannot prove are exclusive — is enforced by `space::Reclaimable`, and a `Preview` now carries
+both a stated total and a *promisable* one. The parsers for btrfs, ZFS and LVM are the weak link and
+are labelled as such: the development machine has none of those filesystems, so they are tested
+against documented formats rather than captured output.
+
+Remaining: STO-12, STO-18, STO-14, STO-13, STO-15, STO-16.
 
 Note also that §4's parallelisation advice no longer applies: this is a solo project, which is why
 **task 0.9 was completed within Phase 0 rather than deferred** — see §5.2 for why M2 is nonetheless

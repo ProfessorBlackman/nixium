@@ -185,6 +185,77 @@ impl Category {
     }
 }
 
+/// How much of an entry's size would actually come back if it were reclaimed.
+///
+/// On a copy-on-write filesystem — btrfs, ZFS, or an LVM thin pool — a file's extents may be shared
+/// with a snapshot. Deleting the file removes the name, but the blocks stay allocated until every
+/// reference to them is gone, so the space does **not** come back. A tool that reports the file's
+/// size as reclaimable in that situation is promising something it cannot deliver.
+///
+/// So the estimate is qualified rather than asserted. Specification `STO-17`: *where exclusive size
+/// is unobtainable, suppress the estimate rather than fake it.*
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "confidence", rename_all = "snake_case")]
+#[ts(export)]
+pub enum Reclaimable {
+    /// Freeing this returns the stated size. The ordinary case, and the only one that may be summed
+    /// into a headline figure without qualification.
+    ///
+    /// The default, so an ordinary filesystem is unaffected by any of this.
+    #[default]
+    Exact,
+    /// Freeing this returns **at most** the stated size, and possibly nothing.
+    ///
+    /// `exclusive` is the portion nix could prove is referenced only here, when a tool was able to
+    /// tell us.
+    AtMost {
+        #[ts(type = "number | null")]
+        exclusive: Option<u64>,
+        reason: String,
+    },
+    /// nix cannot say how much would come back.
+    ///
+    /// Reported honestly rather than guessed: on a copy-on-write filesystem without the tools to
+    /// ask, any number would be invention.
+    Unknown { reason: String },
+}
+
+impl Reclaimable {
+    /// Whether the stated size can be trusted as a figure that will actually be returned.
+    #[must_use]
+    pub const fn is_exact(&self) -> bool {
+        matches!(self, Self::Exact)
+    }
+
+    /// The bytes safe to include in a headline total.
+    ///
+    /// An `AtMost` entry contributes only its *proven exclusive* portion, and nothing when that is
+    /// unknown — because a total is a promise, and a promise built from maybes is not one.
+    #[must_use]
+    pub const fn promisable(&self, stated: u64) -> u64 {
+        match self {
+            Self::Exact => stated,
+            Self::AtMost {
+                exclusive: Some(exclusive),
+                ..
+            } => *exclusive,
+            Self::AtMost {
+                exclusive: None, ..
+            }
+            | Self::Unknown { .. } => 0,
+        }
+    }
+
+    /// A phrase for the UI, or `None` when there is nothing to caveat.
+    #[must_use]
+    pub fn caveat(&self) -> Option<&str> {
+        match self {
+            Self::Exact => None,
+            Self::AtMost { reason, .. } | Self::Unknown { reason } => Some(reason),
+        }
+    }
+}
+
 /// How safe it is to reclaim an entry.
 ///
 /// **Computed, never hardcoded per category**: an open file handle, a recent access time, or a
@@ -827,6 +898,80 @@ mod tests {
         assert_eq!(Safety::Safe.strictest(Safety::Risky), Safety::Risky);
         assert_eq!(Safety::Never.strictest(Safety::Safe), Safety::Never);
         assert_eq!(Safety::Review.strictest(Safety::Safe), Safety::Review);
+    }
+
+    // ---- reclaimable confidence ----
+
+    #[test]
+    fn an_exact_estimate_is_promisable_in_full() {
+        let exact = Reclaimable::Exact;
+        assert!(exact.is_exact());
+        assert_eq!(exact.promisable(1_000_000), 1_000_000);
+        assert_eq!(exact.caveat(), None);
+    }
+
+    /// The property this type exists for: a shared entry must not contribute its whole size to a
+    /// headline figure, because that space will not come back.
+    #[test]
+    fn a_shared_entry_promises_only_what_is_proven_exclusive() {
+        let partly = Reclaimable::AtMost {
+            exclusive: Some(200_000),
+            reason: "Shared with a snapshot.".into(),
+        };
+        assert!(!partly.is_exact());
+        assert_eq!(
+            partly.promisable(1_000_000),
+            200_000,
+            "only the portion proven to be referenced nowhere else"
+        );
+        assert!(
+            partly.caveat().is_some(),
+            "a qualified figure must explain itself"
+        );
+    }
+
+    #[test]
+    fn an_unprovable_entry_promises_nothing_at_all() {
+        // The specification's rule: suppress the estimate rather than fake it. Zero is the only
+        // honest contribution to a promise when nothing can be proven.
+        let unprovable = Reclaimable::AtMost {
+            exclusive: None,
+            reason: "Extents may be shared with a snapshot.".into(),
+        };
+        assert_eq!(unprovable.promisable(1_000_000), 0);
+
+        let unknown = Reclaimable::Unknown {
+            reason: "btrfs tools are unavailable.".into(),
+        };
+        assert_eq!(unknown.promisable(1_000_000), 0);
+        assert!(unknown.caveat().is_some());
+    }
+
+    #[test]
+    fn exactness_is_the_default_so_ordinary_filesystems_are_unaffected() {
+        assert!(Reclaimable::default().is_exact());
+    }
+
+    #[test]
+    fn reclaimable_round_trips_over_the_wire() {
+        for value in [
+            Reclaimable::Exact,
+            Reclaimable::AtMost {
+                exclusive: Some(42),
+                reason: "shared".into(),
+            },
+            Reclaimable::AtMost {
+                exclusive: None,
+                reason: "unknown sharing".into(),
+            },
+            Reclaimable::Unknown {
+                reason: "no tools".into(),
+            },
+        ] {
+            let json = serde_json::to_string(&value).unwrap();
+            let back: Reclaimable = serde_json::from_str(&json).unwrap();
+            assert_eq!(value, back, "{json}");
+        }
     }
 
     #[test]

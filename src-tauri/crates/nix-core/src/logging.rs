@@ -114,7 +114,7 @@ pub fn init(level: LogLevel) -> (Guard, Option<crate::error::AppError>) {
 pub struct Diagnostics {
     pub core_version: String,
     pub kernel: Option<String>,
-    pub capabilities: caps::Snapshot,
+    pub capabilities: caps::Capabilities,
     pub log_dir: Option<PathBuf>,
     pub config_dir: Option<PathBuf>,
     pub state_dir: Option<PathBuf>,

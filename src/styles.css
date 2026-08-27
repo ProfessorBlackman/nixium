@@ -986,3 +986,10 @@ button.danger:hover:not(:disabled) {
   color: var(--on-accent);
   filter: brightness(1.08);
 }
+
+/* A qualified size explains itself in place — a caveat the user has to go looking for is not
+   a caveat. */
+.reclaim-sharing {
+  font-size: 0.8125rem;
+  color: var(--review);
+}

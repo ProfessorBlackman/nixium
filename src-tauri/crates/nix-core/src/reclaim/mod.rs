@@ -47,11 +47,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::cow::{self, CowMap};
 use crate::error::{AppError, ErrorCode, Result};
 use crate::helper;
 use crate::op::CancelToken;
 use crate::protect::{Guard, Refusal};
-use crate::space::{ReclaimMethod, Safety};
+use crate::space::{ReclaimMethod, Reclaimable, Safety};
 use crate::trash;
 
 /// Proof that a preview was computed and shown.
@@ -89,6 +90,12 @@ pub struct PreviewItem {
     pub cost: Option<String>,
     /// The category that proposed it.
     pub category: String,
+    /// How much of `bytes` will actually come back.
+    ///
+    /// [`Reclaimable::Exact`] for the ordinary case. On a copy-on-write filesystem where extents may
+    /// be shared with a snapshot this is qualified, and the UI must show the caveat beside the size
+    /// rather than presenting the number bare.
+    pub reclaimable: Reclaimable,
     /// Size at preview time, so execution can detect a change underneath it.
     #[ts(type = "number")]
     fingerprint: u64,
@@ -108,9 +115,17 @@ impl PreviewItem {
 pub struct Preview {
     pub ticket: Ticket,
     pub items: Vec<PreviewItem>,
-    /// Total if everything offered were reclaimed.
+    /// Total if everything offered were reclaimed, taking every stated size at face value.
     #[ts(type = "number")]
     pub total_bytes: u64,
+    /// The part of [`Preview::total_bytes`] nix is willing to **promise**.
+    ///
+    /// Lower than the total whenever some entry sits on a copy-on-write filesystem and its
+    /// exclusivity could not be proven. Those entries contribute nothing here, because a total is a
+    /// promise and a promise assembled from maybes is not one. When the two figures differ, the UI
+    /// must lead with this one.
+    #[ts(type = "number")]
+    pub promisable_bytes: u64,
     /// Total of only the entries safe enough to pre-check.
     #[ts(type = "number")]
     pub safe_bytes: u64,
@@ -130,6 +145,21 @@ impl Preview {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
+    }
+
+    /// Whether any entry's size is qualified, so the headline total is an upper bound.
+    #[must_use]
+    pub fn total_is_upper_bound(&self) -> bool {
+        self.promisable_bytes < self.total_bytes
+    }
+
+    /// Entries whose stated size cannot be taken at face value.
+    #[must_use]
+    pub fn qualified(&self) -> Vec<&PreviewItem> {
+        self.items
+            .iter()
+            .filter(|i| !i.reclaimable.is_exact())
+            .collect()
     }
 }
 
@@ -269,6 +299,11 @@ impl Session {
         let mut refused = Vec::new();
         let mut next_id = 0u64;
 
+        // Built once per preview, not once per candidate: resolving a path's filesystem walks the
+        // whole mount table. On a machine with no copy-on-write filesystem the map answers `None`
+        // for everything and the qualification costs nothing.
+        let cow_map = CowMap::build();
+
         for candidate in registry.collect(token)? {
             token.check()?;
 
@@ -292,6 +327,16 @@ impl Session {
                 continue;
             }
 
+            // `STO-17`: on a copy-on-write filesystem the stated size may not be what comes back,
+            // so the estimate is qualified here rather than asserted. A category may already have
+            // qualified its own candidate — a snapshot-aware one knows more than this does — and
+            // that judgement wins over the filesystem-level guess.
+            let reclaimable = if candidate.reclaimable.is_exact() {
+                cow::reclaimable_for(&candidate.path, cow_map.kind_for(&candidate.path))
+            } else {
+                candidate.reclaimable
+            };
+
             items.push(PreviewItem {
                 id: next_id,
                 fingerprint: fingerprint(&candidate.path),
@@ -302,6 +347,7 @@ impl Session {
                 method: candidate.method,
                 cost: candidate.cost,
                 category: candidate.category,
+                reclaimable,
             });
             next_id += 1;
         }
@@ -312,10 +358,16 @@ impl Session {
         let preview = Preview {
             ticket: Ticket::mint(),
             total_bytes: items.iter().map(|i| i.bytes).sum(),
+            // Only what can actually be promised: a qualified entry contributes its proven
+            // exclusive portion, or nothing when none is proven.
+            promisable_bytes: items
+                .iter()
+                .map(|i| i.reclaimable.promisable(i.bytes))
+                .sum(),
             safe_bytes: items
                 .iter()
                 .filter(|i| i.safety.pre_checkable())
-                .map(|i| i.bytes)
+                .map(|i| i.reclaimable.promisable(i.bytes))
                 .sum(),
             items,
             refused,
@@ -752,6 +804,7 @@ mod tests {
                     },
                     cost: None,
                     category: "test".into(),
+                    reclaimable: Reclaimable::Exact,
                 }])
             }
         }
@@ -796,6 +849,7 @@ mod tests {
                     },
                     cost: None,
                     category: "never".into(),
+                    reclaimable: Reclaimable::Exact,
                 }])
             }
         }
@@ -862,6 +916,7 @@ mod tests {
                     },
                     cost: Some("It goes to the trash.".into()),
                     category: "file".into(),
+                    reclaimable: Reclaimable::Exact,
                 }])
             }
         }
@@ -918,6 +973,7 @@ mod tests {
                     },
                     cost: Some("It goes to the trash.".into()),
                     category: "file".into(),
+                    reclaimable: Reclaimable::Exact,
                 }])
             }
         }
@@ -1111,6 +1167,127 @@ mod tests {
 
     // ---------- ordering and presentation ----------
 
+    // ---------- STO-17: a qualified estimate is never presented as a promise ----------
+
+    /// The acceptance criterion. A candidate whose exclusivity cannot be proven must not contribute
+    /// to the promisable total, however large its stated size.
+    #[test]
+    fn an_unprovable_candidate_contributes_nothing_to_the_promise() {
+        struct Shared;
+        impl Category for Shared {
+            fn id(&self) -> &'static str {
+                "shared"
+            }
+            fn label(&self) -> &'static str {
+                "Shared"
+            }
+            fn space_category(&self) -> crate::space::Category {
+                crate::space::Category::UserFile
+            }
+            fn candidates(&self, _: &CancelToken) -> Result<Vec<Candidate>> {
+                let path = std::env::temp_dir().join("nix-shared-candidate");
+                std::fs::write(&path, vec![b'x'; 4096]).ok();
+                Ok(vec![Candidate {
+                    path: path.clone(),
+                    label: "On a snapshotted volume".into(),
+                    bytes: 8_589_934_592,
+                    safety: Safety::Review,
+                    method: ReclaimMethod::MoveToTrash { path },
+                    cost: Some("It goes to the trash.".into()),
+                    category: "shared".into(),
+                    // The category knows its own sharing, and that judgement wins over the
+                    // filesystem-level guess.
+                    reclaimable: Reclaimable::AtMost {
+                        exclusive: None,
+                        reason: "Shared with a snapshot.".into(),
+                    },
+                }])
+            }
+        }
+
+        let mut registry = Registry::new();
+        registry.register(Box::new(Shared));
+        let preview = Session::new()
+            .preview(&registry, &guard(), &CancelToken::new())
+            .unwrap();
+
+        assert_eq!(preview.items.len(), 1);
+        assert_eq!(
+            preview.total_bytes, 8_589_934_592,
+            "the stated size is still shown"
+        );
+        assert_eq!(
+            preview.promisable_bytes, 0,
+            "but nothing may be promised, because nothing was proven"
+        );
+        assert!(preview.total_is_upper_bound());
+        assert_eq!(preview.qualified().len(), 1);
+        assert!(preview.items[0].reclaimable.caveat().is_some());
+    }
+
+    #[test]
+    fn a_partly_shared_candidate_promises_only_its_exclusive_part() {
+        struct Partly;
+        impl Category for Partly {
+            fn id(&self) -> &'static str {
+                "partly"
+            }
+            fn label(&self) -> &'static str {
+                "Partly"
+            }
+            fn space_category(&self) -> crate::space::Category {
+                crate::space::Category::UserFile
+            }
+            fn candidates(&self, _: &CancelToken) -> Result<Vec<Candidate>> {
+                let path = std::env::temp_dir().join("nix-partly-candidate");
+                std::fs::write(&path, vec![b'x'; 4096]).ok();
+                Ok(vec![Candidate {
+                    path: path.clone(),
+                    label: "Mostly shared".into(),
+                    bytes: 10_000_000_000,
+                    safety: Safety::Safe,
+                    method: ReclaimMethod::MoveToTrash { path },
+                    cost: None,
+                    category: "partly".into(),
+                    reclaimable: Reclaimable::AtMost {
+                        exclusive: Some(2_000_000_000),
+                        reason: "Most of this is shared with a snapshot.".into(),
+                    },
+                }])
+            }
+        }
+
+        let mut registry = Registry::new();
+        registry.register(Box::new(Partly));
+        let preview = Session::new()
+            .preview(&registry, &guard(), &CancelToken::new())
+            .unwrap();
+
+        assert_eq!(preview.promisable_bytes, 2_000_000_000);
+        assert_eq!(
+            preview.safe_bytes, 2_000_000_000,
+            "a pre-checked total must also be a promise, not a stated size"
+        );
+        assert!(preview.total_is_upper_bound());
+    }
+
+    #[test]
+    fn an_ordinary_candidate_is_exact_and_the_two_totals_agree() {
+        let sandbox = Sandbox::new("exact");
+        let registry = sandbox.registry(sandbox.filled_trash(2));
+        let preview = Session::new()
+            .preview(&registry, &guard(), &CancelToken::new())
+            .unwrap();
+
+        assert!(preview.items[0].reclaimable.is_exact());
+        assert_eq!(
+            preview.promisable_bytes, preview.total_bytes,
+            "on an ordinary filesystem there is nothing to qualify"
+        );
+        assert!(!preview.total_is_upper_bound());
+        assert!(preview.qualified().is_empty());
+    }
+
     #[test]
     fn items_are_ordered_largest_first() {
         struct Multi;
@@ -1138,6 +1315,7 @@ mod tests {
                         },
                         cost: None,
                         category: "multi".into(),
+                        reclaimable: Reclaimable::Exact,
                     })
                     .collect())
             }
@@ -1276,6 +1454,7 @@ mod tests {
             },
             cost: None,
             category: "test".into(),
+            reclaimable: Reclaimable::Exact,
             fingerprint: fingerprint(&file),
         };
 

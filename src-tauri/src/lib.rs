@@ -49,6 +49,7 @@ pub fn run() {
             commands::scan_cache_clear,
             commands::scan_cache_size,
             commands::home_directory,
+            commands::snapshots,
             commands::reclaim_preview,
             commands::reclaim_execute,
             commands::reclaim_clear,

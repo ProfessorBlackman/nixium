@@ -143,8 +143,16 @@ export default function Reclaim() {
           <div className="card">
             <div className="summary">
               <div>
-                <span className="summary-figure">{formatBytes(preview.total_bytes)}</span>
-                <span className="muted">found</span>
+                <span className="summary-figure">
+                  {formatBytes(
+                    preview.promisable_bytes < preview.total_bytes
+                      ? preview.promisable_bytes
+                      : preview.total_bytes,
+                  )}
+                </span>
+                <span className="muted">
+                  {preview.promisable_bytes < preview.total_bytes ? "certain to free" : "found"}
+                </span>
               </div>
               <div>
                 <span className="summary-figure">{formatBytes(selectedBytes)}</span>
@@ -155,6 +163,16 @@ export default function Reclaim() {
                 <span className="muted">of {preview.items.length} items</span>
               </div>
             </div>
+            {/* When some entries are qualified, the difference is stated rather than papered over.
+                The headline is the promise; this is the optimistic case beside it. */}
+            {preview.promisable_bytes < preview.total_bytes && (
+              <p className="caveat">
+                Up to {formatBytes(preview.total_bytes)} was found, but only{" "}
+                {formatBytes(preview.promisable_bytes)} is certain to come back. The rest sits on a
+                copy-on-write filesystem where space can be shared with snapshots — deleting it may
+                return less, or nothing.
+              </p>
+            )}
             <div className="row wrap">
               <button type="button" onClick={selectAllSelectable}>
                 Select all except risky
@@ -183,12 +201,21 @@ export default function Reclaim() {
                       <span className={`safety-tag safety-${item.safety}`} title={SAFETY_EXPLAINS[item.safety]}>
                         {SAFETY_LABEL[item.safety]}
                       </span>
-                      <span className="reclaim-bytes">{formatBytes(item.bytes)}</span>
+                      {/* A qualified size is shown as an upper bound, never as a bare figure:
+                          on a copy-on-write filesystem the space may not come back at all. */}
+                      <span className="reclaim-bytes">
+                        {item.reclaimable.confidence === "exact"
+                          ? formatBytes(item.bytes)
+                          : `up to ${formatBytes(item.bytes)}`}
+                      </span>
                     </span>
                     {item.path && <code className="reclaim-path">{item.path}</code>}
                     {/* A cost is shown wherever there is one — a rating that says "this costs
                         something" without saying what gives nothing to decide with. */}
                     {item.cost && <span className="reclaim-cost">{item.cost}</span>}
+                    {item.reclaimable.confidence !== "exact" && (
+                      <span className="reclaim-sharing">{item.reclaimable.reason}</span>
+                    )}
                   </span>
                 </label>
               </li>

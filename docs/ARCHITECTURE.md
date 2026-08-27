@@ -106,6 +106,9 @@ Built in M4:
 | `reclaim::caches` | 1.11 | application caches, attributed to the apps that own them |
 | `reclaim::logs` | 1.12 | rotated logs and the systemd journal |
 | `reclaim::packages` | 1.13 | package manager caches, cleaned through the owning tool |
+| `pkg` | STO-10 | package database queries; parsers tested against real captured output |
+| `reclaim::kernels` | STO-11 | superseded kernels and residual configuration |
+| `cow` | STO-17 | copy-on-write sharing, so an estimate is never overstated |
 | `tests/reclaim_accuracy` | 1.14 | the specification's 2% criterion, verified end to end |
 
 ## How "nothing bypasses preview" is enforced
@@ -155,6 +158,45 @@ Three further properties fall out of the same design:
 
 One privileged session is opened per *batch*, not per item — Stacer re-ran every command under
 `pkexec`, so toggling five services meant five dialogs.
+
+## Copy-on-write filesystems: a qualified estimate, never a bare number
+
+On btrfs, ZFS, or an LVM thin volume a file's extents may be shared with a snapshot. Deleting the
+file removes the name, but the blocks stay allocated until every reference is gone — so the space
+does not come back. A user who deletes 8 GiB and sees `df` move by nothing has been lied to by
+whatever told them 8 GiB was reclaimable.
+
+`space::Reclaimable` therefore qualifies every estimate:
+
+| Variant | Meaning | Contributes to a headline total |
+| --- | --- | --- |
+| `Exact` | Freeing this returns the stated size | the whole size |
+| `AtMost { exclusive: Some(n) }` | Partly shared; `n` is proven exclusive | `n` only |
+| `AtMost { exclusive: None }` | Shared, and the exclusive part is unprovable | **nothing** |
+| `Unknown` | A CoW filesystem nix could not ask about | **nothing** |
+
+A `Preview` carries both `total_bytes` (every stated size at face value) and `promisable_bytes`
+(what nix will actually promise). The UI leads with the second and states the difference. That is
+`STO-17`'s rule made concrete: *where exclusive size is unobtainable, suppress the estimate rather
+than fake it.*
+
+The pessimistic default is the important part. A CoW filesystem whose tool is absent yields
+`Unknown`, not an assumption of exclusivity — assuming exclusivity is exactly how a tool ends up
+promising space that never arrives.
+
+**Snapshots are attributed, never deleted.** They are inventoried so their space lands in the
+`Snapshot` category rather than in `Unknown`, but nix does not offer to remove one: a snapper or
+Timeshift snapshot may be somebody's only route back from a bad upgrade.
+
+### An honest limitation
+
+The free-space half of `STO-17` landed in `STO-1` and is verified against a real filesystem. The
+`cow` module is not: the development machine is ext4 with no btrfs, ZFS or LVM tooling, so those
+parsers are written to each tool's documented output format and tested against fixtures built from
+that documentation — not against captured output. The package parsers found two real bugs precisely
+*because* they ran against a live database, and these have had no equivalent exposure. **They need
+re-verifying on a real btrfs and ZFS system before their numbers are trusted.** What is fully tested
+is the suppression logic, because that is pure and runs everywhere.
 
 ## The report checks its own arithmetic
 

@@ -32,6 +32,7 @@
 //! |---|---|---|
 //! | [`space`] | 1.1 | the space model and its invariants |
 //! | [`fs`] | 1.2 | mount enumeration, per-filesystem accounting, btrfs honesty |
+//! | [`cow`] | STO-17 | copy-on-write sharing, so a reclaim estimate is never overstated |
 //! | [`scan`] | 1.3 | streaming, cancellable, parallel walker |
 //! | [`cache`] | 1.4 | scan persistence, so the explorer opens on the last result |
 //! | [`watch`] | 1.15 | inotify staleness watching over the largest directories |
@@ -44,6 +45,7 @@
 pub mod budget;
 pub mod cache;
 pub mod caps;
+pub mod cow;
 pub mod error;
 pub mod fixture;
 pub mod fs;
@@ -94,6 +96,75 @@ mod tests {
     #[test]
     fn version_is_populated() {
         assert!(!VERSION.is_empty());
+    }
+
+    /// Two Rust types with the same name generate the same TypeScript file, and ts-rs silently lets
+    /// the second overwrite the first — so one type ends up with no binding at all while the code
+    /// still compiles. That happened once, with `caps::Snapshot` clobbering `cow::Snapshot`, and it
+    /// only surfaced because a binding was noticed missing. This makes it a build failure instead.
+    #[test]
+    fn no_two_exported_types_share_a_name() {
+        use std::collections::HashMap;
+
+        let mut seen: HashMap<String, Vec<String>> = HashMap::new();
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+
+        fn walk(dir: &std::path::Path, found: &mut Vec<(String, String)>) {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return;
+            };
+            for entry in entries.filter_map(std::result::Result::ok) {
+                let path = entry.path();
+                if path.is_dir() {
+                    walk(&path, found);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    let Ok(source) = std::fs::read_to_string(&path) else {
+                        continue;
+                    };
+                    // A type is exported when a `#[ts(export...)]` attribute precedes it.
+                    let lines: Vec<&str> = source.lines().collect();
+                    for (i, line) in lines.iter().enumerate() {
+                        if !line.trim_start().starts_with("#[ts(export") {
+                            continue;
+                        }
+                        // The declaration is the next line that declares a type.
+                        for next in lines.iter().skip(i + 1).take(6) {
+                            if let Some(name) = next
+                                .split_whitespace()
+                                .skip_while(|w| *w != "struct" && *w != "enum")
+                                .nth(1)
+                            {
+                                let name = name
+                                    .trim_end_matches(|c: char| !c.is_alphanumeric() && c != '_');
+                                if !name.is_empty() {
+                                    found.push((name.to_string(), path.display().to_string()));
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut found = Vec::new();
+        walk(&root, &mut found);
+        assert!(
+            found.len() > 20,
+            "the scan found only {} exported types",
+            found.len()
+        );
+
+        for (name, file) in found {
+            seen.entry(name).or_default().push(file);
+        }
+
+        let clashes: Vec<_> = seen.iter().filter(|(_, files)| files.len() > 1).collect();
+        assert!(
+            clashes.is_empty(),
+            "these type names are exported more than once, so their bindings overwrite each \
+             other: {clashes:?}"
+        );
     }
 
     /// The dependency rule from `docs/ARCHITECTURE.md`, asserted rather than trusted: this crate

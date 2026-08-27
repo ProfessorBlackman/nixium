@@ -8,9 +8,18 @@ import type { Ticket } from "./Ticket";
  */
 export type Preview = { ticket: Ticket, items: Array<PreviewItem>, 
 /**
- * Total if everything offered were reclaimed.
+ * Total if everything offered were reclaimed, taking every stated size at face value.
  */
 total_bytes: number, 
+/**
+ * The part of [`Preview::total_bytes`] nix is willing to **promise**.
+ *
+ * Lower than the total whenever some entry sits on a copy-on-write filesystem and its
+ * exclusivity could not be proven. Those entries contribute nothing here, because a total is a
+ * promise and a promise assembled from maybes is not one. When the two figures differ, the UI
+ * must lead with this one.
+ */
+promisable_bytes: number, 
 /**
  * Total of only the entries safe enough to pre-check.
  */

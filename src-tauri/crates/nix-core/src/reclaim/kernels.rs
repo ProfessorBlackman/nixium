@@ -23,7 +23,7 @@
 use crate::error::Result;
 use crate::op::CancelToken;
 use crate::pkg::{Backend, DpkgBackend, dpkg};
-use crate::space::{Category as SpaceCategory, ReclaimMethod, RemovableKind, Safety};
+use crate::space::{Category as SpaceCategory, ReclaimMethod, Reclaimable, RemovableKind, Safety};
 
 use super::registry::{Candidate, Category};
 
@@ -94,6 +94,7 @@ impl Category for OldKernelCategory {
                     set.version.0
                 )),
                 category: self.id().to_string(),
+                reclaimable: Reclaimable::Exact,
             });
         }
 
@@ -170,6 +171,7 @@ impl Category for ResidualConfigCategory {
                 if count == 1 { "" } else { "s" }
             )),
             category: self.id().to_string(),
+            reclaimable: Reclaimable::Exact,
         }])
     }
 }

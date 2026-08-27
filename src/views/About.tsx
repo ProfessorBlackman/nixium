@@ -14,7 +14,7 @@ import {
   toAppError,
   type Diagnostics,
   type HelperProbe,
-  type Snapshot,
+  type Capabilities,
   type Versions,
 } from "../lib/ipc";
 import { notify } from "../lib/notices";
@@ -31,7 +31,7 @@ const DEMO_ERRORS = [
 
 export default function About() {
   const [versions, setVersions] = useState<Versions | null>(null);
-  const [caps, setCaps] = useState<Snapshot | null>(null);
+  const [caps, setCaps] = useState<Capabilities | null>(null);
   const [diag, setDiag] = useState<Diagnostics | null>(null);
   const [helper, setHelper] = useState<HelperProbe | null>(null);
   const [probing, setProbing] = useState(false);

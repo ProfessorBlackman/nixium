@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use nix_core::op::CancelToken;
 use nix_core::protect::Guard;
 use nix_core::reclaim::{Candidate, Category, ItemOutcome, Registry, Session};
-use nix_core::space::{Category as SpaceCategory, ReclaimMethod, Safety};
+use nix_core::space::{Category as SpaceCategory, ReclaimMethod, Reclaimable, Safety};
 
 /// A sandbox that removes itself.
 struct Sandbox {
@@ -87,6 +87,7 @@ impl Category for Fixed {
                 method: ReclaimMethod::MoveToTrash { path: path.clone() },
                 cost: Some("It goes to the trash.".into()),
                 category: "harness".into(),
+                reclaimable: Reclaimable::Exact,
             })
             .collect())
     }
