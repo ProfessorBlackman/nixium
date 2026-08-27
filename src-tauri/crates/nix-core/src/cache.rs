@@ -358,6 +358,7 @@ mod tests {
                 errors: Vec::new(),
                 cancelled: false,
                 errors_truncated: false,
+                aggregated_below: 0,
                 coverage_note: None,
             },
         };
@@ -401,6 +402,7 @@ mod tests {
             errors: Vec::new(),
             cancelled: false,
             errors_truncated: false,
+            aggregated_below: 0,
             coverage_note: None,
         };
 

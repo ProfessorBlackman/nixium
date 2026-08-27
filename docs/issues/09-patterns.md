@@ -1,6 +1,6 @@
 # What generalises
 
-Thirty-nine entries is enough to see structure. This is the part worth re-reading.
+Forty-two entries is enough to see structure. This is the part worth re-reading.
 
 ---
 
@@ -71,9 +71,11 @@ floor you cannot go below. If the gap between them is small, the optimisation is
 whatever the plan says. Two of the three most valuable findings in this project came from measuring
 something the plan had already decided.
 
-The corollary, from the same episode: **measure each attempted fix too.** The diagnosis was right and
-the first two implementations were both wrong — one gave 13% where 3× was predicted, and one made
-things *worse than the original*. Neither would have been noticed without a number.
+The corollary, from the same episode, and it kept applying: **measure each attempted fix too.** Across
+the scan work five implementations of correct diagnoses were themselves wrong — one gave 13% where 3×
+was predicted, two made things *worse than the original*, and one silently orphaned 633,035 nodes.
+None of those would have been noticed without a number, and in one case I read the number as noise for
+two runs because the design "should" have been faster.
 
 ---
 
@@ -146,7 +148,7 @@ it.
 
 ## 8. Encode the guard in the toolchain, not in memory
 
-Ten of thirty-nine entries were caught by a gate. Those cost minutes. The ones that cost hours were
+Ten of forty-two entries were caught by a gate. Those cost minutes. The ones that cost hours were
 caught by reasoning, and the two worst were nearly not caught at all.
 
 Gates currently in force:

@@ -237,6 +237,13 @@ export default function Explorer() {
               </p>
             )}
             {result.coverage_note && <p className="caveat">{result.coverage_note}</p>}
+            {result.aggregated_below > 0 && (
+              <p className="muted">
+                Anything under {formatBytes(result.aggregated_below)} is grouped into a &ldquo;smaller
+                items&rdquo; row beside its siblings, so a directory listing stays readable. Those
+                bytes are still counted in every total on this page.
+              </p>
+            )}
             {result.allocated !== result.apparent_size && (
               <p className="muted">
                 On-disk and apparent size differ because of block rounding, sparse files, and

@@ -101,7 +101,7 @@ every other thread waiting on it, and a map growing to 454,129 entries rehashes 
 
 So the version that landed keeps a staging vector and builds the map once, pre-sized. The trade-off is
 that the vector and the map are both alive during the transfer, which is the direct cause of
-[entry 4](#4-scan-memory-scales-with-file-count-not-with-anything-a-user-can-see) being as bad as it
+entry 4 being as bad as it
 is. Both attempts and the reason each failed are recorded in the module documentation, so the next
 person to look at that code does not re-run the experiment.
 
@@ -109,7 +109,7 @@ person to look at that code does not re-run the experiment.
 
 ---
 
-## 4. Scan memory scales with file count, not with anything a user can see
+## 4. Scan memory scaled with file count, not with anything a user can see
 
 **M5 / STO-18** · **Critical** · **Found by** pointing the scanner at a real home directory
 
@@ -139,18 +139,102 @@ Worth being precise about what is *not* wrong. The byte accounting is correct �
 Nothing is miscounted. The model simply holds a node per file when what a user needs is to know where
 the bytes are.
 
-**Not resolved.** Raised as **STO-19** at P0 in `SPEC.md`, because it blocks pointing the explorer at
-a home directory, which is the tool's main use. The likely shape is bounding the tree by
-*significance* rather than depth — individual nodes for children that matter, one honest
-"*n* smaller items" node for the rest, which is what the treemap already does at the pixel level
-(decision D8) applied at the model level instead.
+**Resolved** as STO-19: a directory keeps nodes for children at or above a size threshold and folds the
+rest into one aggregate node carrying exactly the bytes it replaced. Peak memory 4,211.8 MiB →
+**94.9 MiB**, nodes 5,454,451 → **48,848**, and the scan got *faster* (34.7 s → 28.0 s) because most of
+those nodes were never worth building. Totals unchanged, zero invariant violations.
 
-Recorded here rather than fixed silently because it was found while measuring something else, and the
-measurement that found it is the argument for STO-19 existing.
+Because a child cannot hold more than its parent, a folded directory has nothing significant inside it
+either — so folding prunes whole subtrees, which is what bounds the directory count. That was the part
+that mattered: 782,119 directories is why a per-directory rule like "keep the largest sixteen" would
+not have worked.
+
+**Guard.** Four tests: aggregate bytes equal what they replaced at every level, a smaller budget yields
+a smaller tree with identical totals, an aggregate carries its count and claims no path, and the
+reachability test in entry 7.
 
 ---
 
-## 5. Test fixtures caused an I/O storm
+## 5. Counting the tree before building it doubled the cost of the scan it was meant to speed up
+
+**M5 / STO-19** · **Moderate** · **Found by** measuring the first implementation
+
+The threshold that decides which children earn a node is a share of the tree's total, and the total is
+not knowable before walking. The obvious answer is to walk twice: count, then build.
+
+Measured, that took the home-directory scan from 34.7 s to **61.2 s**. That tree is syscall-bound — 5.4
+million `stat` calls against 307 GiB that cannot sit in page cache — so a second traversal simply
+doubles the dominant cost. `/usr` had hidden this throughout development by being small enough to be
+page-cache hot, where a second pass is nearly free.
+
+**Resolved** by estimating the threshold from the filesystem's used bytes, which `statvfs` gives for
+free, and walking once. The estimate is good precisely where it matters: a scan rooted at a home
+directory covers most of what the filesystem holds.
+
+A second walk still happens when the estimate is badly wrong — a small subtree of a large filesystem —
+and that is the case where walking twice costs almost nothing. `Options::size_hint` lets a caller pass
+the figure outright, the obvious source being the previous scan of the same root.
+
+**Guard.** A test asserting a hint is honoured exactly, so the correction cannot creep back in for
+callers who already know the answer.
+
+---
+
+## 6. Correcting the estimate on any overshoot retried nearly every scan
+
+**M5 / STO-19** · **Moderate** · **Found by** the timings not improving as predicted
+
+Having replaced the counting pass with an estimate, the correction fired whenever the estimate came out
+higher than the truth. That is almost always: a scanned tree is almost always smaller than the
+filesystem holding it.
+
+So nearly every scan walked twice anyway and the fix had bought nothing. `/usr` went 759 ms → **2.4 s**,
+and the home directory sat at 63.4 s — worse than the two-pass version it replaced.
+
+Both numbers were in front of me and I read them as noise at first, because the design "should" have
+been faster. What settled it was `aggregated_below` in the result: it reported the *corrected*
+threshold, which is only possible if the correction had run.
+
+**Resolved** with a tolerance: correct only when the estimate is more than 8x too coarse. A home
+directory comes out around 1.4x and is left alone; `/usr`, at 3% of the filesystem, comes out 31x and is
+worth the second walk.
+
+**Guard.** None mechanical — the tolerance is a judgement, and the numbers behind it are in
+`ARCHITECTURE.md`. What *is* guarded is that a `size_hint` skips the correction entirely.
+
+---
+
+## 7. An aggregate built by the wrong node orphaned 633,035 of 674,065 nodes
+
+**M5 / STO-19** · **Serious** · **Found by** the node count being 3.4x its budget
+
+The first version had each directory build its own aggregate node and push it to the shared sink. That
+is the natural place for it — the directory is what the aggregate describes.
+
+But whether a directory survives is its **parent's** decision, and the parent makes it later, once the
+child's walk has returned its total. When the parent folded the directory, the directory's node was
+never created and its child list was discarded — leaving the aggregate in the sink referenced by
+nothing: unreachable from the root, still occupying memory and payload, and holding bytes already
+counted inside its ancestor's own aggregate.
+
+On a real home directory that was **633,035 orphans out of 674,065 nodes**, which is why the tree came
+out at 3.4x its 200,000 budget instead of comfortably under it.
+
+`check_invariants` passed throughout, because it only walks entries it can reach from the root. So did
+every existing test. The signal was the node count, nothing else.
+
+**Resolved** by having the parent create the aggregate at the moment it commits to keeping the child.
+The root is the one case with no parent, so `scan` builds its aggregate itself — which was missed on the
+first attempt and caught immediately by the structural test, as a root claiming 2,555,904 bytes whose
+children held zero.
+
+**Guard.** `a_folded_directory_leaves_no_orphaned_aggregate` walks from the root with a deliberately
+tiny node budget, so most directories fold, and asserts every node is reachable exactly once.
+**Verified to fire** by moving aggregate creation back into the child.
+
+---
+
+## 8. Test fixtures caused an I/O storm
 
 **M2** · **Friction** · **Found by** the diagnosis above
 
@@ -166,7 +250,7 @@ a correctness test does not need a performance fixture.
 
 ---
 
-## 6. Fixture temporary directories collided between parallel tests
+## 9. Fixture temporary directories collided between parallel tests
 
 **Phase 0** · **Moderate** · **Found by** intermittent test failures
 

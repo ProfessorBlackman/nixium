@@ -49,4 +49,12 @@ errors_truncated: boolean,
  * Carried as a field rather than computed in the frontend so the wording lives in one place,
  * and so it is impossible to render a total without the caveat being available beside it.
  */
-coverage_note: string | null, };
+coverage_note: string | null, 
+/**
+ * The size below which children were folded into per-directory aggregate nodes. `STO-19`.
+ *
+ * Zero when nothing was aggregated. Reported so the UI can say what the threshold was rather
+ * than leaving a user to wonder why a directory they know about is not listed — the bytes are
+ * always there, in the "*n* smaller items" entry beside its siblings.
+ */
+aggregated_below: number, };

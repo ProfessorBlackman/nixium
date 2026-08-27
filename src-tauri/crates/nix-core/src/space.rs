@@ -525,6 +525,14 @@ pub enum Provenance {
     ProjectMarker { marker: String },
     /// Reported by a filesystem-specific tool, e.g. btrfs.
     FilesystemTool { tool: String },
+    /// A synthetic entry standing in for children too small to be worth their own node. `STO-19`.
+    ///
+    /// Its bytes are exactly the sum of what it replaced, so a parent's total still equals the sum of
+    /// its children — the aggregate is a *summary*, never a rounding.
+    Aggregated {
+        #[ts(type = "number")]
+        count: u64,
+    },
 }
 
 /// One node: bytes attributed to a thing.
@@ -576,6 +584,35 @@ impl SpaceEntry {
             reclaim: None,
             last_used: None,
             is_dir,
+            children: Vec::new(),
+        }
+    }
+}
+
+impl SpaceEntry {
+    /// The stand-in for a directory's children that were too small for their own nodes. `STO-19`.
+    ///
+    /// Carries no path, because it is not a place — it is a statement about a set of places. The
+    /// count is structured rather than only being in the label, so the UI can decide how to phrase it
+    /// without parsing English.
+    #[must_use]
+    pub fn aggregated(parent: &Path, count: u64, apparent_size: u64, allocated: u64) -> Self {
+        Self {
+            // Derived from the parent's path, so it is stable across rescans like every other id.
+            id: EntryId::for_label("aggregated", &parent.to_string_lossy()),
+            path: None,
+            label: format!(
+                "{count} smaller {}",
+                if count == 1 { "item" } else { "items" }
+            ),
+            apparent_size,
+            allocated,
+            category: Category::Unknown,
+            provenance: Provenance::Aggregated { count },
+            safety: Safety::Never,
+            reclaim: None,
+            last_used: None,
+            is_dir: false,
             children: Vec::new(),
         }
     }

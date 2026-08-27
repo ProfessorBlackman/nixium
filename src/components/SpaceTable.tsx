@@ -96,7 +96,13 @@ export function SpaceTable({
               return (
                 <div
                   key={entry.id}
-                  className={entry.is_dir ? "tr is-dir" : "tr"}
+                  className={
+                    entry.provenance.by === "aggregated"
+                      ? "tr is-aggregate"
+                      : entry.is_dir
+                        ? "tr is-dir"
+                        : "tr"
+                  }
                   style={{ position: "absolute", top: index * ROW_HEIGHT, height: ROW_HEIGHT }}
                   role="row"
                   tabIndex={0}
@@ -110,7 +116,7 @@ export function SpaceTable({
                 >
                   <span className="td td-name" title={entry.path ?? entry.label}>
                     <span aria-hidden="true" className="td-icon">
-                      {entry.is_dir ? "▸" : "·"}
+                      {entry.provenance.by === "aggregated" ? "⋯" : entry.is_dir ? "▸" : "·"}
                     </span>
                     {entry.label}
                   </span>

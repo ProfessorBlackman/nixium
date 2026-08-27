@@ -329,9 +329,53 @@ The accounting itself is right — 307.2 GiB against `du`'s 310.4 GiB, the gap b
 errors and not crossing filesystem boundaries. Nothing is miscounted; there is simply a node for every
 file when what a user needs is to know where the bytes are.
 
-Raised as **STO-19** at P0. The likely shape is bounding the tree by *significance* instead of depth —
-individual nodes for children that matter and one honest "*n* smaller items" node for the remainder,
-which is decision D8's pixel-level aggregation applied at the model level.
+### Bounded by significance, not by depth
+
+**STO-19, done.** A directory keeps individual nodes for children at or above a size threshold and
+folds the rest into a single `SpaceEntry::aggregated` node — "*1,234 smaller items*" — carrying exactly
+the bytes it replaced. This is decision D8's pixel-level aggregation applied at the model level.
+
+| | before | after |
+| --- | --- | --- |
+| peak resident memory | 4,211.8 MiB | **94.9 MiB** |
+| tree nodes | 5,454,451 | **48,848** |
+| time | 34.7 s | **28.0 s** |
+
+Four properties hold this together, and each has a test:
+
+1. **An aggregate is a summary, never a rounding.** Its bytes are the sum of what it replaced, so a
+   parent still equals the sum of its children and no total moves. The budget trades away *listing*,
+   never *accounting*.
+2. **Significance is judged on allocated bytes**, not apparent ones. A sparse ten-gigabyte image
+   occupying one block is not among the largest things on the disk, whatever it claims.
+3. **The threshold is fixed for the whole walk**, which is what makes folding local and exact: a
+   directory decides each child on the spot with nothing to revisit. A threshold that moved mid-walk
+   would mean pruning nodes whose parents did not exist yet.
+4. **Aggregates are built by the parent**, not by the directory they summarise — because whether a
+   directory survives is the parent's decision, made after the child's walk returns. See
+   [issues §05](issues/05-concurrency-and-performance.md) for what happened when it was the other way
+   round.
+
+Because a child can never hold more than its parent, a folded directory has nothing significant inside
+it either. So folding prunes whole subtrees, which is what bounds the *directory* count — and the
+directory count is what actually dominates: a per-directory rule such as "keep the largest sixteen"
+would still leave 782,119 directories to describe.
+
+#### Choosing the threshold without knowing the total
+
+The threshold is a share of the tree's total, and the total is not knowable before walking. Counting
+first and building second is the obvious answer and was measured as the wrong one: it took the
+home-directory scan to 61.2 s, because that tree is syscall-bound and a second traversal doubles the
+dominant cost.
+
+So it is estimated from the filesystem's used bytes, which `statvfs` gives for free, and corrected by a
+second walk only when the estimate proves more than 8x too coarse. That keeps the cases that matter —
+a whole home directory, a whole filesystem — to a single traversal, and pays a second one only for a
+small subtree, where a walk is cheap. `Options::size_hint` lets a caller supply the figure outright;
+the obvious source is the previous scan of the same root, so a rescan never pays the correction.
+
+Getting the estimate wrong is not a correctness problem. It only decides how much detail the tree
+carries, never what the totals are.
 
 ## The privileged helper
 

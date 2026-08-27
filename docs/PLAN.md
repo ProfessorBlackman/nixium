@@ -162,7 +162,34 @@ almost every file. Its byte accounting is *correct* (307.2 GiB against `du`'s 31
 node per file. That has to be bounded by significance before the explorer can be pointed at a home
 directory.
 
-Remaining: STO-19 (new, P0), STO-14, STO-13, STO-15, STO-16.
+**STO-19 is done.** Scan memory no longer scales with file count. On the same home directory —
+5,409,614 files, 782,119 directories:
+
+| | before | after |
+| --- | --- | --- |
+| peak resident memory | 4,211.8 MiB | **94.9 MiB** |
+| tree nodes | 5,454,451 | **48,848** |
+| time | 34.7 s | **28.0 s** |
+
+Children too small to list fold into one aggregate node per directory, holding exactly the bytes they
+replaced. Totals are untouched: the root still reports 307.3 GiB against `du`'s 310.4 GiB, and every
+directory still equals the sum of its children including its aggregate.
+
+Three things went wrong on the way, and all three were found by measuring rather than reasoning:
+
+1. **Counting first, then building** — the obvious way to learn the total before choosing a threshold —
+   took the home-directory scan from 34.7 s to **61.2 s**. That tree is syscall-bound, so a second
+   traversal simply doubles the dominant cost; `/usr` had hidden this by being page-cache hot. The
+   threshold is now estimated from the filesystem's used bytes and corrected only when badly wrong.
+2. **Correcting on any overshoot retried essentially every scan**, since a scanned tree is almost
+   always smaller than its filesystem. `/usr` went 759 ms → 2.4 s. Now it corrects only past 8x.
+3. **The aggregate node was built by the directory it summarised**, but whether that directory
+   survives is its parent's decision, made later — so 633,035 of 674,065 nodes were orphans,
+   unreachable from the root yet still holding bytes counted in an ancestor. `check_invariants` did not
+   catch it because it only walks what it can reach. Aggregates are now built by the parent. A
+   reachability test guards it, verified by reintroducing the bug.
+
+Remaining: STO-14, STO-13, STO-15, STO-16.
 
 Note also that §4's parallelisation advice no longer applies: this is a solo project, which is why
 **task 0.9 was completed within Phase 0 rather than deferred** — see §5.2 for why M2 is nonetheless

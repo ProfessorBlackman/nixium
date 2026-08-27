@@ -310,7 +310,7 @@ with a reclaim method (§5.5 invariant 3); user exclusions survive a rescan.
 | STO-16 | Growth history | P2 |
 | STO-17 | btrfs, LVM & ZFS awareness | **P0** |
 | STO-18 | Incremental rescan | ~~P1~~ superseded |
-| STO-19 | Bounded scan memory | **P0** |
+| STO-19 | Bounded scan memory | **P0** — done |
 
 **STO-10 Package storage attribution.** Installed size per package, joined into the space model
 so a directory can name the package that owns it. This is what makes an uninstaller a storage
@@ -408,6 +408,26 @@ cap was meant to bound the payload and does not, because depth 12 still reaches 
 
 *Accepts:* a scan of a 5-million-file tree peaks under 500 MiB; the tree the UI receives is bounded by
 significance rather than by file count, and says plainly how many entries it aggregated.
+
+**Met.** Measured on the same home directory — 5,409,614 files in 782,119 directories:
+
+| | before | after |
+| --- | --- | --- |
+| peak resident memory | 4,211.8 MiB | **94.9 MiB** |
+| tree nodes | 5,454,451 | **48,848** |
+| time | 34.7 s | **28.0 s** |
+| invariant violations | 0 | 0 |
+| root total vs `du` | 307.2 / 310.4 GiB | unchanged |
+
+Children below a threshold fold into one `SpaceEntry::aggregated` node per directory, carrying exactly
+the bytes they replaced — so a parent still equals the sum of its children and no total moves. The
+threshold is a share of the tree's total, estimated from the filesystem's used bytes and corrected by a
+second walk only when that estimate is more than 8x too coarse; callers who know the size (a rescan,
+from the previous result) pass `size_hint` and skip the correction entirely.
+
+The budget is an upper bound and realised counts sit well under it, because nesting means far fewer
+entries clear the threshold than `total / threshold` suggests. Under-shooting is the safe direction: it
+costs listing detail, never accounting.
 
 ---
 

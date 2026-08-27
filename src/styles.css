@@ -1055,3 +1055,10 @@ button.danger:hover:not(:disabled) {
   font-family: var(--font-mono);
   white-space: pre;
 }
+
+/* An aggregate row stands for many entries rather than being one, so it must not read as a file.
+   Muted and italic: present and countable, but plainly not a thing you can open. */
+.is-aggregate .td-name {
+  font-style: italic;
+  color: var(--ink-mute);
+}
