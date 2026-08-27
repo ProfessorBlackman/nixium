@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! Application caches. Task 1.11 (`STO-5`).
 //!
 //! # Attribution, not directory listing

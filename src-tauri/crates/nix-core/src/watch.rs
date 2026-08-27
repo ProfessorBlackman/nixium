@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! Staleness watching. Task 1.15, completing decision D6.
 //!
 //! # What this is for

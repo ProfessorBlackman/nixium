@@ -37,6 +37,15 @@ freezes its behaviour so the rebuild does not have to re-derive it.
 | [20-known-quirks-and-bugs.md](20-known-quirks-and-bugs.md) | Defects and fragile parsing to **not** reproduce |
 | [21-tauri-rust-port-notes.md](21-tauri-rust-port-notes.md) | Feature → Rust/Tauri mapping, suggested IPC surface, gaps |
 
+## A note on licensing
+
+Stacer is licensed **GPL-3.0**. These documents describe its behaviour and quote short excerpts of
+its source for analysis and commentary — the only Stacer-derived material anywhere in this
+repository. **nix itself shares no code with Stacer**; it is a from-scratch rewrite, and the
+similarity of licence is a coincidence of what desktop system utilities conventionally use.
+
+nix is GPL-3.0-or-later, so there is no compatibility question either way.
+
 ## At a glance
 
 - **Version documented:** 1.1.0 (`stacer/main.cpp`, `release.sh`)

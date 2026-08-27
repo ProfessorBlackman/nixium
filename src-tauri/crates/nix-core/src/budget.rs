@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! Performance budgets, asserted rather than aspired to. Task 0.11 (`PLT-6`).
 //!
 //! The spec's §7.3 table is only meaningful if a build can fail against it. This module holds the

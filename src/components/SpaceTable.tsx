@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 /**
  * Virtualised table over a scan's entries. Task 1.6 (`STO-2`).
  *

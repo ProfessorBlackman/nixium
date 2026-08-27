@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! The privileged helper: protocol, client, and the operation allow-list. Task 0.9 (`FND-4`).
 //!
 //! # Design

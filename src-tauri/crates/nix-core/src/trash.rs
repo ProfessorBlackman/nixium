@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! The freedesktop trash specification. Task 1.10 (`STO-7`).
 //!
 //! # Why this is implemented properly rather than approximated

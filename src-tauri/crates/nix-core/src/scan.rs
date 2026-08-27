@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! The filesystem scanner. Task 1.3 (`STO-2`).
 //!
 //! Properties the specification requires, and why each matters:

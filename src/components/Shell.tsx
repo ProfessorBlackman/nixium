@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 /**
  * The application shell: sidebar, header, and a lazily-mounted content area. Task 0.4 (FND-1).
  *

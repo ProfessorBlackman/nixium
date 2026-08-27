@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! The category registry. Task 1.9 (`STO-3`).
 //!
 //! This module is the difference between nine categories and nine special cases. Each category

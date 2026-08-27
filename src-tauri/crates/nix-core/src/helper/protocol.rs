@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! Wire protocol shared by the app and the helper.
 //!
 //! Both sides depend on this module, so a change here is a change to both — which is the point.

@@ -17,6 +17,8 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 repository = "https://github.com/tlc/nix"
+license = "GPL-3.0-or-later"
+authors = ["Methuselah Nwodobeh"]
 
 [workspace.dependencies]
 nix-core = { path = "crates/nix-core" }
@@ -56,6 +58,8 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
+license.workspace = true
+authors.workspace = true
 
 # The user-facing command is `nix`, even though the package is `nix-app`.
 # The package is not named `nix` because that name belongs to the well-known

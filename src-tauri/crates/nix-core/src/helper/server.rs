@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! The helper's request loop, validation and audit log. Runs as root.
 //!
 //! Everything here executes with full privilege, so the code is written to be readable rather than

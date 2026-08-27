@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! The space model. Task 1.1.
 //!
 //! This is the spine of the product. Stacer's defining flaw was that disk concerns were scattered

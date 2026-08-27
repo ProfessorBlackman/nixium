@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! Removable system packages: old kernels and residual configuration. `STO-11`.
 //!
 //! # Why this is first in Phase 2

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! Reclaiming space. Tasks 1.8 (`STO-4`) and 1.9 (`STO-3`).
 //!
 //! # The pipeline is the point

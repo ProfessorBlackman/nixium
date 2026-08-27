@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! Core library for nix: the space model, filesystem scanners, and metric samplers.
 //!
 //! This crate deliberately has **no GUI and no Tauri dependency**, so that everything it does can

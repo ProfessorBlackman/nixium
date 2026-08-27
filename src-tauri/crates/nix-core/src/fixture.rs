@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! Reproducible filesystem fixtures for correctness and budget tests. Task 0.11 (`PLT-6`).
 //!
 //! The plan is blunt about why this exists: **build the fixture early or the budgets are

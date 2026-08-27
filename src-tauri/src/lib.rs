@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! The Tauri application shell.
 //!
 //! This crate owns the window, the command surface and the event plumbing. All system access lives

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! Freed-bytes verification. Task 1.14.
 //!
 //! The specification's fourth success criterion is that **reported reclaimed bytes match the

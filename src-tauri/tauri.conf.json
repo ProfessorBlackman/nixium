@@ -48,7 +48,8 @@
         "files": {
           "/usr/libexec/nix/nix-helper": "target/release/nix-helper",
           "/usr/share/polkit-1/actions/com.tlc.nix.policy": "../packaging/polkit/com.tlc.nix.policy",
-          "/usr/share/applications/com.tlc.nix.desktop": "../packaging/nix.desktop"
+          "/usr/share/applications/com.tlc.nix.desktop": "../packaging/nix.desktop",
+          "/usr/share/doc/nix/copyright": "../LICENSE"
         }
       },
       "rpm": {
@@ -58,7 +59,8 @@
         "files": {
           "/usr/libexec/nix/nix-helper": "target/release/nix-helper",
           "/usr/share/polkit-1/actions/com.tlc.nix.policy": "../packaging/polkit/com.tlc.nix.policy",
-          "/usr/share/applications/com.tlc.nix.desktop": "../packaging/nix.desktop"
+          "/usr/share/applications/com.tlc.nix.desktop": "../packaging/nix.desktop",
+          "/usr/share/licenses/nix/LICENSE": "../LICENSE"
         }
       }
     }

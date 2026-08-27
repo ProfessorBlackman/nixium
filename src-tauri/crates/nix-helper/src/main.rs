@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! The nix privileged helper.
 //!
 //! Runs as root, authorised by polkit, and accepts a **closed set** of typed operations over stdin

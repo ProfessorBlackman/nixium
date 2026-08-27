@@ -64,5 +64,20 @@ nix/
 
 ## Licence
 
-**Not yet chosen.** nix shares no code with Stacer (which is GPL-3.0), so we are unconstrained —
-but a licence needs picking before the first public release.
+**GPL-3.0-or-later.** See [LICENSE](LICENSE).
+
+nix is a privileged tool that deletes files, so users have an unusually strong interest in being able
+to audit and rebuild exactly what they run. Copyleft keeps that true of forks as well — which is the
+same commitment as the rest of the project: no silent failures, no flattering numbers.
+
+Every source file carries an `SPDX-License-Identifier` header. Generated files under
+`src/bindings/` do not, because they are rewritten on each build; they are covered by this LICENSE
+like everything else in the repository.
+
+nix shares **no code** with Stacer, so this was a free choice rather than an inherited obligation —
+Stacer is also GPL-3.0, which is a coincidence of category convention. The one place Stacer-derived
+material appears is [docs/stacer/](docs/stacer/README.md), which quotes short excerpts for analysis.
+
+All 551 dependencies (500 Rust crates, 51 npm packages) are permissive or MPL-2.0, and none are
+GPL — so nothing in the tree constrained the choice. WebKitGTK, which Tauri links dynamically, is
+`LGPL-2+`, and LGPL-2-or-later upgrades to LGPL-3.0, which GPL-3.0 permits.

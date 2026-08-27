@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! Structured logging and the diagnostics bundle. Task 0.8 (`FND-8`).
 //!
 //! Stacer wrote a complete file logger and then never called `qInstallMessageHandler`, so every

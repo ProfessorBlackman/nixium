@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! Scan persistence. Task 1.4, implementing decision D6.
 //!
 //! # Why this exists

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! The dpkg/APT backend, and kernel identification.
 //!
 //! # The rule that matters

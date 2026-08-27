@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! Client side of the helper: spawns it, authenticates once, and exchanges typed messages.
 
 use std::io::{BufRead, BufReader, Write};

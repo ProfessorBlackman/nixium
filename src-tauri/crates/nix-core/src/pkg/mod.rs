@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! Package database queries. `STO-10`, and the foundation for `STO-11`.
 //!
 //! # Why this lands before the kernel category

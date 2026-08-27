@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! Cancellation and progress for long operations. Task 0.3 (`FND-2`).
 //!
 //! The plan is explicit that **the primitive is the deliverable**, not the individual commands: get

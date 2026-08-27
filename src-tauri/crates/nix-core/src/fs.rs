@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! Mount enumeration and per-filesystem accounting. Task 1.2 (`STO-1`), plus the free-space slice
 //! of `STO-17` pulled forward.
 //!

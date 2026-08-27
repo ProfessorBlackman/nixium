@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! Capability probing. Task 0.7 (`FND-7`).
 //!
 //! The rule this module exists to enforce is principle P7: **detect capabilities, never distro

@@ -31,7 +31,20 @@ package. That belongs with M9 (PLT-5), not Phase 0.
 /usr/share/polkit-1/actions/com.tlc.nix.policy  the polkit action
 /usr/share/applications/com.tlc.nix.desktop     the desktop entry
 /usr/share/icons/hicolor/*/apps/nix.png         icons
+/usr/share/doc/nix/copyright                    the licence  (deb)
+/usr/share/licenses/nix/LICENSE                 the licence  (rpm)
 ```
+
+Tauri has no licence field of its own, so the copyright file is placed through the same `files` map
+that installs the helper — at the path each packaging convention expects.
+
+## Outstanding for a public release
+
+**Dependency attribution.** nix is GPL-3.0-or-later, and its dependencies are permissive, which is
+compatible in that direction — but Apache-2.0 §4(d) requires that any `NOTICE` file a dependency
+ships be reproduced in distributions. Most Rust crates carry none, so this is likely a short list,
+but it needs generating and shipping (`cargo-about` or `cargo-bundle-licenses`) rather than assumed
+empty. Tracked for M9 (`PLT-5`).
 
 The helper is under `libexec` rather than `bin` because it is not meant to be run by hand; its
 `--serve` mode is the only useful entry point and it says so when invoked without it.

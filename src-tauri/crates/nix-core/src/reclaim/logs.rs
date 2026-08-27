@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! Logs and the systemd journal. Task 1.12 (`STO-6`).
 //!
 //! # journald is the point

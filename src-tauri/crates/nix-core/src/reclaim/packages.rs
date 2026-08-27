@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! Package manager caches, and the first backend implementations. Task 1.13 (`STO-8`).
 //!
 //! # Reclaimed through the owning tool, never by unlinking

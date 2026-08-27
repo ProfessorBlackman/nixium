@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! XDG base-directory resolution.
 //!
 //! Hand-rolled rather than pulled from a crate: the spec targets Linux only, the rules are short,

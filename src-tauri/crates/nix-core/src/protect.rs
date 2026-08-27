@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! Protected paths. Task 1.7 (`STO-9`).
 //!
 //! **Built before the executor, deliberately.** The plan's fourth sequencing rule is that safety
