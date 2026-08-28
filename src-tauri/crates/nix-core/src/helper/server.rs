@@ -411,6 +411,77 @@ fn remove_packages(kind: RemovableKind, requested: &[String]) -> Result<u64> {
     Ok(bytes)
 }
 
+/// Remove packages the user chose by name, after the helper has satisfied itself. `PKG-2`.
+///
+/// The reasoning for why this operation's guarantee differs from every other destructive one is on
+/// [`Op::RemoveSelected`]. What happens here:
+///
+/// 1. **Every name must be an installed package.** Not a filter on what apt will accept — a lookup in
+///    dpkg's database. This is what stops `--force-yes`, `../..`, `;` or an empty string reaching the
+///    argument list, because none of those are installed packages.
+/// 2. **The helper runs its own simulation and applies its own rules.** The client's preview is a UI
+///    convenience and is not consulted. A frontend that lies, or that has a bug, cannot change what
+///    this function computes.
+/// 3. **Fatal concerns are refused**, not warned about.
+fn remove_selected(requested: &[String]) -> Result<u64> {
+    use crate::pkg::{Backend, DpkgBackend, RemovalRisk};
+
+    if requested.is_empty() {
+        // Nothing to do is not an error, and is certainly not a reason to invoke apt with no
+        // arguments — the Stacer defect `PKG-2` exists to avoid.
+        return Ok(0);
+    }
+
+    let backend = DpkgBackend::new();
+    if !backend.available() {
+        return Err(AppError::unsupported("apt"));
+    }
+
+    // (1) Each name is an installed package, checked against dpkg rather than assumed. An
+    // arch-qualified name is accepted; anything dpkg does not report as installed is refused.
+    let installed = backend.installed()?;
+    for name in requested {
+        let known = installed.iter().any(|p| p.id == *name || p.name == *name);
+        if !known {
+            return Err(AppError::new(
+                ErrorCode::HelperRejected,
+                format!("{name} is not an installed package."),
+            )
+            .with_remedy(
+                "The helper only removes packages dpkg reports as installed. Refresh the list.",
+            ));
+        }
+    }
+
+    // (2) The helper's own simulation and its own classification. Not the caller's.
+    let preview = backend.removal_preview(requested)?;
+
+    // (3) A fatal concern is a refusal.
+    if let Some(refusal) = preview.refusal() {
+        return Err(AppError::new(
+            ErrorCode::HelperRejected,
+            format!(
+                "Refusing to remove {}: {} {}.",
+                requested.join(", "),
+                refusal.package,
+                refusal.concern.explanation()
+            ),
+        )
+        .with_remedy(
+            "The helper decides this for itself, so nothing in the interface can approve it. If you              are certain, run the removal yourself.",
+        ));
+    }
+    debug_assert!(preview.risk != RemovalRisk::Refused);
+
+    // Fixed flags; only names that survived every check above vary. No `--allow-remove-essential`,
+    // so apt itself refuses as a last line of defence if the classification above ever misses one.
+    let mut args: Vec<&str> = vec!["remove", "--purge", "-y"];
+    args.extend(requested.iter().map(String::as_str));
+    run_fixed("apt-get", &args)?;
+
+    Ok(preview.freed_bytes)
+}
+
 /// Where snapd keeps its download cache. Mode 0700 and root-owned, so only the helper can see it.
 const SNAPD_CACHE: &str = "/var/lib/snapd/cache";
 
@@ -672,6 +743,10 @@ fn dispatch(op: &Op) -> Result<OpResult> {
 
         Op::RemovePackages { kind, packages } => Ok(OpResult::Reclaimed {
             bytes: remove_packages(*kind, packages)?,
+        }),
+
+        Op::RemoveSelected { packages } => Ok(OpResult::Reclaimed {
+            bytes: remove_selected(packages)?,
         }),
 
         Op::ListSnapRevisions => Ok(OpResult::SnapRevisions {
@@ -1624,6 +1699,97 @@ mod tests {
                 revision.name, revision.revision
             );
         }
+    }
+
+    // ---- `PKG-2`: removing packages the user chose ----
+    //
+    // # What these tests may and may not do
+    //
+    // `remove_selected` performs every check before it invokes apt, so the **refusal** paths are fully
+    // exercisable unprivileged. The success path is not exercisable here at all, and deliberately is
+    // not attempted: a test that reached `apt-get remove` would, if ever run as root, remove a package
+    // from the machine running it. That is not a hypothetical — see
+    // `docs/issues/01-privilege-and-security.md` §5.
+    //
+    // So every name below is one the helper must refuse, and the assertion is always that it refused.
+    // The success path is on the list for the isolated VM pass (`PLAN.md` §9.1).
+
+    /// The check that keeps flags, paths and shell fragments out of the argument list: a name must be
+    /// an installed package, looked up in dpkg's database rather than filtered by pattern.
+    #[test]
+    fn the_helper_refuses_a_name_that_is_not_an_installed_package() {
+        if !crate::caps::registry().has(crate::caps::Capability::Apt) {
+            return;
+        }
+
+        let hostile = [
+            "nix-test-not-a-real-package",
+            "--allow-remove-essential",
+            "-y",
+            "../../etc/passwd",
+            "bash; rm -rf /",
+            "bash bash",
+            "",
+            " ",
+        ];
+
+        for name in hostile {
+            let error = remove_selected(&[name.to_string()])
+                .expect_err("only installed packages may be named");
+            assert_eq!(
+                error.code,
+                ErrorCode::HelperRejected,
+                "{name:?} must be refused by the helper's own lookup"
+            );
+        }
+    }
+
+    /// One bad name in a list poisons the whole list. Removing "the valid ones anyway" would mean
+    /// carrying out an operation the user did not ask for.
+    #[test]
+    fn one_unknown_name_refuses_the_whole_request() {
+        if !crate::caps::registry().has(crate::caps::Capability::Apt) {
+            return;
+        }
+
+        let error = remove_selected(&[
+            "bash".to_string(),
+            "nix-test-not-a-real-package".to_string(),
+        ])
+        .expect_err("a list containing an unknown name is refused entirely");
+        assert_eq!(error.code, ErrorCode::HelperRejected);
+    }
+
+    /// The helper applies the fatal rules **itself**, so a frontend that showed a clean preview cannot
+    /// talk it into a system-destroying removal. `bash` is installed here, so this gets past the
+    /// name check and is stopped by the classification.
+    #[test]
+    fn the_helper_refuses_an_essential_package_on_its_own_judgement() {
+        if !crate::caps::registry().has(crate::caps::Capability::Apt) {
+            return;
+        }
+
+        let error = remove_selected(&["bash".to_string()])
+            .expect_err("bash is essential and must be refused by the helper");
+        assert_eq!(error.code, ErrorCode::HelperRejected);
+        // Which refusal it was matters. `bash` is installed, so reaching the name check's message
+        // would mean the lookup is broken and this test was passing for the wrong reason.
+        assert!(
+            error.message.contains("essential"),
+            "must be refused by the classification, not by the installed-package lookup: {}",
+            error.message
+        );
+        assert!(
+            error.message.contains("bash"),
+            "the refusal must name what it objected to: {}",
+            error.message
+        );
+    }
+
+    /// Nothing selected means nothing done — never an invocation with no arguments.
+    #[test]
+    fn an_empty_selection_does_nothing_rather_than_invoking_apt() {
+        assert_eq!(remove_selected(&[]).expect("empty is not an error"), 0);
     }
 
     // ---- `PRC-2`: signals and renice ----

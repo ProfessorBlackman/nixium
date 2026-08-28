@@ -750,7 +750,7 @@ as their own phase.*
 | ID | Feature | Pri |
 | --- | --- | --- |
 | PKG-1 | Installed software inventory | P0 — done |
-| PKG-2 | Removal with cascade preview | P0 |
+| PKG-2 | Removal with cascade preview | P0 — done |
 | PKG-3 | Multi-backend coverage | P1 |
 | PKG-4 | Startup applications | P1 |
 | PKG-5 | Repository management | P2 |
@@ -794,6 +794,51 @@ which an upgrade rewrites.
 No unconditional empty invocations — Stacer ran `pkexec snap remove` with no arguments on every
 uninstall. *Accepts:* the preview matches the actual outcome; a removal that would take out a
 desktop environment is flagged prominently.
+
+*Delivered.* The simulation is the authority on the cascade, and nix classifies the result itself —
+which turned out to be the whole feature, because **`apt-get -s remove bash` exits zero**. On this
+machine it plans to remove `bash`, `gdm3`, `ubuntu-desktop`, `ubuntu-desktop-minimal`, `aznfs` and
+`mysql-apt-config`, and reports success. A tool that trusts the simulation's exit status offers its
+user a button that destroys their system.
+
+Danger is derived from dpkg's own metadata rather than a list of package names, with one exception that
+had to be built because the metadata does not cover it:
+
+| Signal | Source | Outcome |
+| --- | --- | --- |
+| `Essential: yes` | dpkg | **Refused** |
+| `Priority: required` | dpkg | **Refused** |
+| Part of the running kernel | `uname -r` | **Refused** |
+| `Priority: important` | dpkg | Dangerous |
+| Owns the configured display manager | `/etc/X11/default-display-manager` → `dpkg -S` | Dangerous |
+| More leaves than was asked for | the simulation | Cascading |
+
+The display-manager row exists because priority says nothing about it: `gdm3`, `gnome-shell` and
+`ubuntu-desktop` are all `Priority: optional` here, so the metadata alone would have let "you will boot
+to a text console" pass unmentioned. It is resolved from *this machine's* configuration rather than a
+list of display-manager names, so it stays correct on a system running something the list would not
+have known about.
+
+**A refusal comes with the command to run by hand.** `Priority: required` is self-declared — `aznfs`, a
+third-party NFS helper, declares it on this machine, and so does `libc6`, where removal destroys the
+system. Nothing in the metadata separates those two cases, so nix refuses both; refusing an informed
+user with no way through is how people end up guessing at commands, so the refusal names the exact one.
+
+**The helper re-derives all of it.** `Op::RemoveSelected` cannot validate a user's selection against a
+set it derives itself, so the guarantee is narrower and stated plainly on the op: every name must be an
+installed package (which is what keeps flags and paths out of the argument list), and the helper runs
+its **own** simulation and applies its own copy of the rules. A frontend that lies cannot make the
+helper's simulation come out differently. `--allow-remove-essential` is never passed, so apt itself is
+a last line of defence.
+
+*Accepts:* the outcome is **measured** — the inventory is read before and after and diffed against the
+preview, so a package that survived is reported as remaining and one that went unpreviewed is reported
+as unexpected. apt exits once for the whole transaction and its status says nothing about individual
+packages.
+
+**Not yet exercised as root.** The refusal paths are fully tested unprivileged, because they all
+complete before apt is invoked; the removal itself is on the isolated-VM list (§9.1 of `PLAN.md`), and
+no test may reach it — a test that did would remove a package from whatever machine ran it.
 
 **PKG-3 Multi-backend coverage.** apt, dnf, pacman, **zypper** (Stacer detected it and never
 implemented it), snap, flatpak — each behind a common trait, each independently capability-probed.

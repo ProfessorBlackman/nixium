@@ -225,10 +225,85 @@ pub struct ResidualConfig {
     pub bytes: u64,
 }
 
+/// Why a package appearing in a removal is worth saying something about.
+///
+/// Ordered by how bad it is, so the worst concern in a set decides the [`RemovalRisk`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum Concern {
+    /// More packages leave than were asked for. Normal, and still worth showing.
+    Cascade,
+    /// `Priority: important` — "would be found on any Unix-like system", per Debian policy.
+    Important,
+    /// This package owns the display manager currently configured on **this machine**.
+    ///
+    /// Not a guess from a list of names: resolved by asking dpkg which package owns the binary named
+    /// in `/etc/X11/default-display-manager`.
+    DisplayManager,
+    /// Part of the running kernel.
+    RunningKernel,
+    /// `Priority: required` — the system will not function without it.
+    Required,
+    /// `Essential: yes`. dpkg itself will not remove one of these without being forced.
+    Essential,
+}
+
+impl Concern {
+    /// What to tell the user, in the terms that matter to them rather than the packaging term.
+    #[must_use]
+    pub const fn explanation(self) -> &'static str {
+        match self {
+            Self::Cascade => "would be removed as well, because something being removed needs it",
+            Self::Important => "is part of the base system",
+            Self::DisplayManager => {
+                "runs the graphical login on this machine — removing it boots to a text console"
+            }
+            Self::RunningKernel => "is part of the kernel this machine is running right now",
+            Self::Required => "is required for the system to function",
+            Self::Essential => "is marked essential; removing it breaks the system",
+        }
+    }
+
+    /// Whether nix refuses outright rather than warning.
+    #[must_use]
+    pub const fn is_fatal(self) -> bool {
+        matches!(self, Self::Essential | Self::Required | Self::RunningKernel)
+    }
+}
+
+/// One package in a removal, and why it is worth mentioning.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Flagged {
+    pub package: String,
+    pub concern: Concern,
+}
+
+/// How bad a removal is, in one value the UI can key on.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize, TS,
+)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum RemovalRisk {
+    /// Exactly what was asked for, nothing else.
+    #[default]
+    Safe,
+    /// Other packages go too, none of them alarming.
+    Cascading,
+    /// Something the user will miss. Allowed, behind a deliberate confirmation.
+    Dangerous,
+    /// **nix will not do this.** Not a stern warning — a refusal.
+    Refused,
+}
+
 /// What removing a set of packages would actually do.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct RemovalPreview {
+    /// What the user selected, so the cascade is the difference rather than a guess.
+    pub requested: Vec<String>,
     /// Packages that would be removed, including any pulled out as a consequence.
     pub removing: Vec<String>,
     /// Bytes the manager expects to free.
@@ -238,6 +313,155 @@ pub struct RemovalPreview {
     ///
     /// Almost always empty, and alarming when it is not — worth surfacing rather than hiding.
     pub installing: Vec<String>,
+    /// Everything worth saying about the packages involved, worst first.
+    pub flagged: Vec<Flagged>,
+    /// The worst concern, as one value.
+    pub risk: RemovalRisk,
+}
+
+impl RemovalPreview {
+    /// Packages leaving that the user did not select.
+    #[must_use]
+    pub fn cascade(&self) -> Vec<&String> {
+        self.removing
+            .iter()
+            .filter(|name| !self.requested.contains(name))
+            .collect()
+    }
+
+    /// Set [`RemovalPreview::risk`] and sort the flags from the concerns gathered.
+    ///
+    /// Separate from gathering them so the rule is a pure function over the flags, and can be tested
+    /// without a package database.
+    pub fn settle(&mut self) {
+        self.flagged.sort_by(|a, b| {
+            b.concern
+                .cmp(&a.concern)
+                .then_with(|| a.package.cmp(&b.package))
+        });
+        self.flagged.dedup();
+
+        self.risk = if self.flagged.iter().any(|f| f.concern.is_fatal()) {
+            RemovalRisk::Refused
+        } else if self.flagged.iter().any(|f| f.concern != Concern::Cascade) {
+            RemovalRisk::Dangerous
+        } else if self.flagged.is_empty() {
+            RemovalRisk::Safe
+        } else {
+            RemovalRisk::Cascading
+        };
+    }
+
+    /// The reason nix refuses, if it does.
+    #[must_use]
+    pub fn refusal(&self) -> Option<&Flagged> {
+        if self.risk != RemovalRisk::Refused {
+            return None;
+        }
+        self.flagged.iter().find(|f| f.concern.is_fatal())
+    }
+
+    /// The command to run by hand, for a refusal the user disagrees with.
+    ///
+    /// # Why a refusal comes with an escape hatch
+    ///
+    /// `Priority: required` is **self-declared** — it is whatever the package's own control file says,
+    /// not a judgement by the distribution. On this machine `aznfs`, a third-party NFS helper, declares
+    /// itself required, so nix refuses to remove it; `libc6` declares the same thing and removing it
+    /// destroys the system. Nothing in the metadata distinguishes those two cases.
+    ///
+    /// Refusing both is the right default, because the cost of being wrong is not symmetric. But nix
+    /// refusing is not the same as the user being wrong, and a tool that blocks an informed decision
+    /// with no way through is a tool people work around by guessing at commands. So the refusal names
+    /// the exact command, and the user takes it from there with their eyes open.
+    #[must_use]
+    pub fn manual_command(&self) -> Option<String> {
+        if self.requested.is_empty() {
+            return None;
+        }
+        Some(format!("sudo apt-get remove {}", self.requested.join(" ")))
+    }
+}
+
+/// What a removal actually did, checked against the package database afterwards.
+///
+/// # Why this is measured rather than reported
+///
+/// `apt-get remove` is one transaction and exits zero or non-zero for the whole thing, so its status
+/// says nothing about individual packages. `PKG-2`'s criterion is that **the preview matches the
+/// actual outcome**, and the only way to know that is to look: the inventory is re-read afterwards and
+/// diffed against what the preview said would happen.
+///
+/// This is the same discipline as the reclaim pipeline's `Report`, and it exists for the same reason —
+/// an operation that reports what it *intended* is how a tool ends up claiming to have freed space it
+/// did not free.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct RemovalOutcome {
+    /// Packages that are no longer installed, of those the preview said would go.
+    pub removed: Vec<String>,
+    /// Packages the preview said would go that are **still installed**.
+    ///
+    /// Not necessarily a failure — apt can decline part of a transaction — but never something to
+    /// report as success.
+    pub remaining: Vec<String>,
+    /// Packages that went that the preview did **not** mention.
+    ///
+    /// Should always be empty. If it is not, the preview the user approved was not the operation that
+    /// ran, which is worth knowing loudly rather than never.
+    pub unexpected: Vec<String>,
+    /// Bytes the manager expected to free. Still an expectation — see `Report::freed` for why nix does
+    /// not claim a measured figure it has not measured.
+    #[ts(type = "number")]
+    pub expected_freed_bytes: u64,
+}
+
+impl RemovalOutcome {
+    /// Whether what happened is what the user approved.
+    #[must_use]
+    pub fn matched_preview(&self) -> bool {
+        self.remaining.is_empty() && self.unexpected.is_empty()
+    }
+
+    /// Compare a preview against the inventory before and after.
+    ///
+    /// **Both sets, not just the one after.** `unexpected` is the difference between what disappeared
+    /// and what the preview said would disappear, and that is not computable from the after-set alone —
+    /// an earlier draft took only the after-set and left the field permanently empty, which is a check
+    /// that can never fail and therefore is not a check.
+    ///
+    /// Pure, so it is testable without removing anything — which matters here more than usual, since
+    /// this is the only part of `PKG-2`'s execution path that can be exercised on a machine one intends
+    /// to keep.
+    #[must_use]
+    pub fn compare(preview: &RemovalPreview, before: &[String], after: &[String]) -> Self {
+        // Match on identity, falling back to the bare name, since a preview may hold either.
+        let contains = |set: &[String], name: &String| {
+            set.contains(name)
+                || set
+                    .iter()
+                    .any(|p| p.split(':').next() == Some(name.as_str()))
+        };
+
+        let (remaining, removed): (Vec<String>, Vec<String>) = preview
+            .removing
+            .iter()
+            .cloned()
+            .partition(|name| contains(after, name));
+
+        let unexpected = before
+            .iter()
+            .filter(|name| !contains(after, name) && !contains(&preview.removing, name))
+            .cloned()
+            .collect();
+
+        Self {
+            removed,
+            remaining,
+            unexpected,
+            expected_freed_bytes: preview.freed_bytes,
+        }
+    }
 }
 
 /// How a package manager is queried. Read-only: everything here is unprivileged.
@@ -519,6 +743,119 @@ mod tests {
         let p = package(4096, Some(measured(8000, 8192)));
         let back: Package = serde_json::from_str(&serde_json::to_string(&p).unwrap()).unwrap();
         assert_eq!(p, back);
+    }
+
+    // ---- removal outcomes (`PKG-2`) ----
+
+    fn preview(requested: &[&str], removing: &[&str]) -> RemovalPreview {
+        RemovalPreview {
+            requested: requested.iter().map(|s| (*s).to_string()).collect(),
+            removing: removing.iter().map(|s| (*s).to_string()).collect(),
+            freed_bytes: 1024,
+            ..RemovalPreview::default()
+        }
+    }
+
+    fn ids(names: &[&str]) -> Vec<String> {
+        names.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn a_removal_that_did_what_it_said_matches_its_preview() {
+        let p = preview(&["thing"], &["thing", "thing-data"]);
+        let outcome = RemovalOutcome::compare(
+            &p,
+            &ids(&["thing", "thing-data", "other"]),
+            &ids(&["other"]),
+        );
+
+        assert_eq!(outcome.removed, ids(&["thing", "thing-data"]));
+        assert!(outcome.remaining.is_empty());
+        assert!(outcome.unexpected.is_empty());
+        assert!(outcome.matched_preview());
+    }
+
+    #[test]
+    fn a_package_that_survived_is_reported_as_remaining_not_removed() {
+        let p = preview(&["thing"], &["thing", "thing-data"]);
+        let outcome =
+            RemovalOutcome::compare(&p, &ids(&["thing", "thing-data"]), &ids(&["thing-data"]));
+
+        assert_eq!(outcome.removed, ids(&["thing"]));
+        assert_eq!(outcome.remaining, ids(&["thing-data"]));
+        assert!(
+            !outcome.matched_preview(),
+            "a partial removal is not a match, and must not report as one"
+        );
+    }
+
+    /// # Regression
+    ///
+    /// The first version of `compare` took only the after-set, so `unexpected` was hard-coded empty:
+    /// a field whose whole purpose is to catch the operation diverging from the approved preview, and
+    /// which could never contain anything. It read as a passing check forever.
+    #[test]
+    fn something_removed_that_the_preview_never_mentioned_is_reported() {
+        let p = preview(&["thing"], &["thing"]);
+        let outcome =
+            RemovalOutcome::compare(&p, &ids(&["thing", "bystander", "other"]), &ids(&["other"]));
+
+        assert_eq!(outcome.removed, ids(&["thing"]));
+        assert_eq!(
+            outcome.unexpected,
+            ids(&["bystander"]),
+            "a package the user never approved losing must be surfaced"
+        );
+        assert!(!outcome.matched_preview());
+    }
+
+    #[test]
+    fn identity_and_bare_names_are_matched_against_each_other() {
+        // The preview may hold a bare name where the inventory holds an identity, or the reverse.
+        let p = preview(&["libc6"], &["libc6"]);
+
+        let gone = RemovalOutcome::compare(&p, &ids(&["libc6:amd64"]), &ids(&[]));
+        assert_eq!(gone.removed, ids(&["libc6"]));
+
+        let still = RemovalOutcome::compare(&p, &ids(&["libc6:amd64"]), &ids(&["libc6:amd64"]));
+        assert_eq!(
+            still.remaining,
+            ids(&["libc6"]),
+            "a qualified name in the inventory still matches the bare name asked for"
+        );
+    }
+
+    /// The expected figure stays labelled as an expectation. `Report::freed` exists because a tool that
+    /// claims a number it has not measured is how trust is lost.
+    #[test]
+    fn the_freed_figure_is_carried_as_the_managers_expectation() {
+        let mut p = preview(&["thing"], &["thing"]);
+        p.freed_bytes = 50_000;
+        let outcome = RemovalOutcome::compare(&p, &ids(&["thing"]), &ids(&[]));
+
+        assert_eq!(outcome.expected_freed_bytes, 50_000);
+    }
+
+    #[test]
+    fn a_refusal_names_the_command_to_run_by_hand() {
+        let mut p = preview(&["bash"], &["bash", "gdm3"]);
+        p.flagged = vec![Flagged {
+            package: "bash".into(),
+            concern: Concern::Essential,
+        }];
+        p.settle();
+
+        assert_eq!(p.risk, RemovalRisk::Refused);
+        assert_eq!(
+            p.manual_command().as_deref(),
+            Some("sudo apt-get remove bash"),
+            "a refusal the user disagrees with must not leave them guessing at the command"
+        );
+    }
+
+    #[test]
+    fn nothing_selected_yields_no_command() {
+        assert!(RemovalPreview::default().manual_command().is_none());
     }
 
     // ---- the measurement walk ----

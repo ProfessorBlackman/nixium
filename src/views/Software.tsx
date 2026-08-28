@@ -21,7 +21,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { formatBytes, formatCount } from "../lib/format";
-import { api, toAppError, type Manager, type Package, type ResidualConfig } from "../lib/ipc";
+import {
+  api,
+  toAppError,
+  type Concern,
+  type Manager,
+  type Package,
+  type RemovalOutcome,
+  type RemovalPreview,
+  type ResidualConfig,
+} from "../lib/ipc";
 import { notify } from "../lib/notices";
 
 type SortKey = "size" | "name" | "changed";
@@ -52,6 +61,38 @@ function discrepancy(pkg: Package): string | null {
   return `${formatBytes(Math.abs(delta))} ${sign} on disk than recorded`;
 }
 
+/**
+ * The same wording as `Concern::explanation` in Rust.
+ *
+ * Duplicated rather than sent over the wire because it is display copy, and a `Concern` is a closed
+ * enum — a variant added in Rust breaks this switch at compile time, which is the property that makes
+ * the duplication safe.
+ */
+const CONCERN_TEXT: Record<Concern, string> = {
+  cascade: "would be removed as well, because something being removed needs it",
+  important: "is part of the base system",
+  display_manager:
+    "runs the graphical login on this machine — removing it boots to a text console",
+  running_kernel: "is part of the kernel this machine is running right now",
+  required: "is required for the system to function",
+  essential: "is marked essential; removing it breaks the system",
+};
+
+/**
+ * The twin of `RemovalOutcome::matched_preview`.
+ *
+ * Rust methods do not cross into TypeScript, and the two fields it reads are both here, so this is a
+ * one-line derivation rather than a value to serialise.
+ */
+function matchedPreview(outcome: RemovalOutcome): boolean {
+  return outcome.remaining.length === 0 && outcome.unexpected.length === 0;
+}
+
+/** Concerns worth showing individually. A cascade is shown as a count, not one line per package. */
+function notableConcerns(preview: RemovalPreview) {
+  return preview.flagged.filter((f) => f.concern !== "cascade");
+}
+
 export default function Software() {
   const [packages, setPackages] = useState<Package[]>([]);
   const [residual, setResidual] = useState<ResidualConfig[] | null>(null);
@@ -61,6 +102,10 @@ export default function Software() {
   const [measuring, setMeasuring] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [unavailable, setUnavailable] = useState<string | null>(null);
+  const [chosen, setChosen] = useState<string[]>([]);
+  const [preview, setPreview] = useState<RemovalPreview | null>(null);
+  const [outcome, setOutcome] = useState<RemovalOutcome | null>(null);
+  const [removing, setRemoving] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -104,6 +149,51 @@ export default function Software() {
       setResidual([]);
     }
   }, []);
+
+  const toggle = useCallback((id: string) => {
+    // Changing the selection invalidates the preview. It is cleared rather than left on screen,
+    // because a preview that no longer describes the selection is worse than none.
+    setPreview(null);
+    setOutcome(null);
+    setChosen((current) =>
+      current.includes(id) ? current.filter((c) => c !== id) : [...current, id],
+    );
+  }, []);
+
+  const askWhatWouldHappen = useCallback(async () => {
+    if (chosen.length === 0) return;
+    try {
+      setOutcome(null);
+      setPreview(await api.packagesRemovalPreview(chosen));
+    } catch (thrown) {
+      notify.error(toAppError(thrown));
+      setPreview(null);
+    }
+  }, [chosen]);
+
+  const remove = useCallback(async () => {
+    if (preview === null || preview.risk === "refused") return;
+    setRemoving(true);
+    try {
+      const result = await api.packagesRemove(chosen);
+      setOutcome(result);
+      setPreview(null);
+      setChosen([]);
+      if (!matchedPreview(result)) {
+        // Said loudly rather than left in a panel the user might scroll past: the operation
+        // diverged from what they approved.
+        notify.warning(
+          "The removal did not match what was previewed.",
+          "Check the summary below before continuing.",
+        );
+      }
+      await refresh();
+    } catch (thrown) {
+      notify.error(toAppError(thrown));
+    } finally {
+      setRemoving(false);
+    }
+  }, [preview, chosen, refresh]);
 
   const shown = useMemo(() => {
     const needle = filter.trim().toLowerCase();
@@ -197,6 +287,9 @@ export default function Software() {
           <table className="pkg-table">
             <thead>
               <tr>
+                <th scope="col" className="pkg-pick">
+                  <span className="visually-hidden">Select</span>
+                </th>
                 <th scope="col">Package</th>
                 <th scope="col">Version</th>
                 <th scope="col" className="pkg-num">
@@ -216,6 +309,15 @@ export default function Software() {
                   className={pkg.id === selected ? "is-selected" : undefined}
                   onClick={() => setSelected(pkg.id)}
                 >
+                  <td className="pkg-pick">
+                    <input
+                      type="checkbox"
+                      checked={chosen.includes(pkg.id)}
+                      aria-label={`Select ${pkg.id} for removal`}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={() => toggle(pkg.id)}
+                    />
+                  </td>
                   <td>
                     <span className="pkg-id">{pkg.id}</span>
                     {!pkg.explicit && <span className="pkg-dep">dependency</span>}
@@ -256,6 +358,148 @@ export default function Software() {
           </p>
         )}
       </div>
+
+      {chosen.length > 0 && (
+        <div className="card">
+          <h2>Remove {chosen.length === 1 ? "1 package" : `${chosen.length} packages`}</h2>
+          <p className="muted">
+            {chosen.map((id) => (
+              <span key={id} className="pkg-id pkg-chip">
+                {id}
+              </span>
+            ))}
+          </p>
+
+          <div className="row">
+            <button type="button" onClick={() => void askWhatWouldHappen()}>
+              What would this do?
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setChosen([]);
+                setPreview(null);
+              }}
+            >
+              Clear
+            </button>
+          </div>
+
+          {preview !== null && (
+            <div className={`pkg-verdict pkg-verdict-${preview.risk}`}>
+              {preview.risk === "refused" ? (
+                <>
+                  <h3>nix will not do this</h3>
+                  <ul>
+                    {notableConcerns(preview)
+                      .filter((f) => f.concern !== "important")
+                      .map((f) => (
+                        <li key={`${f.package}-${f.concern}`}>
+                          <span className="pkg-id">{f.package}</span> {CONCERN_TEXT[f.concern]}
+                        </li>
+                      ))}
+                  </ul>
+                  <p className="muted">
+                    This is a refusal, not a warning — nothing in this window can approve it. The
+                    helper that would carry it out decides for itself and refuses as well. If you are
+                    certain, run it yourself:
+                  </p>
+                  <p className="pkg-id pkg-command">
+                    sudo apt-get remove {preview.requested.join(" ")}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <h3>
+                    {preview.removing.length === 1
+                      ? "1 package would be removed"
+                      : `${preview.removing.length} packages would be removed`}
+                    {preview.freed_bytes > 0 && ` · ${formatBytes(preview.freed_bytes)} freed`}
+                  </h3>
+
+                  {notableConcerns(preview).length > 0 && (
+                    <ul className="pkg-concerns">
+                      {notableConcerns(preview).map((f) => (
+                        <li key={`${f.package}-${f.concern}`}>
+                          <span className="pkg-id">{f.package}</span> {CONCERN_TEXT[f.concern]}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  {preview.removing.length > preview.requested.length && (
+                    <p className="muted">
+                      Also going:{" "}
+                      {preview.removing
+                        .filter((name) => !preview.requested.includes(name))
+                        .join(", ")}
+                    </p>
+                  )}
+
+                  {preview.installing.length > 0 && (
+                    <p className="muted">
+                      The manager would also install or upgrade: {preview.installing.join(", ")}.
+                      That is unusual for a removal and worth reading twice.
+                    </p>
+                  )}
+
+                  <p className="muted">
+                    The figure above is what the package manager expects to free, not a measurement.
+                  </p>
+
+                  <button
+                    type="button"
+                    className={preview.risk === "dangerous" ? "danger" : undefined}
+                    disabled={removing}
+                    onClick={() => void remove()}
+                  >
+                    {removing
+                      ? "Removing…"
+                      : preview.risk === "dangerous"
+                        ? "Remove anyway"
+                        : "Remove"}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {outcome !== null && (
+        <div className="card">
+          <h2>What actually happened</h2>
+          {matchedPreview(outcome) ? (
+            <p>
+              {outcome.removed.length === 1
+                ? "1 package removed"
+                : `${outcome.removed.length} packages removed`}
+              , exactly as previewed. The manager expected to free{" "}
+              {formatBytes(outcome.expected_freed_bytes)}.
+            </p>
+          ) : (
+            <>
+              <p>
+                This did not match the preview. Checked against the package database afterwards rather
+                than taken from the manager's exit status.
+              </p>
+              {outcome.remaining.length > 0 && (
+                <p>
+                  <strong>Still installed:</strong> {outcome.remaining.join(", ")}
+                </p>
+              )}
+              {outcome.unexpected.length > 0 && (
+                <p>
+                  <strong>Removed without being previewed:</strong> {outcome.unexpected.join(", ")}
+                </p>
+              )}
+            </>
+          )}
+          {outcome.removed.length > 0 && (
+            <p className="muted">Removed: {outcome.removed.join(", ")}</p>
+          )}
+        </div>
+      )}
 
       {detail !== null && (
         <div className="card">

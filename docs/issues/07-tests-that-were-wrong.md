@@ -68,3 +68,52 @@ change.
 
 Recorded as friction rather than a defect, and left as it is. The alternative — asserting only a count,
 or only membership — would not catch a reordering, and the ordering is the part that matters.
+
+---
+
+## 4. A field whose check could never fail
+
+**Phase 5** · **Moderate** · **Found by** reading the code back after writing it
+
+`PKG-2`'s criterion is that the preview matches the actual outcome, so `RemovalOutcome` carries three
+sets: what went, what survived, and `unexpected` — packages that disappeared without being previewed.
+That last one is the important one. It is the field that catches the operation diverging from what the
+user approved.
+
+The comparison was written like this:
+
+```rust
+pub fn compare(preview: &RemovalPreview, still_installed: &[String]) -> Self {
+    // ...
+    Self {
+        removed,
+        remaining,
+        // Anything gone that the preview did not list. Computable only against a before-set, so the
+        // caller supplies it by passing a preview whose `removing` is the full expected set.
+        unexpected: Vec::new(),
+        expected_freed_bytes: preview.freed_bytes,
+    }
+}
+```
+
+`unexpected` is hard-coded empty, with a comment explaining that the caller supplies it — and no caller
+can, because the function does not take the before-set. Every removal would have reported "matched the
+preview", forever, no matter what happened. The comment is the tell: it explains why the field is empty
+rather than noticing that it therefore does nothing.
+
+**Resolved** by giving `compare` both sets, which is what computing a difference requires:
+
+```rust
+pub fn compare(preview: &RemovalPreview, before: &[String], after: &[String]) -> Self
+```
+
+**Guard.** `something_removed_that_the_preview_never_mentioned_is_reported`, which is exactly the case
+the original could not express.
+
+Worth putting next to
+[04-measurement-accuracy.md §8](04-measurement-accuracy.md), the timer properties that all read
+"never" because a failed read went through `.ok()`. Same shape: a value that can only come out one way
+is not a reading, and a check that can only pass is not a check. The timers took a live machine to
+notice. This one was caught before it ran, by asking of a newly written function what it would take for
+it to fail — which is cheaper, and is the question worth asking of anything whose job is to detect a
+problem.

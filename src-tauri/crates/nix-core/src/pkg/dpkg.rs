@@ -24,7 +24,10 @@ use std::path::{Path, PathBuf};
 use crate::error::Result;
 use crate::space::Manager;
 
-use super::{Backend, Measured, Package, RemovalPreview, ResidualConfig, measure_paths, query};
+use super::{
+    Backend, Concern, Flagged, Measured, Package, RemovalPreview, ResidualConfig, measure_paths,
+    query,
+};
 
 /// Prefixes of the packages that make up a kernel, longest first so `linux-modules-extra-` is
 /// matched before `linux-modules-`.
@@ -357,6 +360,140 @@ pub fn conffile_bytes(files: &[std::path::PathBuf]) -> u64 {
         .sum()
 }
 
+/// Where Debian records which display manager is in charge.
+///
+/// A single line holding the path of a binary. Used instead of a list of display-manager package
+/// names because it is a fact about **this machine** rather than a guess about machines in general —
+/// and it stays right on a system running something nobody thought to put in the list.
+const DEFAULT_DISPLAY_MANAGER: &str = "/etc/X11/default-display-manager";
+
+/// The package owning the configured display manager, if there is one.
+///
+/// Two lookups: the file names a binary, and dpkg says which package owns it. Absent on a server, on a
+/// machine using a display manager installed outside dpkg, or where the file was never written.
+pub fn display_manager_package() -> Option<String> {
+    let binary = std::fs::read_to_string(DEFAULT_DISPLAY_MANAGER).ok()?;
+    let binary = binary.trim();
+    if binary.is_empty() || !binary.starts_with('/') {
+        return None;
+    }
+
+    // `dpkg -S <path>` answers "pkg: /the/path". One package, since a path has one owner.
+    let output = query("dpkg", &["-S", binary]).ok()?;
+    let (name, _) = output.lines().next()?.split_once(':')?;
+    let name = name.trim();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+/// Priority and essentialness for a set of packages, as dpkg holds them.
+///
+/// Batched into one query: classifying a six-package cascade is one subprocess, not six. Keyed by
+/// identity rather than name, because `libc6:amd64` is `Priority: required` here and `libc6:i386` is
+/// `optional` — the same name with two different answers.
+#[must_use]
+pub fn parse_priorities(output: &str) -> BTreeMap<String, (String, bool)> {
+    output
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split('\t');
+            let name = fields.next()?.trim();
+            let arch = fields.next()?.trim();
+            let priority = fields.next()?.trim();
+            let essential = fields.next().unwrap_or("no").trim();
+            if name.is_empty() {
+                return None;
+            }
+            Some((
+                Package::identity(name, arch),
+                (priority.to_string(), essential == "yes"),
+            ))
+        })
+        .collect()
+}
+
+/// Everything worth flagging about a set of packages that are about to be removed.
+///
+/// A pure function over the metadata, so the rules can be tested without a package database — which
+/// matters more here than anywhere else in this module, because these are the rules that decide
+/// whether nix refuses.
+///
+/// `priorities` is keyed by identity; a package the map does not mention contributes no concern, since
+/// an unknown priority is not evidence of danger.
+#[must_use]
+pub fn flag_removal(
+    removing: &[String],
+    requested: &[String],
+    priorities: &BTreeMap<String, (String, bool)>,
+    display_manager: Option<&str>,
+    running_kernel: Option<&KernelVersion>,
+) -> Vec<Flagged> {
+    let mut flags = Vec::new();
+
+    for name in removing {
+        let bare = name.split(':').next().unwrap_or(name);
+
+        if !requested.contains(name) {
+            flags.push(Flagged {
+                package: name.clone(),
+                concern: Concern::Cascade,
+            });
+        }
+
+        // dpkg's own metadata, which is authoritative for system breakage. Looked up by identity
+        // first, falling back to the bare name for a caller that passed one.
+        let meta = priorities
+            .get(name)
+            .or_else(|| priorities.get(&Package::identity(bare, "amd64")))
+            .or_else(|| {
+                priorities
+                    .iter()
+                    .find(|(k, _)| k.starts_with(&format!("{bare}:")) || *k == bare)
+                    .map(|(_, v)| v)
+            });
+
+        if let Some((priority, essential)) = meta {
+            if *essential {
+                flags.push(Flagged {
+                    package: name.clone(),
+                    concern: Concern::Essential,
+                });
+            } else if priority == "required" {
+                flags.push(Flagged {
+                    package: name.clone(),
+                    concern: Concern::Required,
+                });
+            } else if priority == "important" {
+                flags.push(Flagged {
+                    package: name.clone(),
+                    concern: Concern::Important,
+                });
+            }
+        }
+
+        // Priority says nothing about the desktop: `gdm3`, `gnome-shell` and `ubuntu-desktop` are all
+        // `optional` on this machine, so losing the graphical session would otherwise pass unmentioned.
+        if display_manager.is_some_and(|dm| dm == bare) {
+            flags.push(Flagged {
+                package: name.clone(),
+                concern: Concern::DisplayManager,
+            });
+        }
+
+        // The rule the kernel category already enforces, applied to arbitrary removals too: a user who
+        // types the running kernel's name into a filter and selects it must not be able to.
+        if let Some(running) = running_kernel
+            && KernelVersion::from_package(bare).is_some_and(|v| v == *running)
+        {
+            flags.push(Flagged {
+                package: name.clone(),
+                concern: Concern::RunningKernel,
+            });
+        }
+    }
+
+    flags
+}
+
 /// Parse `apt-get -s remove` output into a preview.
 ///
 /// The simulation is the authority on what a removal actually does — guessing at dependencies
@@ -471,13 +608,42 @@ impl Backend for DpkgBackend {
     }
 
     fn removal_preview(&self, names: &[String]) -> Result<RemovalPreview> {
+        // No unconditional invocation with nothing to do. Stacer ran `pkexec snap remove` with no
+        // arguments on every uninstall, which is a password prompt for a command that cannot work.
         if names.is_empty() {
             return Ok(RemovalPreview::default());
         }
+
         let mut args = vec!["-s", "remove"];
         args.extend(names.iter().map(String::as_str));
         let output = query("apt-get", &args)?;
-        Ok(parse_removal_simulation(&output))
+
+        let mut preview = parse_removal_simulation(&output);
+        preview.requested = names.to_vec();
+
+        // Everything the cascade touches, classified from dpkg's own metadata rather than from apt's
+        // human-readable WARNING block. One batched query for the whole set.
+        if !preview.removing.is_empty() {
+            let mut args: Vec<&str> = vec![
+                "-W",
+                "-f=${Package}\t${Architecture}\t${Priority}\t${Essential}\n",
+            ];
+            args.extend(preview.removing.iter().map(String::as_str));
+            // A name apt knows and dpkg cannot answer for yields no metadata, which flags nothing —
+            // so a failed lookup must not be mistaken for a clean bill of health. It is an error.
+            let meta = query("dpkg-query", &args)?;
+
+            preview.flagged = flag_removal(
+                &preview.removing,
+                &preview.requested,
+                &parse_priorities(&meta),
+                display_manager_package().as_deref(),
+                running_kernel().as_ref(),
+            );
+        }
+
+        preview.settle();
+        Ok(preview)
     }
 
     fn measure(&self, id: &str) -> Result<Measured> {
@@ -506,6 +672,7 @@ impl Backend for DpkgBackend {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use crate::pkg::RemovalRisk;
 
     /// Captured from a running Ubuntu 22.04 machine. Principle P8 asks for golden-file parser
     /// tests, and real output is the only fixture worth having: it contains the awkward cases —
@@ -691,6 +858,318 @@ libc6\ti386\t2.35-0ubuntu3.11\t12482\tinstalled\tinstall\tGNU C Library: Shared 
             total < 1024 * 1024 * 1024,
             "residual configuration totalled {}, which is package sizes rather than config files",
             crate::format_bytes(total)
+        );
+    }
+
+    // ---- removal risk (`PKG-2`) ----
+
+    fn priorities(rows: &[(&str, &str, &str, bool)]) -> BTreeMap<String, (String, bool)> {
+        rows.iter()
+            .map(|(name, arch, priority, essential)| {
+                (
+                    Package::identity(name, arch),
+                    ((*priority).to_string(), *essential),
+                )
+            })
+            .collect()
+    }
+
+    fn preview_of(
+        removing: &[&str],
+        requested: &[&str],
+        meta: &BTreeMap<String, (String, bool)>,
+        dm: Option<&str>,
+        running: Option<&KernelVersion>,
+    ) -> RemovalPreview {
+        let mut preview = RemovalPreview {
+            requested: requested.iter().map(|s| (*s).to_string()).collect(),
+            removing: removing.iter().map(|s| (*s).to_string()).collect(),
+            ..RemovalPreview::default()
+        };
+        preview.flagged = flag_removal(&preview.removing, &preview.requested, meta, dm, running);
+        preview.settle();
+        preview
+    }
+
+    #[test]
+    fn removing_exactly_what_was_asked_for_is_safe() {
+        let meta = priorities(&[("flat-remix-gtk", "all", "optional", false)]);
+        let preview = preview_of(&["flat-remix-gtk"], &["flat-remix-gtk"], &meta, None, None);
+
+        assert_eq!(preview.risk, RemovalRisk::Safe);
+        assert!(preview.flagged.is_empty());
+        assert!(preview.cascade().is_empty());
+        assert!(preview.refusal().is_none());
+    }
+
+    #[test]
+    fn taking_something_else_with_it_is_reported_as_a_cascade() {
+        let meta = priorities(&[
+            ("thing", "amd64", "optional", false),
+            ("thing-data", "all", "optional", false),
+        ]);
+        let preview = preview_of(&["thing", "thing-data"], &["thing"], &meta, None, None);
+
+        assert_eq!(preview.risk, RemovalRisk::Cascading);
+        assert_eq!(preview.cascade(), vec![&"thing-data".to_string()]);
+        assert_eq!(preview.flagged.len(), 1);
+        assert_eq!(preview.flagged[0].concern, Concern::Cascade);
+    }
+
+    /// The criterion `PKG-2` names: a removal that would take out the desktop is flagged prominently.
+    ///
+    /// `gdm3`, `gnome-shell` and `ubuntu-desktop` are all `Priority: optional` on this machine, so
+    /// priority alone would have said nothing at all about losing the graphical session.
+    #[test]
+    fn removing_the_display_manager_is_dangerous_even_though_its_priority_is_optional() {
+        let meta = priorities(&[("gdm3", "amd64", "optional", false)]);
+        let preview = preview_of(&["gdm3"], &["gdm3"], &meta, Some("gdm3"), None);
+
+        assert_eq!(preview.risk, RemovalRisk::Dangerous);
+        assert!(
+            preview
+                .flagged
+                .iter()
+                .any(|f| f.concern == Concern::DisplayManager)
+        );
+        assert!(
+            preview.refusal().is_none(),
+            "dangerous is allowed behind a confirmation; it is not a refusal"
+        );
+    }
+
+    /// A display manager that is installed but *not* the configured one is nobody's emergency.
+    #[test]
+    fn a_display_manager_that_is_not_in_charge_is_not_flagged() {
+        let meta = priorities(&[("lightdm", "amd64", "optional", false)]);
+        let preview = preview_of(&["lightdm"], &["lightdm"], &meta, Some("gdm3"), None);
+
+        assert_eq!(preview.risk, RemovalRisk::Safe);
+    }
+
+    #[test]
+    fn an_essential_package_is_refused_not_warned_about() {
+        let meta = priorities(&[
+            ("bash", "amd64", "required", true),
+            ("ubuntu-desktop", "all", "optional", false),
+        ]);
+        let preview = preview_of(&["bash", "ubuntu-desktop"], &["bash"], &meta, None, None);
+
+        assert_eq!(preview.risk, RemovalRisk::Refused);
+        let refusal = preview.refusal().expect("a refusal has a reason");
+        assert_eq!(refusal.package, "bash");
+        assert_eq!(refusal.concern, Concern::Essential);
+    }
+
+    #[test]
+    fn a_required_priority_package_is_refused_even_without_the_essential_flag() {
+        // libc6:amd64 is exactly this on this machine: required, but not marked essential.
+        let meta = priorities(&[("libc6", "amd64", "required", false)]);
+        let preview = preview_of(&["libc6:amd64"], &["libc6:amd64"], &meta, None, None);
+
+        assert_eq!(preview.risk, RemovalRisk::Refused);
+        assert_eq!(preview.refusal().unwrap().concern, Concern::Required);
+    }
+
+    /// # Regression
+    ///
+    /// The same name at two architectures can carry two different priorities — `libc6:amd64` is
+    /// `required` here and `libc6:i386` is `optional`. Classifying by bare name would take whichever
+    /// the map happened to hold.
+    #[test]
+    fn priority_is_looked_up_per_architecture() {
+        let meta = priorities(&[
+            ("libc6", "amd64", "required", false),
+            ("libc6", "i386", "optional", false),
+        ]);
+
+        let amd64 = preview_of(&["libc6:amd64"], &["libc6:amd64"], &meta, None, None);
+        assert_eq!(
+            amd64.risk,
+            RemovalRisk::Refused,
+            "the required one must be refused"
+        );
+
+        let i386 = preview_of(&["libc6:i386"], &["libc6:i386"], &meta, None, None);
+        assert_eq!(
+            i386.risk,
+            RemovalRisk::Safe,
+            "and the optional one must not be, or removing a stray i386 library is impossible"
+        );
+    }
+
+    /// The running-kernel rule, applied to an arbitrary removal rather than only to the kernel
+    /// category — a user can reach these names through a filter.
+    #[test]
+    fn the_running_kernel_cannot_be_removed_by_name_either() {
+        let running = KernelVersion(RUNNING.into());
+        let meta = priorities(&[("linux-image-6.8.0-138-generic", "amd64", "optional", false)]);
+        let preview = preview_of(
+            &["linux-image-6.8.0-138-generic"],
+            &["linux-image-6.8.0-138-generic"],
+            &meta,
+            None,
+            Some(&running),
+        );
+
+        assert_eq!(preview.risk, RemovalRisk::Refused);
+        assert_eq!(preview.refusal().unwrap().concern, Concern::RunningKernel);
+    }
+
+    #[test]
+    fn an_older_kernel_is_not_caught_by_the_running_kernel_rule() {
+        let running = KernelVersion(RUNNING.into());
+        let meta = priorities(&[("linux-image-6.8.0-136-generic", "amd64", "optional", false)]);
+        let preview = preview_of(
+            &["linux-image-6.8.0-136-generic"],
+            &["linux-image-6.8.0-136-generic"],
+            &meta,
+            None,
+            Some(&running),
+        );
+
+        assert_eq!(preview.risk, RemovalRisk::Safe);
+    }
+
+    /// The worst concern decides, and the flags are ordered worst-first so a UI showing only the top
+    /// one shows the one that matters.
+    #[test]
+    fn the_worst_concern_decides_and_sorts_first() {
+        let meta = priorities(&[
+            ("bash", "amd64", "required", true),
+            ("systemd", "amd64", "important", false),
+            ("extra", "all", "optional", false),
+        ]);
+        let preview = preview_of(&["bash", "systemd", "extra"], &["extra"], &meta, None, None);
+
+        assert_eq!(preview.risk, RemovalRisk::Refused);
+        assert_eq!(preview.flagged[0].concern, Concern::Essential);
+        assert!(
+            preview
+                .flagged
+                .iter()
+                .any(|f| f.concern == Concern::Important),
+            "the lesser concerns are still reported, not swallowed by the worst"
+        );
+    }
+
+    /// A package dpkg has no metadata for contributes nothing. Recorded as a deliberate choice: the
+    /// alternative is treating "unknown" as "dangerous", which would flag every removal on a system
+    /// whose database the query could not read — and a warning on everything is a warning on nothing.
+    #[test]
+    fn an_unknown_package_contributes_no_concern() {
+        let preview = preview_of(&["mystery"], &["mystery"], &BTreeMap::new(), None, None);
+        assert_eq!(preview.risk, RemovalRisk::Safe);
+    }
+
+    #[test]
+    fn priorities_are_parsed_keyed_by_identity() {
+        let output =
+            "libc6\tamd64\trequired\tno\nlibc6\ti386\toptional\tno\nbash\tamd64\trequired\tyes\n";
+        let map = parse_priorities(output);
+
+        assert_eq!(map.get("libc6:amd64"), Some(&("required".into(), false)));
+        assert_eq!(map.get("libc6:i386"), Some(&("optional".into(), false)));
+        assert_eq!(map.get("bash:amd64"), Some(&("required".into(), true)));
+    }
+
+    // ---- against this machine ----
+
+    /// The display manager is resolved from this machine's own configuration, not from a name list.
+    #[test]
+    fn this_machines_display_manager_resolves_to_an_installed_package() {
+        let Some(name) = display_manager_package() else {
+            return; // a server, or a display manager dpkg does not own
+        };
+
+        assert!(!name.is_empty());
+        assert!(
+            !name.contains('/'),
+            "a package name, not the path it was resolved from: {name}"
+        );
+
+        // And it is a package that is actually installed.
+        let listing = query(
+            "dpkg-query",
+            &["-W", "-f=${Package}\t${db:Status-Status}\n", &name],
+        )
+        .unwrap_or_default();
+        assert!(
+            listing.contains("installed"),
+            "{name} owns the display manager but is not installed: {listing:?}"
+        );
+    }
+
+    /// # Regression
+    ///
+    /// `apt-get -s remove bash` does **not** refuse. It plans to take `ubuntu-desktop` and `gdm3` with
+    /// it and reports success, so a tool that trusts the simulation's exit status offers the user a
+    /// button that destroys their system. nix classifies the cascade itself.
+    #[test]
+    fn this_machine_refuses_a_removal_that_would_take_the_system_with_it() {
+        let backend = DpkgBackend::new();
+        if !backend.available() {
+            return;
+        }
+
+        let Ok(preview) = backend.removal_preview(&["bash".to_string()]) else {
+            return; // apt unavailable or locked
+        };
+
+        assert!(
+            preview.removing.len() > 1,
+            "removing bash on this machine cascades; got {:?}",
+            preview.removing
+        );
+        assert_eq!(
+            preview.risk,
+            RemovalRisk::Refused,
+            "flagged {:?}",
+            preview.flagged
+        );
+        assert!(preview.refusal().is_some());
+
+        // The concerns this machine actually raises, which is more than the essential flag: `aznfs`
+        // declares `Priority: required` in its own control file, and `gdm3` owns the display manager.
+        assert!(
+            preview
+                .flagged
+                .iter()
+                .any(|f| f.concern == Concern::DisplayManager),
+            "gdm3 is in the cascade and runs the graphical login: {:?}",
+            preview.flagged
+        );
+    }
+
+    /// And the ordinary case still comes out ordinary, or the classifier is just a scold.
+    #[test]
+    fn this_machine_allows_removing_something_harmless() {
+        let backend = DpkgBackend::new();
+        if !backend.available() {
+            return;
+        }
+
+        // A package with no reverse dependencies worth the name. Chosen from the inventory rather than
+        // hard-coded, so this does not depend on what happens to be installed.
+        let Ok(packages) = backend.installed() else {
+            return;
+        };
+        let Some(font) = packages
+            .iter()
+            .find(|p| p.name.starts_with("fonts-") && p.arch == "all")
+        else {
+            return;
+        };
+
+        let Ok(preview) = backend.removal_preview(std::slice::from_ref(&font.name)) else {
+            return;
+        };
+        assert_ne!(
+            preview.risk,
+            RemovalRisk::Refused,
+            "{} should be removable; flagged {:?}",
+            font.name,
+            preview.flagged
         );
     }
 

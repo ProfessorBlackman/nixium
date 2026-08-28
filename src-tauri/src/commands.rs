@@ -418,6 +418,85 @@ pub(crate) fn package_measure(
     Ok(measured)
 }
 
+/// What removing these packages would actually do. `PKG-2`.
+///
+/// The manager's own simulation is the authority on the cascade — guessing at dependencies would be
+/// both wrong and dangerous — and nix classifies the result itself, because `apt-get -s remove bash`
+/// exits **zero** while planning to take `ubuntu-desktop` and the display manager with it.
+///
+/// Nothing is invoked for an empty selection. Stacer ran `pkexec snap remove` with no arguments on
+/// every uninstall: a password prompt for a command that could not work.
+#[tauri::command]
+pub(crate) fn packages_removal_preview(ids: Vec<String>) -> Result<pkg::RemovalPreview> {
+    if ids.is_empty() {
+        return Ok(pkg::RemovalPreview::default());
+    }
+    let backends = pkg::backends();
+    let backend = backends
+        .first()
+        .ok_or_else(|| AppError::unsupported("a package manager"))?;
+    backend.removal_preview(&ids)
+}
+
+/// Remove the selected packages, and then check what actually happened. `PKG-2`.
+///
+/// Three things are worth knowing about this path.
+///
+/// **The preview shown to the user is not what authorises the removal.** It is re-derived here, and
+/// then the helper re-derives it a third time and applies the fatal rules itself — see
+/// [`Op::RemoveSelected`]. A stale preview cannot approve anything, which is the same reasoning that
+/// makes the reclaim pipeline re-stat every path before acting.
+///
+/// **A refusal is refused here too, before a password is ever asked for.** Prompting for
+/// administrator rights and *then* declining would train users to approve prompts.
+///
+/// **The outcome is measured, not assumed.** apt exits once for the whole transaction, so the
+/// inventory is read before and after and diffed against the preview.
+#[tauri::command]
+pub(crate) fn packages_remove(ids: Vec<String>) -> Result<pkg::RemovalOutcome> {
+    if ids.is_empty() {
+        return Ok(pkg::RemovalOutcome::default());
+    }
+
+    let backends = pkg::backends();
+    let backend = backends
+        .first()
+        .ok_or_else(|| AppError::unsupported("a package manager"))?;
+
+    // Re-derived rather than carried from the frontend: a preview the user is looking at may describe
+    // a machine that has since changed.
+    let preview = backend.removal_preview(&ids)?;
+    if let Some(refusal) = preview.refusal() {
+        return Err(AppError::refused(format!(
+            "{} {}.",
+            refusal.package,
+            refusal.concern.explanation()
+        ))
+        .with_remedy(match preview.manual_command() {
+            Some(command) => format!(
+                "nix will not carry this out. If you are certain, run it yourself: {command}"
+            ),
+            None => "nix will not carry this out.".to_string(),
+        }));
+    }
+
+    let before: Vec<String> = backend.installed()?.into_iter().map(|p| p.id).collect();
+
+    let transport = helper::Transport::production()?;
+    let mut client = helper::Client::connect(&transport)?;
+    match client.request(&Op::RemoveSelected { packages: ids })? {
+        OpResult::Reclaimed { .. } => {}
+        other => {
+            return Err(AppError::internal(format!(
+                "The helper answered a removal with {other:?}"
+            )));
+        }
+    }
+
+    let after: Vec<String> = backend.installed()?.into_iter().map(|p| p.id).collect();
+    Ok(pkg::RemovalOutcome::compare(&preview, &before, &after))
+}
+
 /// Configuration left behind by packages removed without `--purge`. `STO-9`, surfaced here too.
 #[tauri::command]
 pub(crate) fn packages_residual() -> Result<Vec<pkg::ResidualConfig>> {

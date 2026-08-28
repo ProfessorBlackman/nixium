@@ -65,6 +65,8 @@ pub fn run() {
             commands::packages_list,
             commands::package_measure,
             commands::packages_residual,
+            commands::packages_removal_preview,
+            commands::packages_remove,
             commands::processes_list,
             commands::processes_forget,
             commands::process_signal,

@@ -79,6 +79,29 @@ pub enum Op {
         packages: Vec<String>,
     },
 
+    /// Remove packages the **user selected by name**. `PKG-2`.
+    ///
+    /// # Why this cannot work like [`Op::RemovePackages`]
+    ///
+    /// Every other destructive operation here is validated by the helper re-deriving the eligible set
+    /// and refusing anything outside it. That is not available for an arbitrary selection: only the
+    /// user knows which of their packages they want gone, and a helper that re-derived "the packages
+    /// the user chose" would be validating its input against its input.
+    ///
+    /// So the guarantee is different, and narrower — but it is not *nothing*, and it is not the
+    /// client's word either. The helper:
+    ///
+    /// 1. checks every name is a **currently installed package**, which is what stops a flag, a path
+    ///    or a shell fragment reaching the argument list;
+    /// 2. runs its **own** `apt-get -s remove` and classifies the cascade with its own copy of the
+    ///    rules, so the refusal does not depend on the preview the user was shown being honest;
+    /// 3. refuses outright if that cascade touches an essential package, a `Priority: required` one,
+    ///    or the running kernel.
+    ///
+    /// Step 2 is the one that matters. A compromised or simply buggy frontend can ask for anything;
+    /// what it cannot do is make the helper's own simulation come out differently.
+    RemoveSelected { packages: Vec<String> },
+
     /// List the packages the helper considers removable for a category.
     ///
     /// The same derivation the removal uses, so the list a user sees is exactly the list that can
@@ -150,6 +173,7 @@ impl Op {
             Self::PackageManagerClean { .. } => "package_manager_clean",
             Self::JournalVacuum { .. } => "journal_vacuum",
             Self::RemovePackages { .. } => "remove_packages",
+            Self::RemoveSelected { .. } => "remove_selected",
             Self::ListRemovable { .. } => "list_removable",
             Self::ListSnapRevisions => "list_snap_revisions",
             Self::RemoveSnapRevision { .. } => "remove_snap_revision",
@@ -171,6 +195,7 @@ impl Op {
                 | Self::PackageManagerClean { .. }
                 | Self::JournalVacuum { .. }
                 | Self::RemovePackages { .. }
+                | Self::RemoveSelected { .. }
                 | Self::RemoveSnapRevision { .. }
                 | Self::FlatpakUninstallUnused
                 | Self::SignalProcess { .. }

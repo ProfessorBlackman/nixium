@@ -41,6 +41,11 @@ import type { Package } from "../bindings/Package";
 import type { Measured } from "../bindings/Measured";
 import type { Manager } from "../bindings/Manager";
 import type { ResidualConfig } from "../bindings/ResidualConfig";
+import type { RemovalPreview } from "../bindings/RemovalPreview";
+import type { RemovalOutcome } from "../bindings/RemovalOutcome";
+import type { Flagged } from "../bindings/Flagged";
+import type { Concern } from "../bindings/Concern";
+import type { RemovalRisk } from "../bindings/RemovalRisk";
 import type { UnitFile } from "../bindings/UnitFile";
 import type { Process } from "../bindings/Process";
 import type { TreeNode } from "../bindings/TreeNode";
@@ -53,7 +58,7 @@ import type { Series } from "../bindings/Series";
 import type { State as TimerState } from "../bindings/State";
 import type { SpaceEntry } from "../bindings/SpaceEntry";
 
-export type { Action, AppError, CachedScan, Completion, Diagnostics, DuplicateReport, Filesystem, GrowthReport, Detail, Metric, Preview, PreviewItem, Process, ProcessState, Progress, Reading, Refusal, Report, Rule, Sample, ScanResult, Series, Settings, Page, Scope, Signal, SpaceEntry, Ticket, Timer, TimerState, TreeNode, Unit, UnitFile, Package, Measured, Manager, ResidualConfig };
+export type { Action, AppError, CachedScan, Completion, Diagnostics, DuplicateReport, Filesystem, GrowthReport, Detail, Metric, Preview, PreviewItem, Process, ProcessState, Progress, Reading, Refusal, Report, Rule, Sample, ScanResult, Series, Settings, Page, Scope, Signal, SpaceEntry, Ticket, Timer, TimerState, TreeNode, Unit, UnitFile, Package, Measured, Manager, ResidualConfig, RemovalPreview, RemovalOutcome, Flagged, Concern, RemovalRisk };
 export type { Capabilities };
 export type { CowSnapshot };
 export type { CowKind } from "../bindings/CowKind";
@@ -158,6 +163,9 @@ export const api = {
   packageMeasure: (manager: Manager, id: string, version: string) =>
     call<Measured>("package_measure", { manager, id, version }),
   packagesResidual: () => call<ResidualConfig[]>("packages_residual"),
+  packagesRemovalPreview: (ids: string[]) =>
+    call<RemovalPreview>("packages_removal_preview", { ids }),
+  packagesRemove: (ids: string[]) => call<RemovalOutcome>("packages_remove", { ids }),
   unitLogs: (scope: Scope, unit: string, limit?: number, after?: string) =>
     call<Page>("unit_logs", { scope, unit, limit: limit ?? null, after: after ?? null }),
   processesList: () => call<Process[]>("processes_list"),
