@@ -752,7 +752,7 @@ as their own phase.*
 | PKG-1 | Installed software inventory | P0 — done |
 | PKG-2 | Removal with cascade preview | P0 — done |
 | PKG-3 | Multi-backend coverage | P1 |
-| PKG-4 | Startup applications | P1 |
+| PKG-4 | Startup applications | P1 — done |
 | PKG-5 | Repository management | P2 |
 | SYS-1 | Hosts file editor | P1 — done |
 | SYS-2 | File search | P2 |
@@ -857,6 +857,44 @@ value (§P7) — which keeps the zypper gap explicit rather than silent.
 `NoDisplay`, `OnlyShowIn`/`NotShowIn`, `TryExec`; show `Icon`; list `/etc/xdg/autostart`
 read-only; atomic writes preserving unknown keys and comments. *Accepts:* distro-shipped entries
 show their true state; an edit preserves every key nix does not manage.
+
+*Delivered, and the Stacer claim verified in its source rather than assumed:*
+
+```cpp
+if (! hidden.isEmpty()) {
+    enabled = (hidden != enabledStr);
+} else {
+    enabled = (gnomeEnabled == enabledStr);
+}
+```
+
+With both keys absent, `gnomeEnabled` is `""`, `"" == "true"` is false, and the entry reads as
+**disabled**. Measured against this machine: **neither key appears in any of the 44 entries**, so every
+entry Stacer listed showed as disabled while actually running, and ticking one to "enable" wrote
+`Hidden=false` into a file that was already starting. nix reports all 44 as enabled, which is the truth.
+
+Stacer also read only `$XDG_CONFIG_HOME/autostart`, so the **42 entries in `/etc/xdg/autostart`** — the
+ones a distribution ships, and the ones a user is most likely to want to stop — were invisible. nix
+lists both, keyed on file name, with a user entry shadowing a system one.
+
+**Turning off a system entry needs no privilege.** XDG already answers it: a file of the same name in
+the user directory shadows the system file, so nix writes a copy carrying `Hidden=true` and never
+touches `/etc`. This entire feature has no privileged code path.
+
+`NoDisplay` is a label and a sort key, never a filter — 40 of the 42 system entries set it, so filtering
+would leave the screen nearly empty while the thing the user came to stop is very likely among them.
+`OnlyShowIn`/`NotShowIn` are matched case-insensitively against every name in `XDG_CURRENT_DESKTOP`
+(`ubuntu:GNOME` here), with an exclusion beating an inclusion; a missing `TryExec` is reported, because
+an entry that shows as on and does nothing is the most confusing state this screen can produce.
+
+*Accepts:* every line keeps its original text and is re-emitted verbatim unless it is the one being
+changed — which matters more than it looks, since the system entries here carry **338 localised keys**
+(`Name[de]`, `Comment[fr]`, …) plus `X-GNOME-*`, `X-KDE-*` and `AutostartCondition` keys that an editor
+rebuilding from known fields would silently delete. Asserted as a round trip over every real entry on
+the machine. Section-aware, so a `[Desktop Action …]` block's own `Name` and `Exec` are never read as
+the entry's, and an appended key lands in `[Desktop Entry]` rather than after the action section.
+Enabling **removes** the key rather than writing `Hidden=false`, because absence is the specified
+default.
 
 **PKG-5 Repository management.** APT sources with **deb822 `.sources` support** — the format
 current Debian/Ubuntu increasingly uses and which Stacer could not see at all — plus legacy

@@ -117,3 +117,55 @@ is not a reading, and a check that can only pass is not a check. The timers took
 notice. This one was caught before it ran, by asking of a newly written function what it would take for
 it to fail — which is cheaper, and is the question worth asking of anything whose job is to detect a
 problem.
+
+---
+
+## 5. Reading the wrong directory, and a test that was happy about it
+
+**Phase 5** · **Serious** · **Found by** printing the numbers a passing test had not looked at
+
+`PKG-4` reads two autostart directories: `/etc/xdg/autostart` and the user's own. `user_dir` was built
+on the obvious helper:
+
+```rust
+paths::config_dir().map(|dir| dir.join("autostart"))
+```
+
+`config_dir()` is `$XDG_CONFIG_HOME/nix` — **nix's own settings directory**. So it looked for autostart
+entries in `~/.config/nix/autostart`, which does not exist, and found none. The user's two real entries
+were never read.
+
+The test that should have caught it:
+
+```rust
+assert!(!entries.is_empty(), "a desktop machine has autostart entries");
+assert!(entries.iter().any(|e| e.origin == Origin::System), "…");
+```
+
+Both pass. There are 42 system entries, so the list is not empty and the system half works; the user
+half being empty is indistinguishable from a machine that has no user entries. The test asserted that
+listing works at all, and it did assert that — it simply had nothing to say about the half that was
+broken.
+
+What found it was printing the breakdown instead of the total:
+
+```
+PROBE total=42 enabled=42 system=42 user=0 no_display=40 not_in_session=3 shadowed=0
+```
+
+`user=0`, on a machine with `slack.desktop` and `jetbrains-toolbox.desktop` sitting in
+`~/.config/autostart`. After the fix: `total=44 … user=2`.
+
+**Resolved** by adding `paths::config_home()` — the XDG base directory with no application
+subdirectory — and using that. Not `config_dir().parent()`, which is fragile and would have produced
+the right answer for the wrong reason on a machine where `XDG_CONFIG_HOME` is set.
+
+**Guard.** Two, because there are two ways to get this wrong. In `paths.rs`,
+`the_base_config_directory_is_not_nixs_own` asserts the two helpers differ and that the base one does
+not end in the application name. In `autostart.rs`, the machine test now counts `.desktop` files in the
+user directory itself and requires at least one user entry **if there are any files there** — a
+conditional property, since a machine legitimately might have none.
+
+That second shape is the transferable part. The original assertion was about the *result*; the
+replacement is about the result agreeing with the input. A test that reads a directory and asserts
+"something came back" cannot tell you it read the right directory.

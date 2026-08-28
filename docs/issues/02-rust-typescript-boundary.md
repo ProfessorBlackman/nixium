@@ -150,3 +150,40 @@ arithmetic, does not survive `JSON.stringify`, and every byte count in this proj
 
 **Guard.** None, deliberately. The trade-off is recorded in a comment at each site naming the 2^53
 limit, so the choice is visible to anyone who later needs a genuinely large integer.
+
+---
+
+## 8. Two types called `Entry`, and the guard that did not fire
+
+**Phase 5** · **Moderate** · **Found by** the compiler, after the guard let it through
+
+`autostart::Entry` joined `journal::Entry`, and both carried `#[ts(export)]`. ts-rs writes one file per
+exported **name**, so `Entry.ts` stopped being the journal entry and became the autostart one. Nothing
+failed at that point: the name still resolved, so TypeScript was happy until a field was actually used.
+
+This is the same defect as §4 — `space::Snapshot` versus `cow::Snapshot` — and §4's fix was a guard,
+`no_two_exported_types_share_a_name`, which reads the source for `#[ts(export)]` attributes and asserts
+the names are unique. It did not catch this one, and the reason is worth more than the defect:
+
+**the guard ran after the bindings were regenerated.** `cargo test` runs the export tests and the guard
+in the same pass, in no guaranteed order, so the overwrite had already happened on disk by the time
+anything complained. The guard is a *report*, not a barrier — which is fine, but it means the failure
+mode is "the next full test run tells you", and I had been running `cargo test -p nix-core autostart::`
+filtered to the module I was working on. A filtered test run cannot fail a test it filtered out.
+
+**Resolved** with `#[ts(export, rename = "AutostartEntry")]`, keeping the Rust name — it is always read
+as `autostart::Entry` — and giving the binding an unambiguous one.
+
+Then the guard failed anyway, on the *fixed* code: it read the declared name and ignored `rename`, so
+the resolved case still looked like a clash. A guard that cannot recognise its own remedy fails closed
+forever, which is worse than one that fails open — the fix would have been to delete the guard. It now
+reads `rename` first.
+
+**Guard.** The existing one, taught about `rename`, and verified in both directions: it fails naming
+both files when the rename is removed, and passes when it is there. Also worth recording that I wrote a
+second, near-identical guard before discovering the first — the duplicate is deleted. Two tests
+asserting one property is not defence in depth, it is one property with two places to update.
+
+The lesson that generalises is not about ts-rs. It is that **a check which reports on generated output
+is not a barrier against generating it**, and the only reliable barrier here is the full `make check`
+before a commit — which is what caught it.

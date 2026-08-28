@@ -35,7 +35,8 @@ use nix_core::settings::Settings;
 // `Manager` is `tauri::Manager` here, so the package manager enum is renamed rather than shadowing it.
 use nix_core::space::Manager as PkgManager;
 use nix_core::{
-    detail, find, fs as nixfs, history, hosts, journal, metrics, process, scan, timer, units,
+    autostart, detail, find, fs as nixfs, history, hosts, journal, metrics, process, scan, timer,
+    units,
 };
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -508,6 +509,49 @@ pub(crate) fn packages_residual() -> Result<Vec<pkg::ResidualConfig>> {
     }
     all.sort_unstable_by_key(|r| std::cmp::Reverse(r.bytes));
     Ok(all)
+}
+
+// ---- Startup applications. `PKG-4` ----
+
+/// Everything that starts at login, from both autostart directories. `PKG-4`.
+///
+/// Includes `/etc/xdg/autostart`, which Stacer never read — 42 of the 44 entries on this machine, and
+/// the ones a user is most likely to want to stop. Entries with `NoDisplay=true` are included too:
+/// 40 of the 42 set it, and filtering them out would leave a startup screen showing almost nothing.
+#[tauri::command]
+pub(crate) fn autostart_list() -> Result<Vec<autostart::Entry>> {
+    autostart::list()
+}
+
+/// Turn a startup entry on or off. `PKG-4`.
+///
+/// **Never privileged, and never writes to `/etc`.** A system entry is turned off by writing a copy
+/// into the user's autostart directory, which XDG defines as shadowing the system file — the
+/// specification already solved the problem that would otherwise have needed the helper.
+#[tauri::command]
+pub(crate) fn autostart_set_enabled(id: String, enabled: bool) -> Result<Vec<autostart::Entry>> {
+    autostart::set_enabled(&id, enabled)?;
+    autostart::list()
+}
+
+/// Add a startup entry of your own. `PKG-4`.
+#[tauri::command]
+pub(crate) fn autostart_add(
+    name: String,
+    exec: String,
+    comment: Option<String>,
+) -> Result<Vec<autostart::Entry>> {
+    autostart::add(&name, &exec, comment.as_deref())?;
+    autostart::list()
+}
+
+/// Delete one of your own startup entries. `PKG-4`.
+///
+/// A system entry cannot be deleted — the file belongs to a package — but it can be turned off.
+#[tauri::command]
+pub(crate) fn autostart_remove(id: String) -> Result<Vec<autostart::Entry>> {
+    autostart::remove(&id)?;
+    autostart::list()
 }
 
 // ---- The hosts file. `SYS-1` ----

@@ -1892,3 +1892,99 @@ button.danger:hover:not(:disabled) {
 .hosts-form .field {
   max-width: none;
 }
+
+/* Startup applications (PKG-4).
+   A row per entry: toggle, what it is, and why it might not run. The notes matter more than they look
+   — an entry that shows as on and does nothing is the most confusing state this screen can produce. */
+.startup-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.startup-item {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr) max-content;
+  gap: 0.6rem;
+  align-items: start;
+  padding: 0.5rem 0.2rem;
+  border-bottom: 1px solid var(--rule);
+  font-size: 0.8125rem;
+}
+
+.startup-item:last-child {
+  border-bottom: 0;
+}
+
+.startup-toggle {
+  display: flex;
+  justify-content: center;
+  padding-top: 0.15rem;
+}
+
+.startup-body {
+  min-width: 0;
+}
+
+.startup-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.startup-exec {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--ink-mute);
+  word-break: break-all;
+}
+
+/* Off, but still legible: the user may be looking for exactly this row to turn back on. */
+.startup-item.is-off .startup-head strong {
+  color: var(--ink-faint);
+  text-decoration: line-through;
+}
+
+/* Enabled but not for this session. Quieter than a warning, because nothing is wrong. */
+.startup-item.is-other-session .startup-body {
+  opacity: 0.85;
+}
+
+.startup-tag {
+  padding: 0 0.3rem;
+  border: 1px solid var(--rule-strong);
+  border-radius: 2px;
+  color: var(--ink-mute);
+  font-size: 0.6875rem;
+}
+
+/* A reason this will not run. Amber rather than red: it is information, not a fault. */
+.startup-note {
+  margin-top: 0.2rem;
+  color: var(--review);
+  font-size: 0.75rem;
+}
+
+.startup-note code {
+  color: inherit;
+}
+
+.startup-actions {
+  text-align: right;
+  white-space: nowrap;
+  padding-top: 0.1rem;
+}
+
+@media (max-width: 48rem) {
+  .startup-item {
+    grid-template-columns: 2rem minmax(0, 1fr);
+  }
+
+  .startup-actions {
+    grid-column: 2;
+    text-align: left;
+  }
+}

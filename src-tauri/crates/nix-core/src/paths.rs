@@ -35,6 +35,19 @@ fn home_os() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+/// The XDG base directory itself, with no application subdirectory appended.
+///
+/// Same spec rule as [`resolve`]: a relative value must be ignored in favour of the `$HOME` default.
+fn base_dir_for(var: &str, fallback: &str) -> Option<PathBuf> {
+    if let Some(value) = std::env::var_os(var).filter(|v| !v.is_empty()) {
+        let path = Path::new(&value);
+        if path.is_absolute() {
+            return Some(path.to_path_buf());
+        }
+    }
+    home_os().map(|home| home.join(fallback))
+}
+
 fn dir_for(var: &str, fallback: &str) -> Option<PathBuf> {
     let value = std::env::var_os(var);
     let home = home_os();
@@ -44,6 +57,17 @@ fn dir_for(var: &str, fallback: &str) -> Option<PathBuf> {
 /// `$XDG_CONFIG_HOME/nix` — settings live here.
 pub fn config_dir() -> Option<PathBuf> {
     dir_for("XDG_CONFIG_HOME", ".config")
+}
+
+/// `$XDG_CONFIG_HOME` itself — **without** nix's own subdirectory.
+///
+/// For the handful of places that need to read or write a directory the *desktop* owns rather than one
+/// nix owns: `autostart` is the first. Kept separate from [`config_dir`] rather than left to callers to
+/// strip the suffix, because `config_dir().parent()` is both fragile and easy to get wrong — an earlier
+/// version of `PKG-4` used `config_dir()` directly and silently looked for autostart entries in
+/// `~/.config/nix/autostart`, finding none.
+pub fn config_home() -> Option<PathBuf> {
+    base_dir_for("XDG_CONFIG_HOME", ".config")
 }
 
 /// `$XDG_STATE_HOME/nix` — logs and growth history live here.
@@ -65,6 +89,33 @@ pub fn home_dir() -> Option<PathBuf> {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    /// # Regression
+    ///
+    /// `PKG-4` needs the directory the *desktop* owns, and used `config_dir()` — which is
+    /// `~/.config/nix`. It looked for autostart entries in nix's own settings directory, found none,
+    /// and reported an empty list as though that were the answer.
+    #[test]
+    fn the_base_config_directory_is_not_nixs_own() {
+        let Some(base) = config_home() else {
+            return;
+        };
+        let Some(ours) = config_dir() else {
+            return;
+        };
+
+        assert_ne!(base, ours);
+        assert_eq!(
+            ours,
+            base.join(APP),
+            "nix's directory is the base one plus its own name, and nothing else needs to know that"
+        );
+        assert!(
+            !base.ends_with(APP),
+            "the base directory must not carry the application name: {}",
+            base.display()
+        );
+    }
     use std::ffi::OsString;
 
     fn os(s: &str) -> OsString {

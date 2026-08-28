@@ -42,6 +42,7 @@
 //!
 //! Next: `reclaim` (1.8–1.9).
 
+pub mod autostart;
 pub mod budget;
 pub mod cache;
 pub mod caps;
@@ -137,6 +138,19 @@ mod tests {
                         if !line.trim_start().starts_with("#[ts(export") {
                             continue;
                         }
+                        // An explicit `rename` decides the exported name, and is how a genuine clash
+                        // is *resolved* — so a guard that ignores it reports the resolved case as
+                        // still broken. `autostart::Entry` is renamed to `AutostartEntry` for exactly
+                        // this reason, and this test failed on it until it learned to look.
+                        if let Some(renamed) = line
+                            .split_once("rename = \"")
+                            .and_then(|(_, rest)| rest.split_once('"'))
+                            .map(|(name, _)| name)
+                        {
+                            found.push((renamed.to_string(), path.display().to_string()));
+                            continue;
+                        }
+
                         // The declaration is the next line that declares a type.
                         for next in lines.iter().skip(i + 1).take(6) {
                             if let Some(name) = next

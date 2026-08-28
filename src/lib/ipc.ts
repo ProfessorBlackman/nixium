@@ -49,6 +49,10 @@ import type { RemovalRisk } from "../bindings/RemovalRisk";
 import type { HostsFile } from "../bindings/HostsFile";
 import type { HostLine } from "../bindings/HostLine";
 import type { LineKind } from "../bindings/LineKind";
+// `AutostartEntry.ts`, not `Entry.ts`: `journal::Entry` owns that name, which is why the Rust type
+// carries #[ts(rename = "AutostartEntry")].
+import type { AutostartEntry } from "../bindings/AutostartEntry";
+import type { Origin } from "../bindings/Origin";
 import type { UnitFile } from "../bindings/UnitFile";
 import type { Process } from "../bindings/Process";
 import type { TreeNode } from "../bindings/TreeNode";
@@ -61,7 +65,7 @@ import type { Series } from "../bindings/Series";
 import type { State as TimerState } from "../bindings/State";
 import type { SpaceEntry } from "../bindings/SpaceEntry";
 
-export type { Action, AppError, CachedScan, Completion, Diagnostics, DuplicateReport, Filesystem, GrowthReport, Detail, Metric, Preview, PreviewItem, Process, ProcessState, Progress, Reading, Refusal, Report, Rule, Sample, ScanResult, Series, Settings, Page, Scope, Signal, SpaceEntry, Ticket, Timer, TimerState, TreeNode, Unit, UnitFile, Package, Measured, Manager, ResidualConfig, RemovalPreview, RemovalOutcome, Flagged, Concern, RemovalRisk, HostsFile, HostLine, LineKind };
+export type { Action, AppError, CachedScan, Completion, Diagnostics, DuplicateReport, Filesystem, GrowthReport, Detail, Metric, Preview, PreviewItem, Process, ProcessState, Progress, Reading, Refusal, Report, Rule, Sample, ScanResult, Series, Settings, Page, Scope, Signal, SpaceEntry, Ticket, Timer, TimerState, TreeNode, Unit, UnitFile, Package, Measured, Manager, ResidualConfig, RemovalPreview, RemovalOutcome, Flagged, Concern, RemovalRisk, HostsFile, HostLine, LineKind, AutostartEntry, Origin };
 export type { Capabilities };
 export type { CowSnapshot };
 export type { CowKind } from "../bindings/CowKind";
@@ -169,6 +173,12 @@ export const api = {
   packagesRemovalPreview: (ids: string[]) =>
     call<RemovalPreview>("packages_removal_preview", { ids }),
   packagesRemove: (ids: string[]) => call<RemovalOutcome>("packages_remove", { ids }),
+  autostartList: () => call<AutostartEntry[]>("autostart_list"),
+  autostartSetEnabled: (id: string, enabled: boolean) =>
+    call<AutostartEntry[]>("autostart_set_enabled", { id, enabled }),
+  autostartAdd: (name: string, exec: string, comment?: string) =>
+    call<AutostartEntry[]>("autostart_add", { name, exec, comment: comment ?? null }),
+  autostartRemove: (id: string) => call<AutostartEntry[]>("autostart_remove", { id }),
   hostsLoad: () => call<HostsFile>("hosts_load"),
   hostsSave: (file: HostsFile) => call<HostsFile>("hosts_save", { file }),
   unitLogs: (scope: Scope, unit: string, limit?: number, after?: string) =>
