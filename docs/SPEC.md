@@ -1076,7 +1076,7 @@ and always available.
 | PLT-3 | Tray & background behaviour | P1 |
 | PLT-4 | First-run experience | P2 |
 | PLT-5 | Packaging & distribution | P0 |
-| PLT-6 | Performance budget verification | P0 |
+| PLT-6 | Performance budget verification | P0 — done |
 | PLT-7 | Documentation & in-app help | P1 |
 
 **PLT-1 Internationalisation.** Harvest Stacer's 26 existing Qt `.ts` locale files into JSON
@@ -1100,6 +1100,30 @@ installs and runs on its Tier-1 target in CI.
 
 **PLT-6 Performance budget verification.** The budgets in §7.3 asserted in CI on a fixed
 fixture, failing the build on regression.
+
+*Delivered, and the deliverable is partly a registry rather than only measurements.* `budget::SPEC_ROWS`
+holds one entry per row of §7.3, each either naming the test that asserts it or **stating why there is
+none**, and a test reads this section out of `SPEC.md` and requires the two to agree. Adding a budget to
+the spec without deciding how it will be held to account now fails the build — verified by adding a row
+and watching it fail. A budget table nobody checks is a wish list.
+
+Measured on this machine:
+
+| Row | Measured | Budget |
+| --- | --- | --- |
+| Idle CPU, monitoring view mounted | **0.75%** of one core | < 1% |
+| Idle CPU, nothing subscribed | **one clock tick over two seconds** | ~0 |
+| Resident memory, steady state | **45.7 MiB** after a fixture scan (2.8 MiB baseline) | < 150 MB |
+| Scan, per file | **4.65 µs** (93,620 files in 436 ms) | < 10 µs |
+
+Two rows are honestly unasserted and say so: cold start needs a display server the CI runner does not
+have, and incremental rescan has nothing to measure since `STO-18` was superseded by `STO-19`.
+
+**The two CPU and memory budgets live in their own test binaries**, which was not the original design
+and is the more interesting part. `/proc/self/stat` and `/proc/self/statm` report the **whole process**,
+and `cargo test` runs a crate's tests in parallel threads of one process — so beside the other budgets
+they measured the test suite. Idle CPU read **196% of one core**; memory read **317.5 MiB** against a
+150 MiB limit where an isolated run of the same code measures 45.7 MiB.
 
 **PLT-7 Documentation & in-app help.** Per-category explanations of what reclaiming actually
 does — inline, at the point of decision, not in a manual.

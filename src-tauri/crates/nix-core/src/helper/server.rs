@@ -1952,9 +1952,26 @@ mod tests {
             return;
         }
 
+        // apt on Ubuntu is shared with `apt-daily.timer`, which holds a lock while it runs — so a
+        // simulation can fail for reasons that say nothing about this code. Probed first, and skipped
+        // rather than asserted against, because a `CommandFailed` here would otherwise read as a
+        // successful refusal.
+        use crate::pkg::Backend;
+        if crate::pkg::DpkgBackend::new()
+            .removal_preview(&["bash".to_string()])
+            .is_err()
+        {
+            return;
+        }
+
         let error = remove_selected(&["bash".to_string()])
             .expect_err("bash is essential and must be refused by the helper");
-        assert_eq!(error.code, ErrorCode::HelperRejected);
+        assert_eq!(
+            error.code,
+            ErrorCode::HelperRejected,
+            "apt answered, so this must be the classification refusing: {}",
+            error.message
+        );
         // Which refusal it was matters. `bash` is installed, so reaching the name check's message
         // would mean the lookup is broken and this test was passing for the wrong reason.
         assert!(

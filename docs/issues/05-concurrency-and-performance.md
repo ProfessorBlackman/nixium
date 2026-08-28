@@ -437,3 +437,80 @@ forced the question.
 **Guard.** The `SVC-1` budget test covers `list` alone, which is the call the view makes on mount. Not a
 guard against `unit_files` regressing, and it would be a poor one to write: 2.2 s is systemd's cost, not
 nix's, and the only defence is not being on the path that waits for it.
+
+---
+
+## 15. A budget that measured the test harness
+
+**Phase 6** · **Serious** · **Found by** running the measurement and disbelieving the number
+
+`PLT-6` asks for §7.3's budgets asserted in CI. Two of them had only ever been measured by hand, so they
+became tests: idle CPU with a monitoring view mounted, and resident memory in the steady state. Both
+read from `/proc/self`:
+
+```rust
+fn cpu_seconds() -> f64 { /* utime + stime from /proc/self/stat */ }
+pub fn resident_bytes() -> Option<u64> { /* field 2 of /proc/self/statm */ }
+```
+
+The first run:
+
+```
+FAIL idle_cpu_monitoring: 196.3252% against a 1.00% budget
+```
+
+196% of one core, for a sampler measured by hand at 0.58%. The number is not wrong — it is the honest
+CPU time of the **whole process** over the window. `cargo test` runs a crate's tests in parallel threads
+of one process, so the measurement included every other test in the suite scanning fixtures.
+
+**Resolved** by moving the measurement into `tests/idle_cpu.rs` — an integration test is a separate
+binary, and with one test in the file it has the process to itself. It then reported **0.75%**, and a
+second test in the same file confirmed the other half of that spec row: an unsubscribed pipeline
+accumulates one clock tick over two seconds, which is the resolution floor, because the worker blocks on
+a condvar rather than polling.
+
+**And then I left the identical defect in place next to it.** The memory budget reads `/proc/self/statm`,
+which is process-wide for exactly the same reason — and it *passed*, because I ran it alone in release
+mode: 88.2 MiB. It failed on the next full `make check` at **317.5 MiB**, having measured the suite's
+allocations. Isolated, the same code measures 45.7 MiB.
+
+That is the part worth keeping. I diagnosed a class of defect, fixed one instance, wrote a paragraph
+explaining the class, and did not look at the other instance twenty lines below it. The passing result is
+what did it: **a measurement that is correct in isolation and wrong in company passes exactly when you
+are looking at it**, so the isolated run I did to check my fix was the least informative run available.
+
+**Guard.** Both budgets are their own binaries, each with a header saying why, and the `SPEC_ROWS`
+registry names the binary rather than a lib test so the arrangement is visible from the budget table.
+Memory is deliberately **not** `NIX_PERF`-gated — it is far less runner-sensitive than timing, and it is
+the budget that caught the 4.2 GiB scanner in §5 of this file.
+
+---
+
+## 16. A test that shells out to apt is a test that apt can fail
+
+**Phase 6** · **Moderate** · **Found by** a green suite going red with nothing changed
+
+`the_helper_refuses_an_essential_package_on_its_own_judgement` asserts that the helper refuses to remove
+`bash` by its own classification. It ran `apt-get -s remove bash` and asserted the error code was
+`HelperRejected`. It passed for two phases, then failed:
+
+```
+left: CommandFailed
+right: HelperRejected
+```
+
+Nothing in the code had changed. `apt-get -s remove bash` exits **100** while `apt-daily.timer` is
+running — one of the 27 timers on this machine, which `SVC-4` lists — because apt cannot read the lists
+while another apt holds them. Checked: concurrent `apt-get -s` from four shells is fine, so it was the
+background job, not the suite's own parallelism.
+
+**Resolved** by probing before asserting. If `removal_preview` cannot answer at all, the test returns;
+if it answers, the classification is asserted strictly. That is the convention the other machine tests
+already used, and this one had reached for `expect_err` instead — which is satisfied by *any* error,
+including the one that means the test learned nothing.
+
+**Guard.** The probe, plus a message on the assertion saying "apt answered, so this must be the
+classification refusing". Worth noting what was **not** done: weakening the assertion to accept either
+code would have made an apt failure indistinguishable from a pass, which is the same shape as the
+`.ok()` that made every timer report "never" in
+[04-measurement-accuracy.md §8](04-measurement-accuracy.md).

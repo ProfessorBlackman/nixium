@@ -20,7 +20,7 @@ followed — is in [issues/](issues/README.md).
 | **M6** Monitoring (Phase 3) — **Phase 3 done** | **complete** |
 | **M7** Processes & services (Phase 4) — **Phase 4 done** | **complete** |
 | **M8** Software & system tools (Phase 5) — **Phase 5 done** | **complete** |
-| M9 1.0 (Phase 6) | not started |
+| M9 1.0 (Phase 6) | **in progress** — PLT-6 done; PLT-1 to PLT-5, PLT-7 remain |
 
 Phase 0 shipped all eleven tasks: the three-crate workspace and quality gates, the error taxonomy,
 the IPC contract with its progress/cancellation primitive, the app shell with lazily-mounted views,
@@ -498,7 +498,16 @@ in M9 is packaging polish, the security sign-off (§7.4), first-run (PLT-4) and 
 ## 8. Continuous workstreams
 
 Four things must run from the first week, because each is dramatically more expensive to retrofit
-than to maintain:
+than to maintain.
+
+**How that actually went, recorded at the start of M9 rather than glossed over.** Two of the four held
+and two did not. Perf budgets were asserted from task 0.11 as intended, and every phase since has added
+its own; the security review ran as a diff per helper operation, and `docs/issues/01-privilege-and-security.md`
+is the record. **i18n did not happen at all** — there is no translation layer and every user-facing
+string in thirteen views is hardcoded. **Accessibility was partial**: twelve `aria-*` attributes across
+thirteen views, added where a control was obviously unlabelled rather than as a discipline per component.
+So PLT-1 and PLT-2 are now exactly the retrofit this table warned about, and the cost is being paid in
+M9 as predicted.
 
 | Workstream | Discipline from day one | Retrofit cost if skipped |
 | --- | --- | --- |

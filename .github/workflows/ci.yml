@@ -106,6 +106,14 @@ jobs:
           NIX_PERF: "1"
         run: "cargo test -p nix-core --release --lib -- budget:: --nocapture"
 
+      # The idle-CPU budget is its own binary: the measurement is process-wide CPU time, and inside the
+      # parallel test harness that measures the harness. It read 196% of one core before it was moved.
+      - name: Idle CPU
+        working-directory: src-tauri
+        env:
+          NIX_PERF: "1"
+        run: "cargo test -p nix-core --release --test idle_cpu -- --nocapture"
+
   frontend:
     name: Frontend — typecheck, build
     runs-on: ubuntu-24.04
