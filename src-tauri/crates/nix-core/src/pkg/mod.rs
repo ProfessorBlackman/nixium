@@ -39,6 +39,8 @@
 
 pub mod dpkg;
 pub mod flatpak;
+pub mod pacman;
+pub mod rpm;
 pub mod snap;
 pub mod store;
 
@@ -579,6 +581,32 @@ pub(crate) fn query(program: &str, args: &[&str]) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+/// Run a query whose **non-zero exit is expected**, returning its combined output.
+///
+/// `dnf remove --assumeno` and `zypper remove --dry-run` both print the transaction they would perform
+/// and then decline it, which they signal by exiting non-zero. [`query`] is right everywhere else and
+/// wrong here: it would turn a successful simulation into an error.
+///
+/// Still not a blind read. A failure to *launch* the program is an error, and stderr is folded into the
+/// output so a real complaint is at least visible to the parser rather than discarded — which is the
+/// mistake Stacer made everywhere by reading only stdout.
+pub(crate) fn query_allowing_failure(program: &str, args: &[&str]) -> Result<String> {
+    let output = std::process::Command::new(program)
+        .args(args)
+        .output()
+        .map_err(|e| {
+            AppError::from_io(&e, format!("ask {program} what a removal would do"))
+                .with_remedy(format!("Check that {program} is installed and on PATH."))
+        })?;
+
+    let mut combined = String::from_utf8_lossy(&output.stdout).into_owned();
+    if !output.stderr.is_empty() {
+        combined.push('\n');
+        combined.push_str(&String::from_utf8_lossy(&output.stderr));
+    }
+    Ok(combined)
+}
+
 /// Every backend usable on this system.
 ///
 /// All of them, not the first that matches: a machine with two managers has two, and Stacer's
@@ -586,11 +614,21 @@ pub(crate) fn query(program: &str, args: &[&str]) -> Result<String> {
 #[must_use]
 pub fn backends() -> Vec<Box<dyn Backend>> {
     let mut found: Vec<Box<dyn Backend>> = Vec::new();
+
+    // All of them that are present, in no particular order of preference. A machine with apt and
+    // flatpak has two, and each is asked for its own answer.
     if caps::registry().has(Capability::Apt) {
         found.push(Box::new(DpkgBackend::new()));
     }
-    // RPM and pacman backends arrive with the features that need them, each reviewed on its own.
-    // Reporting nothing is the honest answer until then — never a fabricated one.
+    if caps::registry().has(Capability::Dnf) {
+        found.push(Box::new(rpm::DnfBackend::new()));
+    }
+    if caps::registry().has(Capability::Zypper) {
+        found.push(Box::new(rpm::ZypperBackend::new()));
+    }
+    if caps::registry().has(Capability::Pacman) {
+        found.push(Box::new(pacman::PacmanBackend::new()));
+    }
     found
 }
 

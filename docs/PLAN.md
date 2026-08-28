@@ -19,7 +19,7 @@ followed — is in [issues/](issues/README.md).
 | **M5** Storage depth (Phase 2) — **Phase 2 done** | **complete** |
 | **M6** Monitoring (Phase 3) — **Phase 3 done** | **complete** |
 | **M7** Processes & services (Phase 4) — **Phase 4 done** | **complete** |
-| M8 Software & system tools (Phase 5) | **in progress** — PKG-1, PKG-2, PKG-4, PKG-5, SYS-1, SYS-2 done; **PKG-3 remains** |
+| **M8** Software & system tools (Phase 5) — **Phase 5 done** | **complete** |
 | M9 1.0 (Phase 6) | not started |
 
 Phase 0 shipped all eleven tasks: the three-crate workspace and quality gates, the error taxonomy,
@@ -481,6 +481,14 @@ so `tree()` now adopts stranded processes, and the cycle guard that had been dea
 **M8 Software & system tools.** PKG-1/2/3 depend on Phase 2's package work being done, so this
 sequencing is already implied. SYS-2 is cheap because it is a projection of STO-2 (D7); do not let
 it grow into a separate search subsystem.
+
+*Done.* Six of seven features were verifiable against this machine; `PKG-3` is the exception and the
+spec says so per backend. dnf and zypper have a real query-format check (`rpm` is installed here, with
+an empty database) and pacman has none at all — both join `STO-17` on the §9.1 list.
+
+SYS-2 did not turn out to be a projection of STO-2. The scan builds a tree and search wants a filtered
+*stream* with cancellation, so it is its own walk sharing the conventions rather than the code. Cheap
+either way, and it stayed one module.
 
 **M9 Release.** PLT-1 (i18n) and PLT-2 (a11y) must not start here — see §8. What genuinely belongs
 in M9 is packaging polish, the security sign-off (§7.4), first-run (PLT-4) and docs (PLT-7).

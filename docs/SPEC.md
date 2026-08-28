@@ -751,7 +751,7 @@ as their own phase.*
 | --- | --- | --- |
 | PKG-1 | Installed software inventory | P0 — done |
 | PKG-2 | Removal with cascade preview | P0 — done |
-| PKG-3 | Multi-backend coverage | P1 |
+| PKG-3 | Multi-backend coverage | P1 — done, **partly unverified** |
 | PKG-4 | Startup applications | P1 — done |
 | PKG-5 | Repository management | P2 — done |
 | SYS-1 | Hosts file editor | P1 — done |
@@ -851,6 +851,41 @@ semantics), two of our six backends bypass it entirely, and backend coverage is 
 distros. Trait surface: `list`, `installed_size`, `preview_removal`, `remove`, `clean_cache`,
 `orphans`, `superseded`. A manager that cannot answer returns `Unsupported`, never a fabricated
 value (§P7) — which keeps the zypper gap explicit rather than silent.
+
+*Delivered, and what is verified differs sharply by backend — stated here rather than left to be
+assumed.*
+
+| Backend | State |
+| --- | --- |
+| **apt / dpkg** | Verified against this machine's real database throughout `PKG-1`, `PKG-2` and `STO-10`/`STO-11` |
+| **snap, flatpak** | Verified against this machine, which has both |
+| **dnf, zypper** | Parsers golden-file tested. `rpm` is present here with an **empty database**, which verifies the query format but not the results |
+| **pacman** | Golden-file tested only. Neither pacman nor any Arch machine was available |
+
+The zypper gap that `PKG-3` names is now closed in code — Stacer detected zypper and never implemented
+it — but honestly, that is a written backend rather than a working one until someone runs it.
+
+**What the rpm half does verify, and why it is worth having.** The likeliest defect in a parser nobody
+can run is a mistyped field name: rpm emits an empty column for an unknown tag and reports no error, so
+every package would silently have no size. `rpm --querytags` lists the tags the local rpm understands,
+and a test asserts every tag the query names is among them — checked by sabotage, where changing
+`LONGSIZE` to `LONGSIZ` fails with the diagnosis. The query also uses `LONGSIZE` rather than `SIZE`
+deliberately: `SIZE` is 32-bit and wraps silently above 4 GiB, which a `kernel-devel` tree reaches.
+
+Two format details that would each have been a consistent, invisible error:
+
+- pacman prints `8.65 MiB` and **means** MiB. Reading that as a million understates every size by five
+  percent, in a tool whose purpose is reporting sizes. Tested as a number: `100.00 MiB` must be
+  104,857,600 and must not be 100,000,000.
+- rpm reports **bytes**; dpkg's `Installed-Size` is **kibibytes**. Getting the two the same way round
+  is a thousand-fold error, and both are asserted.
+
+**`explicit` is not fabricated where it is not knowable.** dpkg and pacman both record whether the user
+asked for a package — pacman says so in the `Install Reason` field. rpm's headers do not; dnf and zypper
+keep it in their own history databases. So RPM backends report the honest default and the UI shows no
+dependency marker there, rather than a guess (§P7).
+
+Both are added to the isolated-VM list in `PLAN.md` §9.1 alongside `STO-17`.
 
 **PKG-4 Startup applications.** XDG autostart CRUD with **spec-correct defaults** — absence of
 `Hidden` and `X-GNOME-Autostart-enabled` means *enabled*, which Stacer got backwards. Honour
