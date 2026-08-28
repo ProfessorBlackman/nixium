@@ -1988,3 +1988,111 @@ button.danger:hover:not(:disabled) {
     text-align: left;
   }
 }
+
+/* Software sources (PKG-5).
+   Grouped by file, because that is how the configuration is laid out and where an edit lands. The
+   position is shown on every row: these entries are addressed by line or stanza number, not by
+   matching their text, and showing the number makes that visible. */
+.repo-file {
+  margin-bottom: 0.1rem;
+}
+
+.repo-path {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.repo-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.repo-item {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr) max-content;
+  gap: 0.6rem;
+  align-items: start;
+  padding: 0.5rem 0.2rem;
+  border-top: 1px solid var(--rule);
+  font-size: 0.8125rem;
+}
+
+.repo-toggle {
+  display: flex;
+  justify-content: center;
+  padding-top: 0.15rem;
+}
+
+.repo-body {
+  min-width: 0;
+}
+
+.repo-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.repo-uri {
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
+
+.repo-item.is-off .repo-uri {
+  color: var(--ink-faint);
+  text-decoration: line-through;
+}
+
+.repo-tag {
+  padding: 0 0.3rem;
+  border: 1px solid var(--rule-strong);
+  border-radius: 2px;
+  color: var(--ink-mute);
+  font-size: 0.6875rem;
+}
+
+.repo-key {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--ink-mute);
+  font-size: 0.75rem;
+  word-break: break-all;
+}
+
+/* An entry with no keyring is not necessarily wrong — the key may be in the legacy trusted set — but
+   it is worth noticing, since it is the field that decides whether apt trusts the repository. */
+.repo-nokey {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--review);
+  font-size: 0.75rem;
+}
+
+.repo-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+  white-space: nowrap;
+}
+
+.repo-where {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.6875rem;
+}
+
+@media (max-width: 48rem) {
+  .repo-item {
+    grid-template-columns: 2rem minmax(0, 1fr);
+  }
+
+  .repo-actions {
+    grid-column: 2;
+    align-items: flex-start;
+    flex-direction: row;
+    gap: 0.5rem;
+  }
+}

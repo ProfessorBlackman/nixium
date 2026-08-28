@@ -124,6 +124,23 @@ pub enum Op {
     /// The path is a constant. It is never taken from the caller.
     WriteHostsFile { expected: String, content: String },
 
+    /// Write one of apt's repository files. `PKG-5`.
+    ///
+    /// Same compare-and-swap as [`Op::WriteHostsFile`], and the same reason: an edit made in a
+    /// terminal between load and save must be reported, not overwritten.
+    ///
+    /// The path crosses the boundary here, which nothing else in this enum does — so it is checked
+    /// against a set the helper **derives itself**: `apt_sources::source_files()`, the files apt
+    /// actually reads. A path that is not in that set is refused, which rules out `/etc/shadow`, a
+    /// `.save` leftover, and anything outside `/etc/apt`. The content is then validated as a
+    /// well-formed file of that format, without which this operation would be a way to write anything
+    /// at all to the files deciding where this machine installs software from.
+    WriteAptSource {
+        path: std::path::PathBuf,
+        expected: String,
+        content: String,
+    },
+
     /// List the packages the helper considers removable for a category.
     ///
     /// The same derivation the removal uses, so the list a user sees is exactly the list that can
@@ -197,6 +214,7 @@ impl Op {
             Self::RemovePackages { .. } => "remove_packages",
             Self::RemoveSelected { .. } => "remove_selected",
             Self::WriteHostsFile { .. } => "write_hosts_file",
+            Self::WriteAptSource { .. } => "write_apt_source",
             Self::ListRemovable { .. } => "list_removable",
             Self::ListSnapRevisions => "list_snap_revisions",
             Self::RemoveSnapRevision { .. } => "remove_snap_revision",
@@ -220,6 +238,7 @@ impl Op {
                 | Self::RemovePackages { .. }
                 | Self::RemoveSelected { .. }
                 | Self::WriteHostsFile { .. }
+                | Self::WriteAptSource { .. }
                 | Self::RemoveSnapRevision { .. }
                 | Self::FlatpakUninstallUnused
                 | Self::SignalProcess { .. }

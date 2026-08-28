@@ -23,6 +23,7 @@ const Processes = lazy(() => import("../views/Processes"));
 const Services = lazy(() => import("../views/Services"));
 const SettingsView = lazy(() => import("../views/SettingsView"));
 const Software = lazy(() => import("../views/Software"));
+const Repositories = lazy(() => import("../views/Repositories"));
 const Startup = lazy(() => import("../views/Startup"));
 const Hosts = lazy(() => import("../views/Hosts"));
 const About = lazy(() => import("../views/About"));
@@ -36,6 +37,7 @@ export type ViewId =
   | "processes"
   | "services"
   | "software"
+  | "repositories"
   | "startup"
   | "hosts"
   | "reclaim"
@@ -52,6 +54,7 @@ const VIEWS: ViewDef[] = [
   { id: "processes", title: "Processes", hint: "What is running, and what it costs" },
   { id: "services", title: "Services", hint: "systemd units, timers and their logs" },
   { id: "software", title: "Software", hint: "What is installed, and what it really costs" },
+  { id: "repositories", title: "Sources", hint: "Where software comes from" },
   { id: "startup", title: "Startup", hint: "What runs when you log in" },
   { id: "hosts", title: "Hosts", hint: "Names this machine resolves itself" },
   { id: "reclaim", title: "Reclaim", hint: "Free space safely" },
@@ -75,6 +78,8 @@ function ViewBody({ id }: { id: ViewId }) {
       return <Services />;
     case "software":
       return <Software />;
+    case "repositories":
+      return <Repositories />;
     case "startup":
       return <Startup />;
     case "hosts":

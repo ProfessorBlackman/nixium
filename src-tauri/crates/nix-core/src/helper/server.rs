@@ -482,6 +482,40 @@ fn remove_selected(requested: &[String]) -> Result<u64> {
     Ok(preview.freed_bytes)
 }
 
+/// Replace one of apt's repository files. `PKG-5`.
+///
+/// The only operation here that takes a path, so it is the only one that needs to answer "which paths
+/// are allowed" — and it answers it the way everything else in this file does: by **deriving the set
+/// itself** rather than checking the caller's word. `apt_sources::source_files()` returns the files
+/// apt actually reads, and a path outside that set is refused. `/etc/shadow` is not in it; neither is
+/// `docker.list.save`, one of the 35 leftovers in `/etc/apt/sources.list.d` that apt ignores.
+fn write_apt_source(path: &Path, expected: &str, content: &str) -> Result<()> {
+    let format = crate::apt_sources::Format::of(path).ok_or_else(|| {
+        AppError::new(
+            ErrorCode::HelperRejected,
+            format!("{} is not a file apt reads.", path.display()),
+        )
+    })?;
+
+    // The helper's own list, not the caller's claim.
+    if !crate::apt_sources::source_files().iter().any(|k| k == path) {
+        return Err(AppError::new(
+            ErrorCode::HelperRejected,
+            format!(
+                "{} is not one of this machine's apt source files.",
+                path.display()
+            ),
+        )
+        .with_path(path)
+        .with_remedy("The helper only writes files apt already reads."));
+    }
+
+    // And the content must be a source file of that format, or this is an arbitrary write.
+    crate::apt_sources::validate_document(format, content)?;
+
+    replace_atomically(path, expected, content)
+}
+
 /// Replace `/etc/hosts`, atomically, if it still holds what the caller last read. `SYS-1`.
 ///
 /// # The staging file is a sibling, not something in `/tmp`
@@ -886,6 +920,15 @@ fn dispatch(op: &Op) -> Result<OpResult> {
 
         Op::WriteHostsFile { expected, content } => {
             write_hosts_file(expected, content)?;
+            Ok(OpResult::Reclaimed { bytes: 0 })
+        }
+
+        Op::WriteAptSource {
+            path,
+            expected,
+            content,
+        } => {
+            write_apt_source(path, expected, content)?;
             Ok(OpResult::Reclaimed { bytes: 0 })
         }
 
@@ -2137,6 +2180,75 @@ mod tests {
             ErrorCode::InvalidInput,
             "bad content must be refused as invalid input, not as a stale precondition"
         );
+    }
+
+    // ---- `PKG-5`: writing apt's repository files ----
+    //
+    // Refusal paths only, and they all complete before anything is written. There is no test of the
+    // success path here for the same reason as `RemoveSelected`: it would mean writing to `/etc/apt`
+    // on whatever machine ran it.
+
+    /// The check that keeps this from being an arbitrary privileged write: the path must be in the set
+    /// the **helper** derives, not one the caller asserts.
+    #[test]
+    fn only_a_file_apt_actually_reads_can_be_written() {
+        for refused in [
+            "/etc/shadow",
+            "/etc/passwd",
+            "/etc/apt/apt.conf",
+            "/etc/apt/trusted.gpg",
+            "/etc/apt/sources.list.d/docker.list.save",
+            "/etc/apt/sources.list.d/nodesource.list.distUpgrade",
+            "/tmp/nix-test-evil.list",
+            "../../etc/shadow",
+        ] {
+            let error = write_apt_source(Path::new(refused), "", "")
+                .expect_err("only apt's own source files may be written");
+            assert_eq!(
+                error.code,
+                ErrorCode::HelperRejected,
+                "{refused} was refused for the wrong reason: {}",
+                error.message
+            );
+        }
+    }
+
+    /// A real source file, with content that is not a source file. Refused on the content, which is
+    /// the check that has to hold once the path check has passed.
+    #[test]
+    fn content_that_is_not_a_source_file_is_refused() {
+        let files = crate::apt_sources::source_files();
+        let Some(real) = files.first() else {
+            return; // not a Debian-family machine
+        };
+
+        for hostile in [
+            "#!/bin/sh\nrm -rf /\n",
+            "deb http://x/ jammy main\nnot a source line at all\n",
+            "deb http://x/ jammy main\0\n",
+            "deb http://x/ jammy main",
+        ] {
+            let error = write_apt_source(real, "this will not match", hostile)
+                .expect_err("only a well-formed source file may be written");
+            assert_eq!(
+                error.code,
+                ErrorCode::InvalidInput,
+                "{hostile:?} was refused for the wrong reason: {}",
+                error.message
+            );
+        }
+    }
+
+    /// And the ordering: content is checked before the precondition, so a bad payload is refused as
+    /// invalid input rather than incidentally caught by a stale comparison.
+    #[test]
+    fn the_content_check_runs_before_the_precondition_for_apt_sources_too() {
+        let files = crate::apt_sources::source_files();
+        let Some(real) = files.first() else {
+            return;
+        };
+        let error = write_apt_source(real, "will never match", "garbage\n").unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidInput);
     }
 
     // ---- `PRC-2`: signals and renice ----

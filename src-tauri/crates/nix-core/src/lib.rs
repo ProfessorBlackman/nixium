@@ -42,6 +42,7 @@
 //!
 //! Next: `reclaim` (1.8–1.9).
 
+pub mod apt_sources;
 pub mod autostart;
 pub mod budget;
 pub mod cache;

@@ -35,8 +35,8 @@ use nix_core::settings::Settings;
 // `Manager` is `tauri::Manager` here, so the package manager enum is renamed rather than shadowing it.
 use nix_core::space::Manager as PkgManager;
 use nix_core::{
-    autostart, detail, find, fs as nixfs, history, hosts, journal, metrics, process, scan, timer,
-    units,
+    apt_sources, autostart, detail, find, fs as nixfs, history, hosts, journal, metrics, process,
+    scan, timer, units,
 };
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -509,6 +509,68 @@ pub(crate) fn packages_residual() -> Result<Vec<pkg::ResidualConfig>> {
     }
     all.sort_unstable_by_key(|r| std::cmp::Reverse(r.bytes));
     Ok(all)
+}
+
+// ---- APT repositories. `PKG-5` ----
+
+/// Every repository apt reads, in both formats. `PKG-5`.
+///
+/// Includes deb822 `.sources` files, which Stacer's `*.list` glob could not see — two repositories on
+/// this machine, with their `Signed-By` keyrings. Excludes the `.save` and `.distUpgrade` leftovers:
+/// `/etc/apt/sources.list.d` holds 53 files here and apt reads 18 of them.
+#[tauri::command]
+pub(crate) fn apt_sources_list() -> Vec<apt_sources::Repository> {
+    apt_sources::list()
+}
+
+/// Turn a repository on or off. `PKG-5`.
+///
+/// Addressed by file and **position** — line number for a one-line entry, stanza index for deb822.
+/// Never by matching the entry's text, which is how an edit ends up on a different line.
+#[tauri::command]
+pub(crate) fn apt_source_set_enabled(
+    at: apt_sources::Location,
+    enabled: bool,
+) -> Result<Vec<apt_sources::Repository>> {
+    let mut file = apt_sources::open(&at.file)?;
+    file.set_enabled(at.index, enabled)?;
+    write_apt_source_file(&file)?;
+    Ok(apt_sources::list())
+}
+
+/// Remove a repository entry. `PKG-5`.
+#[tauri::command]
+pub(crate) fn apt_source_remove(at: apt_sources::Location) -> Result<Vec<apt_sources::Repository>> {
+    let mut file = apt_sources::open(&at.file)?;
+    file.remove(at.index)?;
+    write_apt_source_file(&file)?;
+    Ok(apt_sources::list())
+}
+
+/// Send a modified source file to the helper.
+///
+/// The file's own `original` is the precondition, so an edit made in a terminal since it was read is
+/// reported rather than overwritten. Validated here for an actionable error before any password
+/// prompt; validated again in the helper because that is where it matters.
+fn write_apt_source_file(file: &apt_sources::SourceFile) -> Result<()> {
+    let content = file.render();
+    apt_sources::validate_document(file.format, &content)?;
+    if !file.is_modified() {
+        return Ok(());
+    }
+
+    let transport = helper::Transport::production()?;
+    let mut client = helper::Client::connect(&transport)?;
+    match client.request(&Op::WriteAptSource {
+        path: file.path.clone(),
+        expected: file.original().to_string(),
+        content,
+    })? {
+        OpResult::Reclaimed { .. } => Ok(()),
+        other => Err(AppError::internal(format!(
+            "The helper answered a repository write with {other:?}"
+        ))),
+    }
 }
 
 // ---- Startup applications. `PKG-4` ----
