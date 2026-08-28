@@ -62,3 +62,47 @@ The specification and plan were also published as artifacts. The first version u
 compatibility.
 
 **Resolved** by flattening the rules.
+
+---
+
+## 5. §D10 credited the helper's isolation to the wrong mechanism
+
+**Phase 4** · **Moderate** · **Found by** verifying a documented claim against the source
+
+The decision record for using D-Bus closes on the security question — zbus must not end up linked into
+the binary that runs as root — and said so with a measurement:
+
+> a whole-workspace build produces **zero `zbus` symbols in the helper** and 47,547 in the app. Edition
+> 2024's resolver does not unify the feature across the two binaries.
+
+The measurement is real and was taken. The sentence after it is wrong, and it is the sentence carrying
+the claim:
+
+```
+$ cargo build --workspace --message-format=json | ...
+nix_core ['lib'] features= ['dbus', 'default']      # one artifact, feature on
+```
+
+The resolver unifies. In a whole-workspace build there is a single nix-core rlib with `dbus` enabled and
+the helper links *that*, so its zero symbols are the linker discarding code nothing reaches — not a
+feature gate holding. Same observation, materially weaker guarantee: dead-code elimination depends on no
+helper code path reaching zbus, whereas the claim as written implied the helper could not compile against
+it even if a path did.
+
+The shipped artifact is fine, and better than the entry claimed for the build it measured. `cargo build
+-p nix-helper`, which is how the helper is built and packaged, resolves without zbus anywhere in the
+graph:
+
+```
+$ cargo tree -p nix-helper | grep -c zbus
+0
+```
+
+**Resolved** by rewriting the section to separate the two builds and state which guarantee each gives,
+and by adding the feature-off CI run that makes the strong claim testable —
+[06-toolchain-and-lints.md §9](06-toolchain-and-lints.md) has that half.
+
+**Guard.** The feature-off run. The wider point is why this file exists: the error survived because a
+correct number sat next to the explanation and lent it credibility. Four of the five entries here are
+claims about Stacer that went unchecked; this one is a claim about nix's own build, which is worse,
+because it was one command away the whole time.

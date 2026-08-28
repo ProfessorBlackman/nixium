@@ -18,7 +18,7 @@ followed — is in [issues/](issues/README.md).
 | **M4** Storage core complete (tasks 1.11–1.14) — **Phase 1 done** | **complete** |
 | **M5** Storage depth (Phase 2) — **Phase 2 done** | **complete** |
 | **M6** Monitoring (Phase 3) — **Phase 3 done** | **complete** |
-| M7 Processes & services (Phase 4) | **in progress** — PRC-1 to PRC-4 done; SVC-1 to SVC-5 remain |
+| **M7** Processes & services (Phase 4) — **Phase 4 done** | **complete** |
 | M8 – M9 | not started |
 
 Phase 0 shipped all eleven tasks: the three-crate workspace and quality gates, the error taxonomy,
@@ -469,6 +469,13 @@ worst behaviour.
 
 **M7 Processes & services.** Two independent tracks. The systemd D-Bus work (SVC-1) is the
 unfamiliar part; spike it early. Nothing here blocks anything else.
+
+*Done.* The unfamiliarity risk did not materialise — the D-Bus work cost less than the process table,
+and §D10 records why the choice held up. Two things were not on the plan. The inventory had to be split
+because `ListUnitFiles` costs 2.2 s where `ListUnits` costs 11.7 ms, so unit files became a separate
+lazily-invoked command (§P9 again, arrived at by measurement rather than by design). And the process
+tree needed a second pass: building only from roots silently dropped processes whose parent had exited,
+so `tree()` now adopts stranded processes, and the cycle guard that had been dead code is exercised.
 
 **M8 Software & system tools.** PKG-1/2/3 depend on Phase 2's package work being done, so this
 sequencing is already implied. SYS-2 is cheap because it is a projection of STO-2 (D7); do not let

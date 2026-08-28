@@ -51,6 +51,12 @@ pub(crate) struct AppState {
     /// is a delta over the interval, and only the thing holding the previous reading knows how long
     /// ago that was.
     pub(crate) processes: Mutex<(ProcessSampler, Option<Instant>)>,
+    /// Whether the unit watcher has been started. `SVC-3`.
+    ///
+    /// Started once and never stopped: it is a thread blocked on a socket, which costs nothing, and
+    /// there is no way to interrupt a blocking bus read cleanly. A flag rather than a handle, because
+    /// there is nothing to hold.
+    pub(crate) units_watching: Mutex<bool>,
 }
 
 impl AppState {
@@ -81,6 +87,7 @@ impl AppState {
             metrics_subscription: Mutex::new(None),
             alerts: Mutex::new(Alerts::new()),
             processes: Mutex::new((ProcessSampler::new(), None)),
+            units_watching: Mutex::new(false),
         }
     }
 

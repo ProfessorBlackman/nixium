@@ -72,6 +72,14 @@ jobs:
         working-directory: src-tauri
         run: cargo test --workspace
 
+      # nix-core alone, without `dbus` — the configuration the privileged helper links. The run above
+      # builds nix-app, which enables the feature, and the resolver unifies it into every copy of
+      # nix-core; so feature-off is otherwise never tested, and zbus code that escapes its
+      # `#[cfg(feature = "dbus")]` gate would pass here and break the helper (D10).
+      - name: nix-core without D-Bus (the helper's configuration)
+        working-directory: src-tauri
+        run: cargo test -p nix-core
+
       # The generated TypeScript is committed so the frontend can be type-checked on its own. If a
       # Rust type changed without regenerating, the working tree is now dirty — fail rather than
       # let the two sides drift.

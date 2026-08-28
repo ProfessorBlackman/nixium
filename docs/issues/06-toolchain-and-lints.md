@@ -144,3 +144,102 @@ run: "cargo test -p nix-core --release --lib -- budget:: --nocapture"
 
 **Guard.** None beyond CI itself, which is the appropriate one: a YAML error cannot reach `master`
 because the job that would run is the job that fails to parse.
+
+---
+
+## 7. `gen_blocking` names the type without the suffix
+
+**Phase 4** · **Friction** · **Found by** the compiler refusing what was written
+
+`units.rs` declares its systemd interface with zbus's proxy macro, configured for the blocking API
+because nix-core is std threads throughout (§D10):
+
+```rust
+#[zbus::proxy(interface = "org.freedesktop.systemd1.Manager", gen_blocking = true, gen_async = false)]
+```
+
+Every call site referred to `ManagerProxyBlocking`, by analogy with how zbus names the blocking variant
+when it generates both. It does not exist. With `gen_async = false` there is only one proxy type, so it
+takes the plain name — `ManagerProxy` — and the `Blocking` suffix appears only when the async type has
+already claimed it.
+
+**Resolved** by using the plain names. No behaviour was at stake; the cost was reading the macro's
+expansion instead of guessing from the feature name.
+
+**Guard.** The compiler, which is the right one — a missing type cannot ship.
+
+---
+
+## 8. Clippy's complex-type threshold, and what it was right about
+
+**Phase 4** · **Friction** · **Found by** a gate in the toolchain
+
+Three `-D warnings` errors on the SVC work. One was a `%` test that `is_multiple_of` now expresses
+(available since 1.87, which the MSRV move for zbus had just made reachable — a small dividend). The
+other two were `ListUnits`'s return type, which is D-Bus signature `a(ssssssouso)` and therefore a
+ten-field tuple, written inline in both the proxy trait and the call sites.
+
+The lint was making a better point than "this is long". A ten-wide positional tuple is read by counting,
+and reordering two same-typed fields shifts every value by one with nothing to catch it. Extracted as
+`UnitRow` with the field order named in its doc comment, and a `Changes` alias for the
+`(type, file, destination)` triples that enable and disable report back:
+
+```rust
+/// `(name, description, load, active, sub, following, path, job id, job type, job path)` — the
+/// signature `a(ssssssouso)` that `ListUnits` returns, one entry per unit.
+type UnitRow = (String, String, String, String, String, String, OwnedObjectPath, u32, String, OwnedObjectPath);
+```
+
+**Guard.** Clippy, unchanged. Recorded because the lint's stated reason (verbosity) was not the reason
+the change was worth making, and dismissing it on the stated reason would have been easy.
+
+---
+
+## 9. `--workspace` unifies features, so CI tested the helper's configuration nowhere
+
+**Phase 4** · **Friction** · **Found by** reading generated output rather than trusting it compiled
+
+The suspicion was the opposite of the finding, which is why it is written down.
+
+Counting `make check`'s output after the SVC work: 728 tests, the same total as before, though
+`units.rs` and `journal.rs` had added 29. The apparent explanation was that `cargo test --workspace`
+does not build nix-core with `dbus` — the feature only `nix-app` enables — so every
+`#[cfg(feature = "dbus")]` test was invisible and the whole systemd half untested. A `cargo test -p
+nix-core --features dbus` line went into the `Makefile` and CI, with a confident comment.
+
+Then the check that should have come first:
+
+```
+$ cargo test --workspace the_inventory_meets_its_budget
+test units::tests::the_inventory_meets_its_budget ... ok
+
+$ cargo build --workspace --message-format=json | ...
+nix_core ['lib'] features= ['dbus', 'default']
+```
+
+One nix-core lib artifact, feature on. The resolver *does* unify — nix-app asks for `dbus`, so the
+single shared rlib has it, and the gated tests had been running all along. The 29 new tests were
+already in the 721; the total had moved and I had misread which number was which.
+
+The real gap was the mirror image. Nothing in CI built nix-core **without** the feature, which is the
+configuration `nix-helper` links. So zbus code that escaped its `#[cfg(feature = "dbus")]` gate would
+compile and test clean under `--workspace`, and break only when someone built the helper on its own.
+
+**Resolved** by adding the narrow, feature-off run instead of the feature-on one:
+
+```make
+	cd $(CARGO_DIR) && $(TEST_ENV) cargo test -p nix-core
+```
+
+717 tests feature-off, 721 feature-on — the difference is exactly the four gated tests, which is the
+confirmation the first hypothesis never got. §D10 in `SPEC.md` was corrected at the same time: it had
+credited the helper's zero `zbus` symbols to the resolver not unifying, when in a whole-workspace build
+they are the linker discarding unreached code. The shipped helper is still isolated by construction —
+`cargo build -p nix-helper` puts zbus nowhere in its graph at all — but a `--workspace` build cannot
+demonstrate that, and the measurement had been taken there.
+
+**Guard.** The feature-off run, in both `Makefile` and CI. Against
+[09-patterns.md §12](09-patterns.md), the entry that matters here is a different one: the fix was
+verified in the direction that would have caught the original mistake, by asking for one gated test
+**by name** and by reading the build's own feature list, rather than by re-reading a total. A test count
+that does not change is not evidence about which tests ran.

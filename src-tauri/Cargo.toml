@@ -15,7 +15,10 @@ members = ["crates/nix-core", "crates/nix-helper"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+# Moved from 1.85 for `zbus` (D10). The toolchain has been 1.98 throughout, so this only narrows the
+# range of compilers the crate *claims* to support — but it is a real narrowing and belongs in a diff
+# rather than happening by accident.
+rust-version = "1.87"
 repository = "https://github.com/tlc/nix"
 license = "GPL-3.0-or-later"
 authors = ["Methuselah Nwodobeh"]
@@ -81,7 +84,7 @@ workspace = true
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-nix-core = { workspace = true }
+nix-core = { workspace = true, features = ["dbus"] }
 tracing = { workspace = true }
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"

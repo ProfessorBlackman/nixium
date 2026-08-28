@@ -11,7 +11,17 @@ authors.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = []
+# systemd over D-Bus (`SVC-*`, decision D10). Gated so the privileged helper, which depends on this
+# crate, does not link a D-Bus stack it never uses — verified: a whole-workspace build puts zero `zbus`
+# symbols in `nix-helper`.
+dbus = ["dep:zbus"]
+
 [dependencies]
+# `blocking` rather than the async API: this crate is std threads throughout, and the blocking wrapper
+# keeps the executor a transitive detail instead of spreading `async` through every caller.
+zbus = { version = "5", optional = true, default-features = false, features = ["blocking-api", "async-io"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

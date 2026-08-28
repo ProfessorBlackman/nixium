@@ -159,3 +159,56 @@ per-volume trash discovery with the home trash as fallback, and collision-suffix
 **Guard.** Tests for each of the four, including a filename containing a newline and a `%`. The module
 documentation lists Stacer's four errors at the top, so the tests read as deliberate rather than
 arbitrary.
+
+---
+
+## 8. Every timer said "never", because systemd capitalises `USec` and zbus does not
+
+**Phase 4** · **Serious** · **Found by** running against this machine
+
+`SVC-4` shows each `.timer` unit's next and last elapse. On this machine every one of the 27 timers
+reported **never scheduled**, including `apt-daily.timer`, which had visibly run that morning.
+
+The proxy declared the properties by method name and let zbus derive the D-Bus name:
+
+```rust
+#[zbus(property)]
+fn next_elapse_usec_realtime(&self) -> zbus::Result<u64>;
+```
+
+zbus derives `NextElapseUsecRealtime`. systemd spells it **`NextElapseUSecRealtime`** — `USec`, because
+it is an abbreviation of microseconds, not a word. D-Bus property names are case-sensitive, so the read
+failed with unknown-property.
+
+What made it *serious* rather than a crash was the next line up: the result went through `.ok()`, on the
+reasoning that a timer might legitimately have no next elapse. So a protocol-level failure and "this
+timer is not scheduled" arrived at the display as the same value, and the view rendered the honest-looking
+answer for all of them.
+
+**Resolved** by naming all three `USec` properties explicitly rather than letting them be derived —
+`NextElapseUSecRealtime`, `NextElapseUSecMonotonic` and `LastTriggerUSec`, every one of which zbus would
+have got wrong in the same way:
+
+```rust
+#[zbus(property, name = "NextElapseUSecRealtime")]
+fn next_elapse_usec_realtime(&self) -> zbus::Result<u64>;
+```
+
+**Guard.** `this_machines_timers_have_sane_schedules`, against this machine. It cannot know which timer
+should be scheduled, so it asserts a weaker property with the right shape: no value is one of systemd's
+sentinels (`0`, `u64::MAX`), and **if any timer has fired before, at least one must be scheduled to fire
+again**. Verified by sabotage — restoring the derived spelling makes it fail with the diagnosis in the
+message:
+
+```
+timers have fired before but none is scheduled to fire again — the property names are almost
+certainly not being read: ["anacron.timer", "apport-autoreport.timer", "apt-daily.timer", ...]
+```
+
+Safe to sabotage, unlike the escalation guards of [01-privilege-and-security.md §5](01-privilege-and-security.md):
+reading a D-Bus property changes nothing. The general lesson belongs with
+[09-patterns.md §5](09-patterns.md): `.ok()` on a typed protocol read discards the distinction between
+"the answer is nothing" and "the question was wrong", and only one of those is a fact about the machine.
+
+This is the defect §D10 predicted in the other direction. Choosing D-Bus was partly about not parsing
+text — and the failure still came from a string, just one in an attribute instead of in output.

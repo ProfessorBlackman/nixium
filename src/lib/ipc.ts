@@ -31,7 +31,13 @@ import type { Capabilities } from "../bindings/Capabilities";
 import type { DuplicateReport } from "../bindings/DuplicateReport";
 import type { GrowthReport } from "../bindings/GrowthReport";
 import type { Metric } from "../bindings/Metric";
+import type { Action } from "../bindings/Action";
 import type { Detail } from "../bindings/Detail";
+import type { Page } from "../bindings/Page";
+import type { Scope } from "../bindings/Scope";
+import type { Timer } from "../bindings/Timer";
+import type { Unit } from "../bindings/Unit";
+import type { UnitFile } from "../bindings/UnitFile";
 import type { Process } from "../bindings/Process";
 import type { TreeNode } from "../bindings/TreeNode";
 import type { ProcessState } from "../bindings/ProcessState";
@@ -43,7 +49,7 @@ import type { Series } from "../bindings/Series";
 import type { State as TimerState } from "../bindings/State";
 import type { SpaceEntry } from "../bindings/SpaceEntry";
 
-export type { AppError, CachedScan, Completion, Diagnostics, DuplicateReport, Filesystem, GrowthReport, Detail, Metric, Preview, PreviewItem, Process, ProcessState, Progress, Reading, Refusal, Report, Rule, Sample, ScanResult, Series, Settings, Signal, SpaceEntry, Ticket, TimerState, TreeNode };
+export type { Action, AppError, CachedScan, Completion, Diagnostics, DuplicateReport, Filesystem, GrowthReport, Detail, Metric, Preview, PreviewItem, Process, ProcessState, Progress, Reading, Refusal, Report, Rule, Sample, ScanResult, Series, Settings, Page, Scope, Signal, SpaceEntry, Ticket, Timer, TimerState, TreeNode, Unit, UnitFile };
 export type { Capabilities };
 export type { CowSnapshot };
 export type { CowKind } from "../bindings/CowKind";
@@ -69,6 +75,8 @@ export const EVENT_SCAN_DONE = "scan://done";
 export const EVENT_DUPLICATES_DONE = "duplicates://done";
 /** One metrics reading, once a second while subscribed. `MON-1`. */
 export const EVENT_METRICS_TICK = "metrics://tick";
+/** The name of a unit that changed. `SVC-3`. */
+export const EVENT_UNIT_CHANGED = "units://changed";
 
 /** Whether a rejected value is one of our typed errors rather than an unexpected throw. */
 export function isAppError(value: unknown): value is AppError {
@@ -136,6 +144,14 @@ export const api = {
     call<SpaceEntry[]>("largest_files", { path, limit: limit ?? null }),
   duplicatesFind: (path: string, minimumBytes?: number) =>
     call<OperationId>("duplicates_find", { path, minimumBytes: minimumBytes ?? null }),
+  unitsList: (scope: Scope) => call<Unit[]>("units_list", { scope }),
+  unitFiles: (scope: Scope) => call<UnitFile[]>("unit_files", { scope }),
+  unitsTimers: (scope: Scope) => call<Timer[]>("units_timers", { scope }),
+  unitAct: (scope: Scope, unit: string, action: Action) =>
+    call<void>("unit_act", { scope, unit, action }),
+  unitsWatch: () => call<void>("units_watch"),
+  unitLogs: (scope: Scope, unit: string, limit?: number, after?: string) =>
+    call<Page>("unit_logs", { scope, unit, limit: limit ?? null, after: after ?? null }),
   processesList: () => call<Process[]>("processes_list"),
   processesForget: () => call<void>("processes_forget"),
   processDetail: (pid: number) => call<Detail>("process_detail", { pid }),
@@ -174,6 +190,11 @@ export const api = {
   /** Phase 0 scaffolding: fail on purpose, to exercise the error surface. */
   demoFailure: (code: string) => call<void>("demo_failure", { code }),
 };
+
+/** Subscribe to unit changes, including ones made in a terminal. `SVC-3`. */
+export function onUnitChanged(handler: (unit: string) => void): Promise<UnlistenFn> {
+  return listen<string>(EVENT_UNIT_CHANGED, (event) => handler(event.payload));
+}
 
 /** Subscribe to live metrics readings. Only fires while something has subscribed. */
 export function onMetricsTick(handler: (r: Reading) => void): Promise<UnlistenFn> {

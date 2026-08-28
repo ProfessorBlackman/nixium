@@ -406,3 +406,34 @@ otherwise unguessable.
 The same mistake recurred in STO-12's flatpak tests, which used a bare `process::id()`. Fixed the same
 way, which suggests the right long-term answer is one shared temp-directory helper rather than the
 convention being re-derived per module.
+
+---
+
+## 14. `ListUnitFiles` costs 2.2 seconds, and does not belong in the inventory
+
+**Phase 4** · **Moderate** · **Found by** running against this machine
+
+`SVC-1`'s budget is 400 units inventoried in under 500 ms, and the plan was to satisfy it with two
+calls: `ListUnits` for loaded state, `ListUnitFiles` for everything installed on disk including units
+that have never loaded — the `static` and `masked` ones Stacer's filter dropped.
+
+Timed separately against this machine:
+
+| Call | Result | Time |
+| --- | --- | --- |
+| `ListUnits` | 757 loaded units | **11.7 ms** |
+| `ListUnitFiles` | 491 unit files | **2,200 ms** |
+
+A factor of 188. `ListUnits` answers from state systemd already holds; `ListUnitFiles` walks every unit
+directory on disk — `/lib/systemd/system`, `/etc/systemd/system`, the generator directories — and stats
+each entry. Together they would have turned a 12 ms view into a 2.2 s one, four times over budget, for
+data most users open the Services view without wanting.
+
+**Resolved** by splitting them. `units_list` is the inventory and stays at 12 ms; `unit_files` is a
+separate command the UI invokes only when the user asks to see unit files. Which is §P9 arrived at
+backwards — the lazy-view principle was already written down, and applied here only because the number
+forced the question.
+
+**Guard.** The `SVC-1` budget test covers `list` alone, which is the call the view makes on mount. Not a
+guard against `unit_files` regressing, and it would be a poor one to write: 2.2 s is systemd's cost, not
+nix's, and the only defence is not being on the path that waits for it.

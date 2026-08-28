@@ -33,6 +33,13 @@ TEST_ENV := NIX_HELPER_PATH=/nonexistent/nix-helper-must-not-be-found
 
 test: helper ## Run the Rust test suite
 	cd $(CARGO_DIR) && $(TEST_ENV) cargo test --workspace
+	# nix-core again, alone, *without* `dbus` — the configuration the privileged helper links.
+	#
+	# `--workspace` builds nix-app, which enables `nix-core/dbus`, and the resolver unifies that into
+	# every copy of nix-core in the invocation. So the run above tests the feature-on build only, and
+	# nothing else here compiles nix-core feature-off except `make helper`. Without this line, code
+	# that needs zbus but isn't behind `#[cfg(feature = "dbus")]` passes CI and breaks the helper (D10).
+	cd $(CARGO_DIR) && $(TEST_ENV) cargo test -p nix-core
 
 helper: ## Build the helper binary (the client's integration tests spawn it)
 	cd $(CARGO_DIR) && cargo build -p nix-helper

@@ -625,11 +625,11 @@ either `unsafe` or a new dependency in a program that ships privileged code. IPv
 | PRC-2 | Process actions | P0 — done |
 | PRC-3 | Process detail | P1 — done |
 | PRC-4 | Process tree | P2 — done |
-| SVC-1 | systemd unit inventory | P0 |
-| SVC-2 | Unit actions | P0 |
-| SVC-3 | Live unit state | P1 |
-| SVC-4 | Timers & user units | P1 |
-| SVC-5 | Unit logs | P2 |
+| SVC-1 | systemd unit inventory | P0 — done |
+| SVC-2 | Unit actions | P0 — done |
+| SVC-3 | Live unit state | P1 — done |
+| SVC-4 | Timers & user units | P1 — done |
+| SVC-5 | Unit logs | P2 — done |
 
 **PRC-1 Process table.** Direct `/proc/<pid>` reads (§P4), **diff-updated** rather than
 rebuilt each tick, with real instantaneous %CPU computed from `utime + stime` deltas — `ps`
@@ -708,6 +708,15 @@ one round trip instead of Stacer's `1 + 2N` subprocess spawns. Includes `static`
 `generated` units, which Stacer's `--state=enabled,disabled` filter dropped, and template units,
 which it discarded with a regex. *Accepts:* inventory of 400 units in under 500 ms.
 
+*Delivered.* `ListUnits` returns this machine's 757 loaded units in **11.7 ms**, against the 1,515
+subprocess spawns Stacer would have needed. Measured on Stacer's own filter for comparison: it would
+have shown **183 of 491** unit files here, 37% — the omission was the larger of the two problems.
+
+`ListUnitFiles` is the exception and does not belong in that round trip: it takes **2.2 seconds** for
+491 files, because systemd walks the unit directories on disk rather than answering from loaded state.
+It is a separate command the UI invokes only when the user asks for unit files, not part of the
+inventory — folding it in would have made a 12 ms view a 2.2 s one.
+
 **SVC-2 Unit actions.** Enable/disable, start/stop/restart via D-Bus, so polkit integrates
 natively — one prompt, a real error, no custom helper. *Accepts:* a denied authorisation is
 reported as denied, not as success.
@@ -718,7 +727,18 @@ Stacer loaded the list once per app run. *Accepts:* enabling a unit in a termina
 **SVC-4 Timers & user units.** `--user` units and `.timer` units with next/last elapse, both
 absent from Stacer.
 
+*Delivered.* Elapse times come from typed properties rather than parsed text, which is the whole point
+of D10 — and they nearly didn't: systemd spells the property `NextElapseUSecRealtime`, zbus derives
+`NextElapseUsecRealtime` from the method name, and the mismatched read failed silently through an
+`.ok()` so every timer reported "never". The proxy now names all four properties explicitly.
+
 **SVC-5 Unit logs.** Recent journal entries for the selected unit, with follow.
+
+*Delivered.* `journalctl --no-pager -o json`, paged with `--after-cursor` so following does not re-read
+what it has already shown. This is the one place in Phase 4 that shells out, and deliberately: the
+journal's own read path is a C library with no stable D-Bus equivalent, and its JSON output *is* a
+committed interface — unlike the human-facing table §D10 rejects. Unit names are validated against
+`is_unit_name()` before reaching the argument list.
 
 ---
 
@@ -979,10 +999,25 @@ throughout, and needs the workspace MSRV moved from 1.85 to 1.87 — a one-line 
 toolchain is already 1.98.
 
 **Where it lives, and why that needed checking.** `nix-helper` depends on `nix-core`, so anything added
-to core risks linking an async runtime and a D-Bus stack into the binary that runs as root. Tested
-rather than assumed: with the dependency optional behind a `dbus` feature that only `nix-app` enables,
-a whole-workspace build produces **zero `zbus` symbols in the helper** and 47,547 in the app. Edition
-2024's resolver does not unify the feature across the two binaries.
+to core risks linking an async runtime and a D-Bus stack into the binary that runs as root. The
+dependency is optional behind a `dbus` feature that only `nix-app` enables.
+
+Two different builds, with two different strengths of guarantee — worth separating, because an earlier
+draft of this section ran the measurement in one and claimed the mechanism of the other:
+
+- **`cargo build -p nix-helper`, how the helper is actually built and shipped.** nix-core compiles with
+  `default` alone and `zbus` is **absent from the resolved dependency graph entirely** (`cargo tree`:
+  zero matches). The isolation is structural — helper code that reached for zbus would not compile.
+- **`cargo build --workspace`.** The resolver builds **one** nix-core rlib for the whole invocation and
+  unifies the feature into it (`--message-format=json` reports `features = ["dbus", "default"]`, a single
+  lib artifact), because nix-app asks for it. The helper links that rlib. Its **zero `zbus` symbols**,
+  against 47,547 in the app, are therefore the linker discarding unreached code, not the feature gate.
+
+So the shipped binary is safe by construction, but a whole-workspace build cannot *prove* it: zbus code
+escaping its `#[cfg(feature = "dbus")]` gate would compile and test clean there. That is why CI runs
+`cargo test -p nix-core` on its own, feature-off, as well as `--workspace` — the feature-on path is
+already covered by `--workspace`, and the narrow run is the only thing that exercises the helper's
+configuration.
 
 So a feature gate is enough and there is no fourth crate — the rule that all system access lives in
 `nix-core` survives intact, and the privileged binary's dependency tree stays at 52 crates against the

@@ -53,6 +53,7 @@ pub mod fixture;
 pub mod fs;
 pub mod helper;
 pub mod history;
+pub mod journal;
 pub mod logging;
 pub mod metrics;
 pub mod op;
@@ -67,6 +68,7 @@ pub mod signal;
 pub mod space;
 pub mod timer;
 pub mod trash;
+pub mod units;
 pub mod watch;
 
 /// Crate version, surfaced so the app and helper can verify they were built together.

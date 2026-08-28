@@ -477,7 +477,7 @@ fn walk(dir: &Path, depth: usize, shared: &Shared) -> Rollup {
 
             // Report every so often rather than per file: an event per file would swamp the IPC
             // channel and make the UI slower than the scan.
-            if total_files % 2048 == 0 {
+            if total_files.is_multiple_of(2048) {
                 (shared.progress)(total_files, total_allocated);
             }
 
