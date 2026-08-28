@@ -14,6 +14,18 @@
  *              what they will lose is not a decision to make on their behalf.
  * - `risky`  — needs its own confirmation, and is excluded from "select all".
  * - `never`  — cannot reach this view at all; the backend refuses it before the preview.
+ *
+ * # Why the action sits above the list
+ *
+ * The confirm panel used to be last, so reaching the button meant scrolling past every item first.
+ * That was deliberate, and it was also the reason nobody could find the button. It now sits directly
+ * under the totals, where it is the first thing in reach.
+ *
+ * What moved is the **whole panel**, not the button on its own, and that distinction is the point.
+ * The panel carries the itemised selection and both caveats — risky items, and bytes that only go to
+ * the trash — so they are still the text immediately above the button rather than something left
+ * behind at the bottom of the page. A bare button at the top would have been live on first render,
+ * with the safe items pre-checked, above a list the user had not read.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -196,6 +208,52 @@ export default function Reclaim() {
             </div>
           </div>
 
+          <div className="card card-confirm">
+            <h2>Confirm</h2>
+            {selectedItems.length === 0 ? (
+              <p className="muted">Nothing selected.</p>
+            ) : (
+              <>
+                <p>
+                  Reclaim <strong>{formatBytes(selectedBytes)}</strong> from{" "}
+                  <strong>{selectedItems.length}</strong> item
+                  {selectedItems.length === 1 ? "" : "s"}.
+                </p>
+                {hasRisky && (
+                  <p className="caveat">
+                    Your selection includes items marked risky. These may break something that is
+                    running, or lose data.
+                  </p>
+                )}
+                {/* Said before committing, not only afterwards: trashing is a rename within the same
+                    filesystem, so it frees nothing until the trash is emptied. */}
+                {selectedTrashable > 0 && (
+                  <p className="caveat">
+                    {formatBytes(selectedTrashable)} of this goes to the trash, which is reversible but
+                    on the same disk — so that space comes back only once you empty it. nix offers
+                    emptying the trash as its own item.
+                  </p>
+                )}
+                <ul className="confirm-list">
+                  {selectedItems.map((i) => (
+                    <li key={i.id}>
+                      <span>{i.label}</span>
+                      <span>{formatBytes(i.bytes)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+            <button
+              type="button"
+              className="danger"
+              disabled={selectedItems.length === 0}
+              onClick={() => void execute()}
+            >
+              Reclaim {selectedItems.length > 0 ? formatBytes(selectedBytes) : "nothing"}
+            </button>
+          </div>
+
           <ul className="reclaim-list">
             {preview.items.map((item) => (
               <li key={item.id} className={`reclaim-item safety-${item.safety}`}>
@@ -282,51 +340,6 @@ export default function Reclaim() {
             </div>
           )}
 
-          <div className="card card-confirm">
-            <h2>Confirm</h2>
-            {selectedItems.length === 0 ? (
-              <p className="muted">Nothing selected.</p>
-            ) : (
-              <>
-                <p>
-                  Reclaim <strong>{formatBytes(selectedBytes)}</strong> from{" "}
-                  <strong>{selectedItems.length}</strong> item
-                  {selectedItems.length === 1 ? "" : "s"}.
-                </p>
-                {hasRisky && (
-                  <p className="caveat">
-                    Your selection includes items marked risky. These may break something that is
-                    running, or lose data.
-                  </p>
-                )}
-                {/* Said before committing, not only afterwards: trashing is a rename within the same
-                    filesystem, so it frees nothing until the trash is emptied. */}
-                {selectedTrashable > 0 && (
-                  <p className="caveat">
-                    {formatBytes(selectedTrashable)} of this goes to the trash, which is reversible but
-                    on the same disk — so that space comes back only once you empty it. nix offers
-                    emptying the trash as its own item.
-                  </p>
-                )}
-                <ul className="confirm-list">
-                  {selectedItems.map((i) => (
-                    <li key={i.id}>
-                      <span>{i.label}</span>
-                      <span>{formatBytes(i.bytes)}</span>
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
-            <button
-              type="button"
-              className="danger"
-              disabled={selectedItems.length === 0}
-              onClick={() => void execute()}
-            >
-              Reclaim {selectedItems.length > 0 ? formatBytes(selectedBytes) : "nothing"}
-            </button>
-          </div>
         </>
       )}
 
