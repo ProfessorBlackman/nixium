@@ -31,7 +31,7 @@ use nix_core::op::{Completion, OperationId, Progress};
 use nix_core::protect::Refusal;
 use nix_core::reclaim::{Preview, Report, Ticket};
 use nix_core::settings::Settings;
-use nix_core::{find, fs as nixfs, history, metrics, scan, timer};
+use nix_core::{find, fs as nixfs, history, metrics, process, scan, timer};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -262,6 +262,99 @@ pub(crate) fn duplicates_find(
 #[tauri::command]
 pub(crate) fn reclaim_last_total(state: State<'_, AppState>) -> Option<(u64, u64)> {
     state.reclaim.last_preview()
+}
+
+// ---- The process table. `PRC-1`, `PRC-2` ----
+
+/// Every process, busiest first. `PRC-1`.
+///
+/// Poll this while the view is open; nothing samples otherwise (§P9). The first call reports zero CPU
+/// for everything, because one reading of a cumulative counter is not a rate — the second call onward
+/// carries real instantaneous figures.
+///
+/// The interval is measured here rather than assumed, so a slow frame or a paused laptop produces a
+/// correct percentage rather than one scaled by a tick length that did not happen.
+#[tauri::command]
+pub(crate) fn processes_list(state: State<'_, AppState>) -> Vec<process::Process> {
+    let mut held = match state.processes.lock() {
+        Ok(held) => held,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let (sampler, last) = &mut *held;
+
+    let elapsed = last.map_or(process::TABLE_INTERVAL, |at| {
+        // A floor, so a caller polling twice in quick succession cannot divide a tiny interval into a
+        // huge percentage.
+        at.elapsed().max(std::time::Duration::from_millis(100))
+    });
+    *last = Some(std::time::Instant::now());
+    sampler.sample(elapsed)
+}
+
+/// Forget the process table's delta state. `PRC-1`.
+///
+/// Called when the view unmounts. Without it, reopening the view after ten minutes would compute a
+/// percentage from a ten-minute-old counter over an assumed interval — a figure that is neither
+/// instantaneous nor an average, which is the worst of both.
+#[tauri::command]
+pub(crate) fn processes_forget(state: State<'_, AppState>) {
+    let mut held = match state.processes.lock() {
+        Ok(held) => held,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    *held = (process::ProcessSampler::new(), None);
+}
+
+/// Send a signal to a process. `PRC-2`.
+///
+/// Tries as the current user first and only escalates on `EPERM`, so signalling your own processes
+/// never prompts — and a prompt, when it appears, means the process really does belong to someone
+/// else. `state` is the process's state as the table last saw it, used to refuse a zombie before
+/// anything is sent.
+#[tauri::command]
+pub(crate) fn process_signal(
+    pid: u32,
+    signal: nix_core::signal::Signal,
+    process_state: process::ProcessState,
+) -> Result<()> {
+    match nix_core::signal::send(pid, process_state, signal) {
+        Ok(()) => Ok(()),
+        // Only a permission failure is worth escalating. A missing process or a zombie is a fact, not
+        // an authorisation problem, and asking for a password would not change it.
+        Err(error) if error.code == ErrorCode::AuthDenied => {
+            let transport = helper::Transport::production()?;
+            let mut client = helper::Client::connect(&transport)?;
+            match client.request(&Op::SignalProcess { pid, signal })? {
+                OpResult::Reclaimed { .. } => Ok(()),
+                other => Err(AppError::internal(format!(
+                    "The helper answered a signal with {other:?}"
+                ))),
+            }
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Change a process's niceness. `PRC-2`.
+///
+/// Escalates on permission failure for the same reason, and that is more often here: lowering a
+/// niceness is privileged even for your own process.
+#[tauri::command]
+pub(crate) fn process_renice(pid: u32, niceness: i32) -> Result<()> {
+    match nix_core::signal::renice(pid, niceness) {
+        Ok(()) => Ok(()),
+        Err(error) if error.code == ErrorCode::AuthDenied => {
+            let transport = helper::Transport::production()?;
+            let mut client = helper::Client::connect(&transport)?;
+            match client.request(&Op::ReniceProcess { pid, niceness })? {
+                OpResult::Reclaimed { .. } => Ok(()),
+                other => Err(AppError::internal(format!(
+                    "The helper answered a renice with {other:?}"
+                ))),
+            }
+        }
+        Err(error) => Err(error),
+    }
 }
 
 // ---- Live metrics. `MON-1` ----

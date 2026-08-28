@@ -4,10 +4,12 @@
 //! Application state shared by every command.
 
 use std::sync::Mutex;
+use std::time::Instant;
 
 use nix_core::error::Result;
 use nix_core::metrics::{Alerts, Pipeline, Subscription};
 use nix_core::op;
+use nix_core::process::ProcessSampler;
 use nix_core::protect::Guard;
 use nix_core::reclaim::{Registry, Session};
 use nix_core::settings::{Settings, Store};
@@ -42,6 +44,13 @@ pub(crate) struct AppState {
     /// that forgets it already fired notifies every second, which is the behaviour the whole design
     /// exists to prevent.
     pub(crate) alerts: Mutex<Alerts>,
+    /// The process table's sampler and when it last ran. `PRC-1`.
+    ///
+    /// Poll-driven rather than a background task: the table is only wanted while its view is open, so
+    /// asking is the subscription (§P9). The instant is kept beside the sampler because the CPU figure
+    /// is a delta over the interval, and only the thing holding the previous reading knows how long
+    /// ago that was.
+    pub(crate) processes: Mutex<(ProcessSampler, Option<Instant>)>,
 }
 
 impl AppState {
@@ -71,6 +80,7 @@ impl AppState {
             metrics: Pipeline::new(),
             metrics_subscription: Mutex::new(None),
             alerts: Mutex::new(Alerts::new()),
+            processes: Mutex::new((ProcessSampler::new(), None)),
         }
     }
 

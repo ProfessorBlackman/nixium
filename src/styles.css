@@ -1303,3 +1303,72 @@ button.danger:hover:not(:disabled) {
   color: var(--ink-mute);
   white-space: nowrap;
 }
+
+/* ---- Process table. PRC-1. ---------------------------------------------------------------------- */
+
+/* The scroll container is never recreated, because rows are keyed on identity rather than position.
+   That is what keeps the scroll offset across a refresh — the browser does it for free once the DOM
+   node survives. */
+.proc-scroll {
+  max-height: 26rem;
+  overflow: auto;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  margin-top: 0.6rem;
+}
+
+.proc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.proc-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  border-bottom: 1px solid var(--rule);
+  text-align: left;
+  padding: 0;
+  z-index: 1;
+}
+
+.proc-table th button {
+  width: 100%;
+  background: none;
+  border: 0;
+  padding: 0.4rem 0.55rem;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+
+.proc-table th.is-numeric,
+.proc-table td.is-numeric {
+  text-align: right;
+  font-family: var(--font-mono);
+}
+
+.proc-table td {
+  padding: 0.25rem 0.55rem;
+  border-bottom: 1px solid var(--rule);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 22rem;
+}
+
+.proc-table tbody tr {
+  cursor: pointer;
+}
+
+.proc-table tbody tr:hover {
+  background: var(--surface-alt);
+}
+
+.proc-table tbody tr.is-selected {
+  background: var(--accent-soft, var(--surface-alt));
+  outline: 1px solid var(--accent);
+}

@@ -94,6 +94,11 @@ pub struct Settings {
     /// Threshold alerts (`MON-6`). Empty by default: a monitoring tool that starts notifying about
     /// thresholds nobody chose is one whose notifications get switched off wholesale.
     pub alert_rules: Vec<crate::metrics::Rule>,
+    /// Process-table columns the user has hidden (`PRC-1`).
+    ///
+    /// Stored as the columns *hidden* rather than those shown, so a column added by a later version
+    /// appears by default instead of being invisible until someone finds the setting.
+    pub hidden_process_columns: Vec<String>,
 }
 
 impl Default for Settings {
@@ -107,6 +112,7 @@ impl Default for Settings {
             show_pseudo_filesystems: false,
             growth_history_enabled: false,
             alert_rules: Vec::new(),
+            hidden_process_columns: Vec::new(),
         }
     }
 }

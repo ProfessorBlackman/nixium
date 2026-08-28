@@ -31,6 +31,9 @@ import type { Capabilities } from "../bindings/Capabilities";
 import type { DuplicateReport } from "../bindings/DuplicateReport";
 import type { GrowthReport } from "../bindings/GrowthReport";
 import type { Metric } from "../bindings/Metric";
+import type { Process } from "../bindings/Process";
+import type { ProcessState } from "../bindings/ProcessState";
+import type { Signal } from "../bindings/Signal";
 import type { Reading } from "../bindings/Reading";
 import type { Rule } from "../bindings/Rule";
 import type { Sample } from "../bindings/Sample";
@@ -38,7 +41,7 @@ import type { Series } from "../bindings/Series";
 import type { State as TimerState } from "../bindings/State";
 import type { SpaceEntry } from "../bindings/SpaceEntry";
 
-export type { AppError, CachedScan, Completion, Diagnostics, DuplicateReport, Filesystem, GrowthReport, Metric, Preview, PreviewItem, Progress, Reading, Refusal, Report, Rule, Sample, ScanResult, Series, Settings, SpaceEntry, Ticket, TimerState };
+export type { AppError, CachedScan, Completion, Diagnostics, DuplicateReport, Filesystem, GrowthReport, Metric, Preview, PreviewItem, Process, ProcessState, Progress, Reading, Refusal, Report, Rule, Sample, ScanResult, Series, Settings, Signal, SpaceEntry, Ticket, TimerState };
 export type { Capabilities };
 export type { CowSnapshot };
 export type { CowKind } from "../bindings/CowKind";
@@ -131,6 +134,12 @@ export const api = {
     call<SpaceEntry[]>("largest_files", { path, limit: limit ?? null }),
   duplicatesFind: (path: string, minimumBytes?: number) =>
     call<OperationId>("duplicates_find", { path, minimumBytes: minimumBytes ?? null }),
+  processesList: () => call<Process[]>("processes_list"),
+  processesForget: () => call<void>("processes_forget"),
+  processSignal: (pid: number, signal: Signal, processState: ProcessState) =>
+    call<void>("process_signal", { pid, signal, processState }),
+  processRenice: (pid: number, niceness: number) =>
+    call<void>("process_renice", { pid, niceness }),
   alertsEvaluate: () => call<Metric[]>("alerts_evaluate"),
   reclaimLastTotal: () => call<[number, number] | null>("reclaim_last_total"),
   metricsSubscribe: () => call<Reading[]>("metrics_subscribe"),
