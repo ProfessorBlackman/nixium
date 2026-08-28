@@ -753,7 +753,7 @@ as their own phase.*
 | PKG-2 | Removal with cascade preview | P0 — done |
 | PKG-3 | Multi-backend coverage | P1 |
 | PKG-4 | Startup applications | P1 — done |
-| PKG-5 | Repository management | P2 |
+| PKG-5 | Repository management | P2 — done |
 | SYS-1 | Hosts file editor | P1 — done |
 | SYS-2 | File search | P2 |
 
@@ -901,6 +901,45 @@ current Debian/Ubuntu increasingly uses and which Stacer could not see at all �
 one-line entries. Entries tracked by file **and line number**, never located by substring match.
 `signed-by` keyring fields are first-class. *Accepts:* a deb822-only system shows its real
 sources; an edit never rewrites a different line.
+
+*Delivered.* Measured against this machine: **47 repositories across 19 files**, 27 active, **2 in
+deb822** with their `Signed-By` keyrings, 13 entries carrying a keyring path.
+
+`/etc/apt/sources.list.d` holds **53 files and apt reads 18**. The other 35 are `.save` and
+`.distUpgrade` copies left by release upgrades, several contradicting the live entries — so the
+extension check is not tidiness, it is the difference between showing the machine's configuration and
+showing its litter. Stacer's `entryInfoList({"*.list"}, …)` had the opposite problem: `.sources` matched
+no glob it looked at, making both deb822 repositories invisible.
+
+**On "an edit never rewrites a different line".** Stacer located the line like this:
+
+```cpp
+int _pos = sourceFileContent[i].indexOf(aptSource->source);
+if (_pos != -1) { pos = i; break; }
+```
+
+A substring search from the top of the file, first hit wins, against an entry recording only its file
+path. `deb http://x/ jammy main` is a substring of `deb http://x/ jammy main restricted`, so where a
+narrower line follows a broader one, editing the narrower rewrites the broader.
+
+Checked before repeating it as a claim: across all 46 source lines here, **no line's first substring
+match is a different line**, so it misfires nowhere on this machine today. A latent hazard, not an
+observed failure. Every entry nix produces carries its file and its **line number** — or stanza index,
+for deb822 — and edits address that.
+
+Two smaller things the one-line parser gets right that Stacer's did not: a line is only a repository if
+its second field looks like a URI (`^\s*#*\s*deb` also matches `debug=1`), and toggling touches only
+the leading `#` markers (`newSource.replace("#", "")` removes every `#` in the line, so a trailing
+comment does not survive).
+
+**The privileged write.** This is the only operation whose path crosses the boundary, so the helper
+checks it against a set it **derives itself** — `apt_sources::source_files()`, the files apt actually
+reads. `/etc/shadow` is not in it, and neither is `docker.list.save`. The content is then validated as a
+well-formed file of that format, on both sides, by the same function. Same whole-file compare-and-swap
+as `SYS-1`, and the same `replace_atomically` primitive.
+
+**Not offered: adding a repository.** A repository without its signing key is useless, and fetching keys
+on a user's behalf is not something this tool should do. Stated here rather than left as a gap.
 
 ---
 
