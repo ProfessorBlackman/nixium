@@ -126,6 +126,14 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm tsc --noEmit
+
+      # Contrast cannot be eyeballed: a palette can look fine to whoever chose it and be unreadable to
+      # someone else. Both themes, computed against WCAG 2.1 AA. `PLT-2`.
+      - name: Contrast (WCAG AA)
+        run: node scripts/check-contrast.mjs
+
+      - name: Every control has an accessible name
+        run: node scripts/check-labels.mjs
       - run: pnpm build
 
   bundle:

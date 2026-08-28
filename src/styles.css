@@ -22,13 +22,19 @@
   --ink-mute: #5b6472;
   --ink-faint: #8a93a2;
   --rule: #e1e5eb;
-  --rule-strong: #c9d0da;
+  /* A control's own boundary must reach WCAG AA's 3:1 for non-text, or an input is something the user
+     has to guess the edges of. #c9d0da measured 1.55:1 against a white card — this is the lightest
+     grey that passes, checked by `scripts/check-contrast.mjs`. `--rule` stays soft: it separates rows,
+     which is decoration, not a control. */
+  --rule-strong: #8d8d8d;
   --accent: #3b4cc0;
   --accent-ink: #2c3a9b;
   --accent-soft: #eaedfb;
   --on-accent: #ffffff;
-  --safe: #2f7d51;
-  --review: #9a6314;
+  /* Nudged darker to clear 4.5:1 against their own soft backgrounds — these carry meaning, so the
+     label has to be read, not merely noticed as coloured. Both were at 4.37–4.38:1. */
+  --safe: #2b7749;
+  --review: #90590c;
   --risky: #b23a32;
   --safe-soft: #e6f2eb;
   --review-soft: #f7eedc;
@@ -50,7 +56,7 @@
     --ink-mute: #98a2b3;
     --ink-faint: #6e7889;
     --rule: #2a303c;
-    --rule-strong: #3a4252;
+    --rule-strong: #6f7889;
     --accent: #8b97f0;
     --accent-ink: #a8b2f6;
     --accent-soft: #1e2340;
@@ -74,7 +80,7 @@
   --ink-mute: #98a2b3;
   --ink-faint: #6e7889;
   --rule: #2a303c;
-  --rule-strong: #3a4252;
+  --rule-strong: #6f7889;
   --accent: #8b97f0;
   --accent-ink: #a8b2f6;
   --accent-soft: #1e2340;
@@ -2126,4 +2132,26 @@ button.danger:hover:not(:disabled) {
    coverage is not — which is a different thing from an error. */
 .search-partial {
   color: var(--review);
+}
+
+/* The package name doubles as the row's select control, so it is a button that looks like text — the
+   alternative was a clickable <tr>, which has no keyboard path and no role to announce. */
+.pkg-select {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.pkg-select:hover:not(:disabled) {
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.pkg-select[aria-pressed="true"] {
+  font-weight: 600;
 }

@@ -303,23 +303,28 @@ export default function Software() {
               </tr>
             </thead>
             <tbody>
+              {/* No `onClick` on the row itself. A clickable `<tr>` has no keyboard path and no role
+                  a screen reader can act on, so selection is the button on the name — reachable by
+                  Tab, announced as a button, and doing the same thing. */}
               {shown.slice(0, 500).map((pkg) => (
-                <tr
-                  key={pkg.id}
-                  className={pkg.id === selected ? "is-selected" : undefined}
-                  onClick={() => setSelected(pkg.id)}
-                >
+                <tr key={pkg.id} className={pkg.id === selected ? "is-selected" : undefined}>
                   <td className="pkg-pick">
                     <input
                       type="checkbox"
                       checked={chosen.includes(pkg.id)}
                       aria-label={`Select ${pkg.id} for removal`}
-                      onClick={(e) => e.stopPropagation()}
                       onChange={() => toggle(pkg.id)}
                     />
                   </td>
                   <td>
-                    <span className="pkg-id">{pkg.id}</span>
+                    <button
+                      type="button"
+                      className="pkg-select pkg-id"
+                      aria-pressed={pkg.id === selected}
+                      onClick={() => setSelected(pkg.id)}
+                    >
+                      {pkg.id}
+                    </button>
                     {!pkg.explicit && <span className="pkg-dep">dependency</span>}
                     <div className="pkg-summary muted">{pkg.summary}</div>
                   </td>
@@ -339,10 +344,7 @@ export default function Software() {
                     <button
                       type="button"
                       disabled={measuring !== null}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void measure(pkg);
-                      }}
+                      onClick={() => void measure(pkg)}
                     >
                       {measuring === pkg.id ? "Measuring…" : pkg.measured ? "Re-measure" : "Measure"}
                     </button>

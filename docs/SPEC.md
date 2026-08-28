@@ -1072,7 +1072,7 @@ and always available.
 | ID | Feature | Pri |
 | --- | --- | --- |
 | PLT-1 | Internationalisation | P1 |
-| PLT-2 | Accessibility & keyboard | P0 |
+| PLT-2 | Accessibility & keyboard | P0 — done |
 | PLT-3 | Tray & background behaviour | P1 |
 | PLT-4 | First-run experience | P2 |
 | PLT-5 | Packaging & distribution | P0 |
@@ -1086,6 +1086,45 @@ restart.
 
 **PLT-2 Accessibility & keyboard.** Full keyboard operation, visible focus, screen-reader
 labels on every control, `prefers-reduced-motion` honoured, WCAG AA contrast in both themes.
+
+*Delivered, with two of the five properties now checked by the build rather than asserted in prose.*
+
+**Contrast is computed, not eyeballed.** `scripts/check-contrast.mjs` calculates WCAG 2.1 relative
+luminance for the 20 foreground/background token pairs that actually appear on screen, in both themes,
+and fails `make check` below AA — 4.5:1 for text, 3:1 for a control's boundary. The pairs are written
+out rather than derived, because which foreground sits on which background is a fact about the
+stylesheet's rules; a generated cross product would report failures for combinations nobody renders.
+
+It found four, and one mattered:
+
+| Pair | Was | Needs |
+| --- | --- | --- |
+| `--rule-strong` on `--surface` (light) | **1.55:1** | 3:1 |
+| `--rule-strong` on `--surface` (dark) | **1.67:1** | 3:1 |
+| `--safe` on `--safe-soft` | 4.38:1 | 4.5:1 |
+| `--review` on `--review-soft` | 4.37:1 | 4.5:1 |
+
+`--rule-strong` is the border of every button and input. At 1.55:1 those edges are effectively invisible
+to a low-vision user — an input they have to guess the extent of. This palette came from Stacer's own
+`values.ini`, whose light theme shipped unreachable behind a commented-out switcher, so it is likely
+nobody had ever checked it. All 40 pairs now pass.
+
+**Every control has an accessible name**, checked by `scripts/check-labels.mjs` across all 37 of them.
+Documented as a heuristic rather than a proof: it is a text scan that accepts `aria-label`,
+`aria-labelledby`, `id`, or a `<label>` opening within six lines above — the wrapping-label pattern this
+codebase uses. It can be fooled, so it is a floor that fails the build, not a guarantee. Verified by
+planting an unlabelled `<input>` and watching it fail.
+
+**Keyboard operation.** One real gap existed and was mine: `Software.tsx` had a clickable `<tr>`, which
+has no keyboard path and no role a screen reader can act on. Row selection is now a button on the
+package name — reachable by Tab, announced as a button, `aria-pressed` carrying the state. The global
+`:focus-visible` ring and the `prefers-reduced-motion` block were already in place from Phase 0, as were
+`<nav aria-label>`, `<main>`, `aria-current="page"` and the treemap's `role="img"`.
+
+**Notifications are announced.** A polite `role="status"` live region carries the most recent notice.
+Without it a screen-reader user who never opens the panel got no indication that "Freed 4.2 GB" or "Some
+items could not be reclaimed" had happened — the outcomes of the destructive actions, which is the worst
+thing to be silent about.
 
 **PLT-3 Tray & background behaviour.** Optional tray icon, quit-vs-minimise preference, and
 `--hide` start — worth carrying over. Sampling stays paused while hidden unless an alert is

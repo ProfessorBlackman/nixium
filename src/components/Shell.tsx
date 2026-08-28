@@ -11,7 +11,7 @@
 import { Suspense, lazy, useEffect, useState } from "react";
 
 import { api, toAppError } from "../lib/ipc";
-import { markAllRead, notify, useUnreadCount } from "../lib/notices";
+import { markAllRead, notify, useNotices, useUnreadCount } from "../lib/notices";
 import { NoticePanel } from "./NoticePanel";
 
 const Overview = lazy(() => import("../views/Overview"));
@@ -93,6 +93,24 @@ function ViewBody({ id }: { id: ViewId }) {
   }
 }
 
+/**
+ * A polite live region carrying the most recent notification.
+ *
+ * Visually hidden, because the notice is already on screen for anyone who can see it; this exists so
+ * it also reaches anyone who cannot. Keyed on the notice id so an identical message arriving twice is
+ * announced twice — re-rendering the same text into a live region does not.
+ */
+function Announcer() {
+  const notices = useNotices();
+  const latest = notices[0];
+
+  return (
+    <div className="visually-hidden" role="status" aria-live="polite" aria-atomic="true">
+      {latest === undefined ? "" : `${latest.level}: ${latest.title}`}
+    </div>
+  );
+}
+
 export function Shell({ initialView }: { initialView: ViewId }) {
   const [view, setView] = useState<ViewId>(initialView);
   const [panelOpen, setPanelOpen] = useState(false);
@@ -157,6 +175,13 @@ export function Shell({ initialView }: { initialView: ViewId }) {
             {unread > 0 && <span className="badge">{unread}</span>}
           </button>
         </header>
+
+        {/* Notifications are announced here, not only listed in the panel.
+            A screen-reader user who never opens the panel would otherwise get no indication that
+            "Freed 4.2 GB" or "Some items could not be reclaimed" had happened at all — and those are
+            the outcomes of the destructive actions, which is the worst possible thing to be silent
+            about. Polite rather than assertive: it waits for a pause rather than interrupting. */}
+        <Announcer />
 
         <div className="content">
           <main className="view">
