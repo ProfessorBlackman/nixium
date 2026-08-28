@@ -621,10 +621,10 @@ either `unsafe` or a new dependency in a program that ships privileged code. IPv
 
 | ID | Feature | Pri |
 | --- | --- | --- |
-| PRC-1 | Process table | P0 — backend done |
-| PRC-2 | Process actions | P0 — backend done |
-| PRC-3 | Process detail | P1 |
-| PRC-4 | Process tree | P2 |
+| PRC-1 | Process table | P0 — done |
+| PRC-2 | Process actions | P0 — done |
+| PRC-3 | Process detail | P1 — done |
+| PRC-4 | Process tree | P2 — done |
 | SVC-1 | systemd unit inventory | P0 |
 | SVC-2 | Unit actions | P0 |
 | SVC-3 | Live unit state | P1 |
@@ -682,6 +682,26 @@ failure. Both use `rustix`'s safe wrappers, so signalling needs no `unsafe` and 
 cgroup, and **disk footprint** — the link back to the storage model.
 
 **PRC-4 Process tree.** Parent/child hierarchy with aggregated subtree resource use.
+
+**Done.** The subtree figure is the point: a build system's cost is spread across dozens of short-lived
+children and each one alone looks like nothing.
+
+One defect found here, and found only because a test was wrong. The walk carried a cycle guard, and the
+test written to prove it passed with the guard **deliberately removed** — because in a single-parent
+graph no member of a cycle has a parent outside it, so a cycle is reachable from no root and the
+recursion never started. Working out why exposed the real failure: those processes were reachable from
+nothing, so they **vanished from the tree silently**. The walk now adopts anything still unvisited as a
+root of its own, which makes "every process appears exactly once" hold whatever `ppid` claims — and
+makes the guard load-bearing, verified by removing it and watching the stack overflow.
+
+**PRC-3 Process detail.** Most of `/proc/<pid>` is unreadable for another user's process, measured
+rather than assumed: `io`, `environ` and `fd/` are own-process only, while `cgroup` and `task/` are
+readable for anything. So a detail panel for `systemd` shows its control group and thread count and
+says, for each missing section, why.
+
+nix deliberately does **not** offer to escalate for the environment. Another user's environment
+routinely holds credentials, and a task manager that will show you any process's secrets for a password
+is a credential-harvesting tool with a nice icon.
 
 **SVC-1 systemd unit inventory.** Over D-Bus (`ListUnits`, `ListUnitFiles`, plus properties) —
 one round trip instead of Stacer's `1 + 2N` subprocess spawns. Includes `static`, `masked` and

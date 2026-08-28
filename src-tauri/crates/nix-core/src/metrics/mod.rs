@@ -578,34 +578,36 @@ mod tests {
             batteries: Vec::new(),
         };
 
+        // Asserted on the state rather than on a produced reading. `tick` returns nothing until the
+        // CPU sampler has a delta, and two calls in quick succession can read identical `/proc/stat`
+        // counters — so routing this through `latest()` made it depend on whether a jiffie happened to
+        // elapse, which is luck rather than a test.
         {
             let mut state = pipeline.shared.state.lock().unwrap();
-            // Prime both, then two ticks so there is a CPU delta and a reading to inspect.
             tick(&mut state, Some(sensors.clone()), Some(power.clone()));
+
+            // A tick that refreshed neither must carry both forward.
             tick(&mut state, None, None);
-        }
+            assert_eq!(
+                state.sensors.temperatures.len(),
+                1,
+                "a tick refreshing neither family must leave both alone"
+            );
+            assert_eq!(state.power.on_mains, Some(true));
 
-        let reading = pipeline
-            .latest()
-            .expect("two ticks produce a reading; an early return here would pass silently");
-        assert_eq!(
-            reading.sensors.temperatures.len(),
-            1,
-            "a tick that refreshed neither must carry both forward"
-        );
-        assert_eq!(reading.power.on_mains, Some(true));
-
-        // And a tick refreshing only power must leave the sensors alone.
-        {
-            let mut state = pipeline.shared.state.lock().unwrap();
+            // And a tick refreshing only power must leave the sensors alone — the case that blanked
+            // the panel every thirtieth second.
             tick(&mut state, None, Some(power));
+            assert_eq!(
+                state.sensors.temperatures.len(),
+                1,
+                "refreshing power must not wipe the temperatures"
+            );
+
+            // The reverse, for completeness.
+            tick(&mut state, Some(sensors), None);
+            assert_eq!(state.power.on_mains, Some(true));
         }
-        let reading = pipeline.latest().unwrap();
-        assert_eq!(
-            reading.sensors.temperatures.len(),
-            1,
-            "the sensor panel must not blank every thirtieth second"
-        );
     }
 
     /// §P9: nothing samples until a view is mounted.

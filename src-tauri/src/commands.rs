@@ -31,7 +31,7 @@ use nix_core::op::{Completion, OperationId, Progress};
 use nix_core::protect::Refusal;
 use nix_core::reclaim::{Preview, Report, Ticket};
 use nix_core::settings::Settings;
-use nix_core::{find, fs as nixfs, history, metrics, process, scan, timer};
+use nix_core::{detail, find, fs as nixfs, history, metrics, process, scan, timer};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -355,6 +355,24 @@ pub(crate) fn process_renice(pid: u32, niceness: i32) -> Result<()> {
         }
         Err(error) => Err(error),
     }
+}
+
+/// Everything readable about one process. `PRC-3`.
+///
+/// Never escalates. Most of this is unreadable for another user's process by design, and the sections
+/// that are missing say why — including that nix deliberately will not ask for administrator rights to
+/// read someone else's environment, which routinely holds credentials.
+#[tauri::command]
+pub(crate) fn process_detail(pid: u32) -> detail::Detail {
+    detail::read(std::path::Path::new("/proc"), pid)
+}
+
+/// The process tree with subtree totals. `PRC-4`.
+///
+/// Built from the same sample the table uses, so the two cannot disagree about who is busy.
+#[tauri::command]
+pub(crate) fn process_tree(state: State<'_, AppState>) -> Vec<detail::TreeNode> {
+    detail::tree(&processes_list(state))
 }
 
 // ---- Live metrics. `MON-1` ----

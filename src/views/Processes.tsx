@@ -27,9 +27,11 @@ import { formatBytes } from "../lib/format";
 import {
   api,
   toAppError,
+  type Detail,
   type Process,
   type Settings,
   type Signal,
+  type TreeNode,
 } from "../lib/ipc";
 import { notify } from "../lib/notices";
 
@@ -73,6 +75,41 @@ function compare(a: Process, b: Process, column: Column): number {
   }
 }
 
+/** One branch of the tree, indented rather than nested list-within-list. */
+function TreeBranch({
+  node,
+  depth,
+  onSelect,
+}: {
+  node: TreeNode;
+  depth: number;
+  onSelect: (pid: number) => void;
+}) {
+  return (
+    <>
+      <li style={{ paddingLeft: `${depth * 1.1}rem` }}>
+        <button type="button" className="tree-row" onClick={() => onSelect(node.pid)}>
+          <span className="tree-name">{node.name}</span>
+          <span className="tree-figure">{node.subtree_cpu_percent.toFixed(1)}%</span>
+          <span className="tree-figure">{formatBytes(node.subtree_memory_bytes)}</span>
+          <span className="muted">
+            {node.descendants > 0
+              ? `${node.descendants} descendant${node.descendants === 1 ? "" : "s"}`
+              : ""}
+          </span>
+        </button>
+      </li>
+      {/* Only branches that account for something, so a tree of 650 processes stays readable. */}
+      {node.children
+        .filter((child) => child.subtree_cpu_percent > 0.5 || child.descendants > 0)
+        .slice(0, 12)
+        .map((child) => (
+          <TreeBranch key={child.pid} node={child} depth={depth + 1} onSelect={onSelect} />
+        ))}
+    </>
+  );
+}
+
 export default function Processes() {
   const [processes, setProcesses] = useState<Process[]>([]);
   const [sort, setSort] = useState<Sort>({ column: "cpu", descending: true });
@@ -80,6 +117,8 @@ export default function Processes() {
   const [selected, setSelected] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [detail, setDetail] = useState<Detail | null>(null);
+  const [tree, setTree] = useState<TreeNode[] | null>(null);
   /** So the first poll can say whether the CPU column is meaningful yet. */
   const polls = useRef(0);
 
@@ -109,6 +148,23 @@ export default function Processes() {
       void api.processesForget();
     };
   }, []);
+
+  // PRC-3. Loaded on selection rather than for every row: it is a dozen file reads per process, and
+  // nobody wants the detail of six hundred of them.
+  useEffect(() => {
+    if (selected === null) {
+      setDetail(null);
+      return;
+    }
+    let live = true;
+    void api
+      .processDetail(selected)
+      .then((d) => live && setDetail(d))
+      .catch(() => live && setDetail(null));
+    return () => {
+      live = false;
+    };
+  }, [selected]);
 
   const hidden = useMemo(
     () => new Set(settings?.hidden_process_columns ?? []),
@@ -340,8 +396,144 @@ export default function Processes() {
               </p>
             </>
           )}
+          {/* PRC-3. */}
+          {detail && detail.pid === chosen.pid && (
+            <>
+              <h3>Detail</h3>
+              <ul className="detail-list">
+                {detail.executable && (
+                  <li>
+                    <span>Executable</span>
+                    <code>{detail.executable}</code>
+                  </li>
+                )}
+                {detail.working_directory && (
+                  <li>
+                    <span>Working directory</span>
+                    <code>{detail.working_directory}</code>
+                  </li>
+                )}
+                {detail.cgroup && (
+                  <li>
+                    <span>Control group</span>
+                    <code>{detail.cgroup}</code>
+                  </li>
+                )}
+                <li>
+                  <span>Threads</span>
+                  <span>{detail.thread_count}</span>
+                </li>
+                {detail.io && (
+                  <li>
+                    <span>Read / written</span>
+                    <span>
+                      {formatBytes(detail.io.read_chars)} / {formatBytes(detail.io.written_chars)}
+                      <span className="muted">
+                        {" "}
+                        — of which {formatBytes(detail.io.read_bytes)} /{" "}
+                        {formatBytes(detail.io.written_bytes)} actually reached a disk
+                      </span>
+                    </span>
+                  </li>
+                )}
+                {detail.disk_footprint !== null && (
+                  <li>
+                    <span>Disk footprint</span>
+                    <span>
+                      {formatBytes(detail.disk_footprint)}
+                      <span className="muted"> — its executable and the files it has open</span>
+                    </span>
+                  </li>
+                )}
+              </ul>
+
+              {detail.open_files && detail.open_files.length > 0 && (
+                <details>
+                  <summary>
+                    {detail.open_files.length} open file
+                    {detail.open_files.length === 1 ? "" : "s"}
+                  </summary>
+                  <ul className="find-list">
+                    {detail.open_files.slice(0, 40).map((file) => (
+                      <li key={file.fd}>
+                        <span className="find-bytes">
+                          {file.bytes !== null ? formatBytes(file.bytes) : "—"}
+                        </span>
+                        <code>{file.target}</code>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+
+              {detail.environment && detail.environment.length > 0 && (
+                <details>
+                  <summary>{detail.environment.length} environment variables</summary>
+                  <ul className="find-list">
+                    {detail.environment.map(([key, value]) => (
+                      <li key={key}>
+                        <span className="find-bytes">{key}</span>
+                        <code>{value}</code>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+
+              {detail.restricted.length > 0 && (
+                <div className="detail-restricted">
+                  <p className="muted">Not shown, and why:</p>
+                  <ul>
+                    {detail.restricted.map((reason) => (
+                      <li key={reason} className="muted">
+                        {reason}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
+          )}
+
         </div>
       )}
+
+      {/* PRC-4. Loaded on demand: the aggregation is cheap, the payload is every process. */}
+      <div className="card">
+        <h2>Tree</h2>
+        <p className="muted">
+          A build system&rsquo;s cost is spread across dozens of short-lived children, and each one
+          alone looks like nothing. The subtree figure is what explains a slow machine.
+        </p>
+        <div className="row">
+          <button
+            type="button"
+            onClick={() =>
+              void api
+                .processTree()
+                .then(setTree)
+                .catch((thrown) => notify.error(toAppError(thrown)))
+            }
+          >
+            {tree ? "Refresh tree" : "Show tree"}
+          </button>
+          {tree && (
+            <button type="button" onClick={() => setTree(null)}>
+              Hide
+            </button>
+          )}
+        </div>
+        {tree && (
+          <ul className="tree">
+            {tree
+              .filter((node) => node.subtree_cpu_percent > 0.5 || node.descendants > 0)
+              .slice(0, 40)
+              .map((node) => (
+                <TreeBranch key={node.pid} node={node} depth={0} onSelect={setSelected} />
+              ))}
+          </ul>
+        )}
+      </div>
 
       <div className="card">
         <h2>Columns</h2>

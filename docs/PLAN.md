@@ -18,7 +18,7 @@ followed — is in [issues/](issues/README.md).
 | **M4** Storage core complete (tasks 1.11–1.14) — **Phase 1 done** | **complete** |
 | **M5** Storage depth (Phase 2) — **Phase 2 done** | **complete** |
 | **M6** Monitoring (Phase 3) — **Phase 3 done** | **complete** |
-| M7 Processes & services (Phase 4) | not started — **next** |
+| M7 Processes & services (Phase 4) | **in progress** — PRC-1 to PRC-4 done; SVC-1 to SVC-5 remain |
 | M8 – M9 | not started |
 
 Phase 0 shipped all eleven tasks: the three-crate workspace and quality gates, the error taxonomy,

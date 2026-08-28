@@ -1372,3 +1372,85 @@ button.danger:hover:not(:disabled) {
   background: var(--accent-soft, var(--surface-alt));
   outline: 1px solid var(--accent);
 }
+
+/* ---- Process detail and tree. PRC-3, PRC-4. ----------------------------------------------------- */
+
+.detail-list {
+  list-style: none;
+  margin: 0.5rem 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.8125rem;
+}
+
+.detail-list li {
+  display: grid;
+  grid-template-columns: minmax(7rem, 11rem) minmax(0, 1fr);
+  gap: 0.7rem;
+  align-items: baseline;
+}
+
+.detail-list li > span:first-child {
+  color: var(--ink-mute);
+}
+
+.detail-list code {
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
+
+/* What could not be read, and why. Presented as information rather than as an error: for another
+   user's process this is the normal state of affairs, not a fault. */
+.detail-restricted {
+  margin-top: 0.7rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--surface-alt);
+  font-size: 0.8125rem;
+}
+
+.detail-restricted ul {
+  margin: 0.3rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.tree {
+  list-style: none;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  font-size: 0.8125rem;
+}
+
+.tree-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 5rem 6rem auto;
+  gap: 0.7rem;
+  width: 100%;
+  align-items: baseline;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  padding: 0.22rem 0.3rem;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tree-row:hover {
+  background: var(--surface-alt);
+}
+
+.tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-figure {
+  font-family: var(--font-mono);
+  text-align: right;
+}

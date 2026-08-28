@@ -31,7 +31,9 @@ import type { Capabilities } from "../bindings/Capabilities";
 import type { DuplicateReport } from "../bindings/DuplicateReport";
 import type { GrowthReport } from "../bindings/GrowthReport";
 import type { Metric } from "../bindings/Metric";
+import type { Detail } from "../bindings/Detail";
 import type { Process } from "../bindings/Process";
+import type { TreeNode } from "../bindings/TreeNode";
 import type { ProcessState } from "../bindings/ProcessState";
 import type { Signal } from "../bindings/Signal";
 import type { Reading } from "../bindings/Reading";
@@ -41,7 +43,7 @@ import type { Series } from "../bindings/Series";
 import type { State as TimerState } from "../bindings/State";
 import type { SpaceEntry } from "../bindings/SpaceEntry";
 
-export type { AppError, CachedScan, Completion, Diagnostics, DuplicateReport, Filesystem, GrowthReport, Metric, Preview, PreviewItem, Process, ProcessState, Progress, Reading, Refusal, Report, Rule, Sample, ScanResult, Series, Settings, Signal, SpaceEntry, Ticket, TimerState };
+export type { AppError, CachedScan, Completion, Diagnostics, DuplicateReport, Filesystem, GrowthReport, Detail, Metric, Preview, PreviewItem, Process, ProcessState, Progress, Reading, Refusal, Report, Rule, Sample, ScanResult, Series, Settings, Signal, SpaceEntry, Ticket, TimerState, TreeNode };
 export type { Capabilities };
 export type { CowSnapshot };
 export type { CowKind } from "../bindings/CowKind";
@@ -136,6 +138,8 @@ export const api = {
     call<OperationId>("duplicates_find", { path, minimumBytes: minimumBytes ?? null }),
   processesList: () => call<Process[]>("processes_list"),
   processesForget: () => call<void>("processes_forget"),
+  processDetail: (pid: number) => call<Detail>("process_detail", { pid }),
+  processTree: () => call<TreeNode[]>("process_tree"),
   processSignal: (pid: number, signal: Signal, processState: ProcessState) =>
     call<void>("process_signal", { pid, signal, processState }),
   processRenice: (pid: number, niceness: number) =>

@@ -46,6 +46,7 @@ pub mod budget;
 pub mod cache;
 pub mod caps;
 pub mod cow;
+pub mod detail;
 pub mod error;
 pub mod find;
 pub mod fixture;

@@ -60,6 +60,8 @@ pub fn run() {
             commands::processes_forget,
             commands::process_signal,
             commands::process_renice,
+            commands::process_detail,
+            commands::process_tree,
             commands::alerts_evaluate,
             commands::reclaim_last_total,
             commands::metrics_subscribe,
