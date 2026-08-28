@@ -31,7 +31,7 @@ use nix_core::op::{Completion, OperationId, Progress};
 use nix_core::protect::Refusal;
 use nix_core::reclaim::{Preview, Report, Ticket};
 use nix_core::settings::Settings;
-use nix_core::{find, fs as nixfs, history, scan, timer};
+use nix_core::{find, fs as nixfs, history, metrics, scan, timer};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -253,6 +253,66 @@ pub(crate) fn duplicates_find(
     });
 
     id
+}
+
+// ---- Live metrics. `MON-1` ----
+
+/// Event carrying one metrics reading.
+pub(crate) const EVENT_METRICS_TICK: &str = "metrics://tick";
+
+/// Start sampling and return the history that already exists.
+///
+/// The return value is the acceptance criterion made concrete: a view mounting late is handed the
+/// whole window rather than starting its charts from an empty axis. Sampling continues until
+/// [`metrics_unsubscribe`], and nothing samples before this is called (§P9).
+#[tauri::command]
+pub(crate) fn metrics_subscribe(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Vec<metrics::Reading> {
+    let mut held = match state.metrics_subscription.lock() {
+        Ok(held) => held,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+
+    if held.is_none() {
+        // Registered before subscribing, so the very first reading is delivered rather than missed.
+        let emitter = app.clone();
+        state.metrics.observe(move |reading| {
+            if let Err(e) = emitter.emit(EVENT_METRICS_TICK, reading) {
+                tracing::warn!(error = %e, "could not emit a metrics reading");
+            }
+        });
+        *held = Some(state.metrics.subscribe());
+    }
+
+    state.metrics.history()
+}
+
+/// Stop sampling.
+///
+/// Idempotent, and the only way sampling stops — which is deliberate: the subscription's `Drop` is
+/// what pauses the pipeline, so there is no path where the state says "not sampling" while the worker
+/// carries on.
+#[tauri::command]
+pub(crate) fn metrics_unsubscribe(state: State<'_, AppState>) {
+    let mut held = match state.metrics_subscription.lock() {
+        Ok(held) => held,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    *held = None;
+}
+
+/// The window as it stands, without subscribing.
+#[tauri::command]
+pub(crate) fn metrics_history(state: State<'_, AppState>) -> Vec<metrics::Reading> {
+    state.metrics.history()
+}
+
+/// Whether the pipeline is currently sampling. Shown in About, so §P9 is visible rather than claimed.
+#[tauri::command]
+pub(crate) fn metrics_sampling(state: State<'_, AppState>) -> bool {
+    state.metrics.is_sampling()
 }
 
 // ---- Growth history. `STO-16` ----

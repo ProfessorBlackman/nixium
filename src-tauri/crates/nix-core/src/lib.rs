@@ -53,6 +53,7 @@ pub mod fs;
 pub mod helper;
 pub mod history;
 pub mod logging;
+pub mod metrics;
 pub mod op;
 pub mod paths;
 pub mod pkg;

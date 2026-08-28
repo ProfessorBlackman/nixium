@@ -527,7 +527,7 @@ costs listing detail, never accounting.
 
 | ID | Feature | Pri |
 | --- | --- | --- |
-| MON-1 | Live metrics pipeline | P0 |
+| MON-1 | Live metrics pipeline | P0 — done |
 | MON-2 | Overview dashboard | P0 |
 | MON-3 | History charts | P0 |
 | MON-4 | Sensors — temperature & fans | P1 |
@@ -542,6 +542,30 @@ was silently wrong), `/proc/loadavg`, `/sys/block/*/stat`, `/sys/class/net/*/sta
 `scaling_cur_freq`. Zero subprocesses (§P4). *Accepts:* a late-mounting view immediately
 receives the full 60-second history; idle CPU under 1% of one core; memory figures cross-checked
 against `free`.
+
+**Met, all three, measured.**
+
+| Criterion | Result |
+| --- | --- |
+| Idle CPU, nothing subscribed | **0 ms over 12 s — 0.0000%** |
+| CPU while sampling once a second | 20 ms over 12 s — **0.167% of one core** |
+| Memory against `free -b` | **every figure identical, byte for byte** |
+| Late-mounting view | handed the existing window on subscribe |
+
+Idle is *exactly* zero rather than merely small because the worker blocks on a condition variable
+while nothing is subscribed — not a cheap tick, not a short sleep in a loop. A subscription's `Drop`
+is what pauses it, so a view that goes away cannot leave the machine sampling.
+
+Two device-filtering decisions this machine forced, both of which a naive implementation gets wrong:
+
+- **43 of its 44 block devices are `loop`**, one per installed snap. The obvious filter — the kernel's
+  `device` symlink — also excludes `dm-*`, `md*` and `zram*`, so an LVM, LUKS or RAID install would
+  show no disk activity at all. That is the `fuseblk` mistake in another costume, so the rule is the
+  narrow one: exclude `loop` and `ram` by name, require a non-zero size.
+- **29 of its 31 network interfaces are virtual.** Summing them would not merely be noisy but *wrong*:
+  a container's packet crosses its `veth`, then a bridge, then the card, incrementing three counters.
+  The aggregate counts hardware-backed interfaces only, so each byte is counted once; every interface
+  is still recorded individually for MON-7.
 
 **MON-2 Overview dashboard.** At-a-glance CPU, memory, disk and network, plus **storage headline
 figures** — this is a storage-first product, so the dashboard leads with "X GB reclaimable"

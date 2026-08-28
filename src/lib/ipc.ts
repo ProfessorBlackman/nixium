@@ -30,12 +30,13 @@ import type { Settings } from "../bindings/Settings";
 import type { Capabilities } from "../bindings/Capabilities";
 import type { DuplicateReport } from "../bindings/DuplicateReport";
 import type { GrowthReport } from "../bindings/GrowthReport";
+import type { Reading } from "../bindings/Reading";
 import type { Sample } from "../bindings/Sample";
 import type { Series } from "../bindings/Series";
 import type { State as TimerState } from "../bindings/State";
 import type { SpaceEntry } from "../bindings/SpaceEntry";
 
-export type { AppError, CachedScan, Completion, Diagnostics, DuplicateReport, Filesystem, GrowthReport, Preview, PreviewItem, Progress, Refusal, Report, Sample, ScanResult, Series, Settings, SpaceEntry, Ticket, TimerState };
+export type { AppError, CachedScan, Completion, Diagnostics, DuplicateReport, Filesystem, GrowthReport, Preview, PreviewItem, Progress, Reading, Refusal, Report, Sample, ScanResult, Series, Settings, SpaceEntry, Ticket, TimerState };
 export type { Capabilities };
 export type { CowSnapshot };
 export type { CowKind } from "../bindings/CowKind";
@@ -59,6 +60,8 @@ export const EVENT_DONE = "op://done";
 export const EVENT_SCAN_DONE = "scan://done";
 /** A finished duplicate search. `STO-15`. */
 export const EVENT_DUPLICATES_DONE = "duplicates://done";
+/** One metrics reading, once a second while subscribed. `MON-1`. */
+export const EVENT_METRICS_TICK = "metrics://tick";
 
 /** Whether a rejected value is one of our typed errors rather than an unexpected throw. */
 export function isAppError(value: unknown): value is AppError {
@@ -126,6 +129,10 @@ export const api = {
     call<SpaceEntry[]>("largest_files", { path, limit: limit ?? null }),
   duplicatesFind: (path: string, minimumBytes?: number) =>
     call<OperationId>("duplicates_find", { path, minimumBytes: minimumBytes ?? null }),
+  metricsSubscribe: () => call<Reading[]>("metrics_subscribe"),
+  metricsUnsubscribe: () => call<void>("metrics_unsubscribe"),
+  metricsHistory: () => call<Reading[]>("metrics_history"),
+  metricsSampling: () => call<boolean>("metrics_sampling"),
   historySamples: () => call<Sample[]>("history_samples"),
   historySeries: (intervalSeconds?: number) =>
     call<Series>("history_series", { intervalSeconds: intervalSeconds ?? null }),
@@ -150,6 +157,11 @@ export const api = {
   /** Phase 0 scaffolding: fail on purpose, to exercise the error surface. */
   demoFailure: (code: string) => call<void>("demo_failure", { code }),
 };
+
+/** Subscribe to live metrics readings. Only fires while something has subscribed. */
+export function onMetricsTick(handler: (r: Reading) => void): Promise<UnlistenFn> {
+  return listen<Reading>(EVENT_METRICS_TICK, (event) => handler(event.payload));
+}
 
 /** Subscribe to finished duplicate searches. */
 export function onDuplicatesDone(handler: (r: DuplicateReport) => void): Promise<UnlistenFn> {

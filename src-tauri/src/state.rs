@@ -6,6 +6,7 @@
 use std::sync::Mutex;
 
 use nix_core::error::Result;
+use nix_core::metrics::{Pipeline, Subscription};
 use nix_core::op;
 use nix_core::protect::Guard;
 use nix_core::reclaim::{Registry, Session};
@@ -25,6 +26,16 @@ pub(crate) struct AppState {
     pub(crate) categories: Registry,
     /// A warning raised while loading settings, surfaced once the frontend is ready to show it.
     startup_warning: Mutex<Option<nix_core::error::AppError>>,
+    /// The live metrics pipeline. `MON-1`.
+    ///
+    /// Built at startup but **idle**: its worker blocks until a view subscribes, so a cold start
+    /// samples nothing (§P9).
+    pub(crate) metrics: Pipeline,
+    /// The subscription held while a monitoring view is mounted.
+    ///
+    /// Dropping it is what pauses sampling, so this is `None` whenever no view wants metrics — the
+    /// state and the behaviour cannot drift apart, because the state *is* the behaviour.
+    pub(crate) metrics_subscription: Mutex<Option<Subscription>>,
 }
 
 impl AppState {
@@ -51,6 +62,8 @@ impl AppState {
             reclaim: Session::new(),
             categories: Registry::with_defaults(),
             startup_warning: Mutex::new(warning),
+            metrics: Pipeline::new(),
+            metrics_subscription: Mutex::new(None),
         }
     }
 
