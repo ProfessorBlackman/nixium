@@ -67,6 +67,7 @@ pub fn run() {
             commands::packages_residual,
             commands::packages_removal_preview,
             commands::packages_remove,
+            commands::search_start,
             commands::apt_sources_list,
             commands::apt_source_set_enabled,
             commands::apt_source_remove,

@@ -84,7 +84,7 @@ workspace = true
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-nix-core = { workspace = true, features = ["dbus"] }
+nix-core = { workspace = true, features = ["dbus", "regex"] }
 tracing = { workspace = true }
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"

@@ -2096,3 +2096,34 @@ button.danger:hover:not(:disabled) {
     gap: 0.5rem;
   }
 }
+
+/* File search (SYS-2). Results stream in, so the list scrolls on its own rather than growing the page
+   under the form the user is still adjusting. */
+.search-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: 0 0.9rem;
+  margin: 0.6rem 0 0.2rem;
+}
+
+.search-form .field {
+  max-width: none;
+}
+
+.search-scroll {
+  max-height: 26rem;
+  overflow: auto;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  margin-top: 0.6rem;
+}
+
+.search-path {
+  word-break: break-all;
+}
+
+/* A result set that is missing folders it could not read. Amber, because the count is correct and the
+   coverage is not — which is a different thing from an error. */
+.search-partial {
+  color: var(--review);
+}

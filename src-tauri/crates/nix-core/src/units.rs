@@ -185,7 +185,8 @@ pub fn timestamp(raw: u64) -> Option<u64> {
 
 /// Seconds since the epoch, now.
 #[must_use]
-#[cfg(any(feature = "dbus", test))]
+// Only the D-Bus timer reader needs this; no test calls it directly.
+#[cfg(feature = "dbus")]
 pub(crate) fn now_unix() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -194,6 +195,7 @@ pub(crate) fn now_unix() -> i64 {
 
 /// Seconds since boot, from `/proc/uptime`.
 #[must_use]
+// The D-Bus reader, plus `this_machines_uptime_reads`, which is not gated on the feature.
 #[cfg(any(feature = "dbus", test))]
 pub(crate) fn uptime_seconds() -> Option<f64> {
     std::fs::read_to_string("/proc/uptime")

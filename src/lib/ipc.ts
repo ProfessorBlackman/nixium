@@ -57,6 +57,11 @@ import type { Repository } from "../bindings/Repository";
 // `Location` is a DOM global, so the binding is aliased to keep the two apart.
 import type { Location as SourceLocation } from "../bindings/Location";
 import type { Format } from "../bindings/Format";
+import type { Query as SearchQuery } from "../bindings/Query";
+import type { Hit } from "../bindings/Hit";
+import type { Summary as SearchSummary } from "../bindings/Summary";
+import type { NameMatch } from "../bindings/NameMatch";
+import type { FileKind } from "../bindings/FileKind";
 import type { UnitFile } from "../bindings/UnitFile";
 import type { Process } from "../bindings/Process";
 import type { TreeNode } from "../bindings/TreeNode";
@@ -69,7 +74,7 @@ import type { Series } from "../bindings/Series";
 import type { State as TimerState } from "../bindings/State";
 import type { SpaceEntry } from "../bindings/SpaceEntry";
 
-export type { Action, AppError, CachedScan, Completion, Diagnostics, DuplicateReport, Filesystem, GrowthReport, Detail, Metric, Preview, PreviewItem, Process, ProcessState, Progress, Reading, Refusal, Report, Rule, Sample, ScanResult, Series, Settings, Page, Scope, Signal, SpaceEntry, Ticket, Timer, TimerState, TreeNode, Unit, UnitFile, Package, Measured, Manager, ResidualConfig, RemovalPreview, RemovalOutcome, Flagged, Concern, RemovalRisk, HostsFile, HostLine, LineKind, AutostartEntry, Origin, Repository, SourceLocation, Format };
+export type { Action, AppError, CachedScan, Completion, Diagnostics, DuplicateReport, Filesystem, GrowthReport, Detail, Metric, Preview, PreviewItem, Process, ProcessState, Progress, Reading, Refusal, Report, Rule, Sample, ScanResult, Series, Settings, Page, Scope, Signal, SpaceEntry, Ticket, Timer, TimerState, TreeNode, Unit, UnitFile, Package, Measured, Manager, ResidualConfig, RemovalPreview, RemovalOutcome, Flagged, Concern, RemovalRisk, HostsFile, HostLine, LineKind, AutostartEntry, Origin, Repository, SourceLocation, Format, SearchQuery, Hit, SearchSummary, NameMatch, FileKind, OperationId };
 export type { Capabilities };
 export type { CowSnapshot };
 export type { CowKind } from "../bindings/CowKind";
@@ -88,6 +93,8 @@ export type { LogLevel } from "../bindings/LogLevel";
 export type { StartView } from "../bindings/StartView";
 export type { Theme } from "../bindings/Theme";
 
+export const EVENT_SEARCH_HITS = "search://hits";
+export const EVENT_SEARCH_DONE = "search://done";
 export const EVENT_PROGRESS = "op://progress";
 export const EVENT_DONE = "op://done";
 export const EVENT_SCAN_DONE = "scan://done";
@@ -177,6 +184,7 @@ export const api = {
   packagesRemovalPreview: (ids: string[]) =>
     call<RemovalPreview>("packages_removal_preview", { ids }),
   packagesRemove: (ids: string[]) => call<RemovalOutcome>("packages_remove", { ids }),
+  searchStart: (query: SearchQuery) => call<OperationId>("search_start", { query }),
   aptSourcesList: () => call<Repository[]>("apt_sources_list"),
   aptSourceSetEnabled: (at: SourceLocation, enabled: boolean) =>
     call<Repository[]>("apt_source_set_enabled", { at, enabled }),
@@ -253,6 +261,25 @@ export function onProgress(handler: (p: Progress) => void): Promise<UnlistenFn> 
 /** Subscribe to terminal outcomes for all operations. */
 export function onDone(handler: (c: Completion) => void): Promise<UnlistenFn> {
   return listen<Completion>(EVENT_DONE, (event) => handler(event.payload));
+}
+
+/** Subscribe to batches of search results. Tagged with the operation, so an abandoned search's
+ *  results can be discarded rather than mixed into the current one. */
+export function onSearchHits(
+  handler: (batch: { id: OperationId; hits: Hit[] }) => void,
+): Promise<UnlistenFn> {
+  return listen<{ id: OperationId; hits: Hit[] }>(EVENT_SEARCH_HITS, (event) =>
+    handler(event.payload),
+  );
+}
+
+/** Subscribe to finished searches and their counts. */
+export function onSearchDone(
+  handler: (done: { id: OperationId; summary: SearchSummary }) => void,
+): Promise<UnlistenFn> {
+  return listen<{ id: OperationId; summary: SearchSummary }>(EVENT_SEARCH_DONE, (event) =>
+    handler(event.payload),
+  );
 }
 
 /** Subscribe to completed scan results. A cancelled scan still delivers its partial tree. */

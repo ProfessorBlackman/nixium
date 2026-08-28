@@ -36,7 +36,7 @@ use nix_core::settings::Settings;
 use nix_core::space::Manager as PkgManager;
 use nix_core::{
     apt_sources, autostart, detail, find, fs as nixfs, history, hosts, journal, metrics, process,
-    scan, timer, units,
+    scan, search, timer, units,
 };
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -509,6 +509,87 @@ pub(crate) fn packages_residual() -> Result<Vec<pkg::ResidualConfig>> {
     }
     all.sort_unstable_by_key(|r| std::cmp::Reverse(r.bytes));
     Ok(all)
+}
+
+// ---- File search. `SYS-2` ----
+
+/// Search results, in batches.
+pub(crate) const EVENT_SEARCH_HITS: &str = "search://hits";
+
+/// How a search ended: counts, and whether it was truncated or cancelled.
+///
+/// Separate from `Completion`, which carries only an id — and the counts are the point here. A search
+/// that examined 400,000 paths and could not read 12 of them has told the user something a bare "done"
+/// does not.
+pub(crate) const EVENT_SEARCH_DONE: &str = "search://done";
+
+/// Search for files, streaming results as they are found. `SYS-2`.
+///
+/// Returns an operation id immediately; hits arrive on [`EVENT_SEARCH_HITS`] in batches and the run
+/// finishes with a `Completion`. Cancellable through the same registry as every other long operation.
+///
+/// **No row cap.** Stacer displayed `foundFiles.mid(1, 2000)` and said so in its label; a search that
+/// silently stops at a round number makes "is it in there?" unanswerable. A `limit` may be asked for,
+/// and when it bites the summary says `truncated`.
+///
+/// **Unprivileged.** Stacer ran `find` through `sudoExec` for roots outside `$HOME`, so looking for a
+/// file meant a password prompt and a root-privileged traversal. Searching is a read: this walks as
+/// the user and reports what it could not enter.
+#[tauri::command]
+pub(crate) fn search_start(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    query: search::Query,
+) -> OperationId {
+    let (id, token) = state.operations.start();
+
+    std::thread::spawn(move || {
+        let emitter = app.clone();
+        let outcome = search::run(&query, &token, move |batch| {
+            // A failed emit means the window is gone, which is a reason to stop walking rather than to
+            // keep filling a channel nobody is reading.
+            emitter
+                .emit(EVENT_SEARCH_HITS, &SearchBatch { id, hits: batch })
+                .is_ok()
+        });
+
+        let completion = match outcome {
+            Ok(summary) => {
+                let cancelled = summary.cancelled;
+                if let Err(e) = app.emit(EVENT_SEARCH_DONE, &SearchDone { id, summary }) {
+                    tracing::warn!(error = %e, "could not emit search summary");
+                }
+                if cancelled {
+                    Completion::Cancelled { id }
+                } else {
+                    Completion::Done { id }
+                }
+            }
+            Err(error) => Completion::Failed { id, error },
+        };
+        if let Err(e) = app.emit(EVENT_DONE, &completion) {
+            tracing::warn!(error = %e, "could not emit search completion");
+        }
+    });
+
+    id
+}
+
+/// A batch of search results, tagged with the operation that produced it.
+///
+/// Tagged because two searches can overlap — the user starts one, changes their mind, starts another —
+/// and results from the abandoned one must not appear in the new one's list.
+#[derive(Debug, Clone, Serialize)]
+struct SearchBatch {
+    id: OperationId,
+    hits: Vec<search::Hit>,
+}
+
+/// A finished search, with its counts.
+#[derive(Debug, Clone, Serialize)]
+struct SearchDone {
+    id: OperationId,
+    summary: search::Summary,
 }
 
 // ---- APT repositories. `PKG-5` ----

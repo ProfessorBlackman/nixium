@@ -12,6 +12,7 @@ authors.workspace = true
 workspace = true
 
 [features]
+regex = ["dep:regex"]
 default = []
 # systemd over D-Bus (`SVC-*`, decision D10). Gated so the privileged helper, which depends on this
 # crate, does not link a D-Bus stack it never uses — verified: a whole-workspace build puts zero `zbus`
@@ -31,6 +32,13 @@ tracing-appender = { workspace = true }
 ts-rs = { workspace = true }
 rustix = { workspace = true }
 rayon = { workspace = true }
+# Behind a feature for the same reason `zbus` is: `nix-helper` links this crate, and a regex engine has
+# no business in the binary that runs as root. Only `nix-app` enables it. See SPEC.md D10.
+regex = { version = "1", optional = true, default-features = false, features = [
+    "std",
+    "perf",
+    "unicode-case",
+] }
 
 [dev-dependencies]
 proptest = { workspace = true }

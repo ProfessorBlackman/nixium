@@ -49,7 +49,7 @@ type ViewDef = { id: ViewId; title: string; hint: string };
 const VIEWS: ViewDef[] = [
   { id: "overview", title: "Overview", hint: "Storage and system at a glance" },
   { id: "explorer", title: "Space explorer", hint: "Where your disk went" },
-  { id: "find", title: "Find", hint: "Largest files and duplicates" },
+  { id: "find", title: "Find", hint: "Largest files, duplicates and search" },
   { id: "trends", title: "Trends", hint: "What grew, and when" },
   { id: "processes", title: "Processes", hint: "What is running, and what it costs" },
   { id: "services", title: "Services", hint: "systemd units, timers and their logs" },

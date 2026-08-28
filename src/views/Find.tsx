@@ -15,15 +15,34 @@
  * It promises no false positives, which is why it finishes with a byte-for-byte comparison rather
  * than trusting a hash — and why hard links are excluded, since two names for one inode share their
  * blocks and deleting a name frees nothing.
+ *
+ * # Search — `SYS-2`
+ *
+ * A third question: *where is this file?* Stacer built a `find` command line, and its "invert"
+ * checkbox appended `-invert` — which `find` has no predicate for, so it exited with a usage error and
+ * the search returned nothing at all, silently. Every filter here is code, and inversion is applied to
+ * the predicate result.
+ *
+ * Results **stream** and there is no row cap. Stacer displayed the first 2,000 and said so, which
+ * makes "is it in there?" unanswerable. It also ran `find` under `sudo` for roots outside `$HOME`;
+ * searching is a read, so this walks as the user and reports what it could not enter.
  */
 import { useCallback, useEffect, useState } from "react";
 
-import { formatBytes } from "../lib/format";
+import { formatBytes, formatCount } from "../lib/format";
 import {
   api,
   onDuplicatesDone,
+  onSearchDone,
+  onSearchHits,
   toAppError,
   type DuplicateReport,
+  type FileKind,
+  type Hit,
+  type NameMatch,
+  type OperationId,
+  type SearchQuery,
+  type SearchSummary,
   type SpaceEntry,
 } from "../lib/ipc";
 import { notify } from "../lib/notices";
@@ -180,6 +199,257 @@ export default function Find() {
           </>
         )}
       </div>
+      <SearchPanel />
     </section>
+  );
+}
+
+/** The default query: everything under the home directory, no filters. */
+function blankQuery(): SearchQuery {
+  return {
+    root: "",
+    name: "",
+    match_kind: "contains",
+    whole_path: false,
+    case_sensitive: false,
+    min_bytes: null,
+    max_bytes: null,
+    modified_after: null,
+    modified_before: null,
+    kind: null,
+    owner_uid: null,
+    mode_all_of: null,
+    empty_only: false,
+    invert: false,
+    cross_filesystems: false,
+    limit: null,
+  };
+}
+
+/** Kibibytes from a text field, or null for an empty one. */
+function bytesFrom(text: string): number | null {
+  const value = Number.parseFloat(text);
+  return Number.isFinite(value) && value >= 0 ? Math.round(value * 1024) : null;
+}
+
+function SearchPanel() {
+  const [root, setRoot] = useState("");
+  const [name, setName] = useState("");
+  const [matchKind, setMatchKind] = useState<NameMatch>("contains");
+  const [kind, setKind] = useState<FileKind | "">("");
+  const [minKib, setMinKib] = useState("");
+  const [maxKib, setMaxKib] = useState("");
+  const [invert, setInvert] = useState(false);
+  const [emptyOnly, setEmptyOnly] = useState(false);
+  const [caseSensitive, setCaseSensitive] = useState(false);
+
+  const [running, setRunning] = useState<OperationId | null>(null);
+  const [hits, setHits] = useState<Hit[]>([]);
+  const [summary, setSummary] = useState<SearchSummary | null>(null);
+
+  // Subscribed once, filtered by operation id — two searches can overlap when the user changes their
+  // mind, and the abandoned one's results must not appear in the new one's list.
+  useEffect(() => {
+    const hitsOff = onSearchHits((batch) => {
+      setRunning((current: OperationId | null) => {
+        if (current === batch.id) setHits((existing) => [...existing, ...batch.hits]);
+        return current;
+      });
+    });
+    const doneOff = onSearchDone((done) => {
+      setRunning((current: OperationId | null) => {
+        if (current === done.id) {
+          setSummary(done.summary);
+          return null;
+        }
+        return current;
+      });
+    });
+    return () => {
+      void hitsOff.then((off) => off());
+      void doneOff.then((off) => off());
+    };
+  }, []);
+
+  const start = useCallback(async () => {
+    if (root.trim() === "") {
+      notify.warning("Choose a folder to search in.");
+      return;
+    }
+    setHits([]);
+    setSummary(null);
+    try {
+      const query: SearchQuery = {
+        ...blankQuery(),
+        root: root.trim(),
+        name: name.trim(),
+        match_kind: matchKind,
+        case_sensitive: caseSensitive,
+        kind: kind === "" ? null : kind,
+        min_bytes: bytesFrom(minKib),
+        max_bytes: bytesFrom(maxKib),
+        empty_only: emptyOnly,
+        invert,
+      };
+      setRunning(await api.searchStart(query));
+    } catch (thrown) {
+      notify.error(toAppError(thrown));
+    }
+  }, [root, name, matchKind, caseSensitive, kind, minKib, maxKib, emptyOnly, invert]);
+
+  const stop = useCallback(async () => {
+    if (running === null) return;
+    try {
+      await api.operationCancel(running);
+    } catch (thrown) {
+      notify.error(toAppError(thrown));
+    }
+  }, [running]);
+
+  return (
+    <div className="card">
+      <h2>Search</h2>
+      <p className="muted">
+        Every filter here does what it says. Results arrive as they are found, and there is no cap on
+        how many.
+      </p>
+
+      <div className="search-form">
+        <label className="field">
+          <span>In folder</span>
+          <input
+            value={root}
+            placeholder="/home/you"
+            onChange={(e) => setRoot(e.target.value)}
+          />
+        </label>
+        <label className="field">
+          <span>Name</span>
+          <input
+            value={name}
+            placeholder="report, *.log, or a pattern"
+            onChange={(e) => setName(e.target.value)}
+          />
+          <small>Leave empty to match everything and filter by the rest.</small>
+        </label>
+        <label className="field">
+          <span>Match as</span>
+          <select value={matchKind} onChange={(e) => setMatchKind(e.target.value as NameMatch)}>
+            <option value="contains">contains</option>
+            <option value="glob">glob (* ? [abc])</option>
+            <option value="regex">regular expression</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>Type</span>
+          <select value={kind} onChange={(e) => setKind(e.target.value as FileKind | "")}>
+            <option value="">anything</option>
+            <option value="file">files</option>
+            <option value="directory">folders</option>
+            <option value="symlink">symlinks</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>At least (KiB)</span>
+          <input value={minKib} inputMode="decimal" onChange={(e) => setMinKib(e.target.value)} />
+        </label>
+        <label className="field">
+          <span>At most (KiB)</span>
+          <input value={maxKib} inputMode="decimal" onChange={(e) => setMaxKib(e.target.value)} />
+        </label>
+      </div>
+
+      <div className="row wrap">
+        <label className="field field-inline">
+          <input type="checkbox" checked={invert} onChange={(e) => setInvert(e.target.checked)} />
+          <span>Invert — everything that does not match</span>
+        </label>
+        <label className="field field-inline">
+          <input
+            type="checkbox"
+            checked={emptyOnly}
+            onChange={(e) => setEmptyOnly(e.target.checked)}
+          />
+          <span>Empty only</span>
+        </label>
+        <label className="field field-inline">
+          <input
+            type="checkbox"
+            checked={caseSensitive}
+            onChange={(e) => setCaseSensitive(e.target.checked)}
+          />
+          <span>Case sensitive</span>
+        </label>
+      </div>
+
+      <div className="row">
+        <button type="button" onClick={() => void start()} disabled={running !== null}>
+          {running !== null ? "Searching…" : "Search"}
+        </button>
+        {running !== null && (
+          <button type="button" onClick={() => void stop()}>
+            Stop
+          </button>
+        )}
+      </div>
+
+      {(hits.length > 0 || summary !== null) && (
+        <p className="muted">
+          {formatCount(hits.length)} found
+          {summary !== null && ` · ${formatCount(Number(summary.examined))} examined`}
+          {summary !== null && summary.unreadable > 0 && (
+            <>
+              {" · "}
+              <span className="search-partial">
+                {formatCount(Number(summary.unreadable))} folders could not be read, so this is not
+                the whole picture
+              </span>
+            </>
+          )}
+          {summary !== null && summary.truncated && " · stopped at the limit"}
+          {summary !== null && summary.cancelled && " · stopped"}
+        </p>
+      )}
+
+      {hits.length > 0 && (
+        <div className="search-scroll">
+          <table className="pkg-table">
+            <thead>
+              <tr>
+                <th scope="col">Path</th>
+                <th scope="col" className="pkg-num">
+                  Size
+                </th>
+                <th scope="col">Modified</th>
+              </tr>
+            </thead>
+            <tbody>
+              {hits.slice(0, 1000).map((hit) => (
+                <tr key={hit.path}>
+                  <td>
+                    <code className="search-path">{hit.path}</code>
+                    {hit.kind !== "file" && <span className="pkg-dep">{hit.kind}</span>}
+                  </td>
+                  <td className="pkg-num">
+                    {hit.kind === "directory" ? "—" : formatBytes(hit.bytes)}
+                  </td>
+                  <td className="pkg-date">
+                    {hit.modified === null
+                      ? "—"
+                      : new Date(hit.modified * 1000).toLocaleDateString()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {hits.length > 1000 && (
+        <p className="muted">
+          Showing the first 1,000 of {formatCount(hits.length)} found — all of them were searched
+          for and counted; this is only what is rendered.
+        </p>
+      )}
+    </div>
   );
 }

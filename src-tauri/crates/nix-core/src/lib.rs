@@ -66,6 +66,7 @@ pub mod process;
 pub mod protect;
 pub mod reclaim;
 pub mod scan;
+pub mod search;
 pub mod settings;
 pub mod signal;
 pub mod space;
@@ -192,16 +193,54 @@ mod tests {
         );
     }
 
-    /// The dependency rule from `docs/ARCHITECTURE.md`, asserted rather than trusted: this crate
-    /// must not reach for a GUI toolkit. If someone adds `tauri` to `nix-core`, this fails.
+    /// The dependency rule from `docs/ARCHITECTURE.md`, asserted rather than trusted: this crate must
+    /// not reach for a GUI toolkit. If someone adds `tauri` to `nix-core`, this fails.
+    ///
+    /// # Why this reads declarations rather than the whole file
+    ///
+    /// It used to be `manifest.contains(forbidden)` over the raw text, which includes **comments** —
+    /// so a comment explaining *why* a dependency is gated behind a feature only `nix-app` enables
+    /// tripped it. A guard that a comment can fail is a guard people route around by rewording
+    /// comments, which is strictly worse than no guard, because the next reader believes it.
+    ///
+    /// So the manifest is read as what it is: comments stripped, and only lines inside a dependency
+    /// table considered.
     #[test]
     fn core_has_no_gui_dependency() {
         let manifest = include_str!("../Cargo.toml");
+        let mut in_dependencies = false;
+        let mut declarations: Vec<&str> = Vec::new();
+
+        for line in manifest.lines() {
+            // Strip a trailing comment. No dependency line contains a `#`, so this is exact enough.
+            let code = line.split('#').next().unwrap_or_default().trim();
+            if code.is_empty() {
+                continue;
+            }
+
+            if let Some(table) = code.strip_prefix('[').and_then(|t| t.strip_suffix(']')) {
+                // `[dependencies]`, `[dev-dependencies]`, `[target.'…'.dependencies]`.
+                in_dependencies = table.ends_with("dependencies");
+                continue;
+            }
+            if in_dependencies {
+                declarations.push(code);
+            }
+        }
+
+        assert!(
+            !declarations.is_empty(),
+            "no dependency declarations were found, so this test is checking nothing"
+        );
+
         for forbidden in ["tauri", "gtk", "webkit", "nix-app"] {
-            assert!(
-                !manifest.contains(forbidden),
-                "nix-core must not depend on {forbidden} — see docs/ARCHITECTURE.md"
-            );
+            for declaration in &declarations {
+                assert!(
+                    !declaration.contains(forbidden),
+                    "nix-core must not depend on {forbidden} — see docs/ARCHITECTURE.md \
+                     (in: {declaration})"
+                );
+            }
         }
     }
 }
