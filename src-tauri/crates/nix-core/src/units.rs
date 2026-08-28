@@ -36,7 +36,11 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::error::{AppError, Cause, ErrorCode, Result};
+use crate::error::{AppError, ErrorCode, Result};
+// Only the D-Bus error mapping builds a `Cause`; importing it unconditionally warns in the feature-off
+// build, which is the configuration the privileged helper links.
+#[cfg(feature = "dbus")]
+use crate::error::Cause;
 
 /// Which systemd instance to talk to. `SVC-4`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -181,6 +185,7 @@ pub fn timestamp(raw: u64) -> Option<u64> {
 
 /// Seconds since the epoch, now.
 #[must_use]
+#[cfg(any(feature = "dbus", test))]
 pub(crate) fn now_unix() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -189,6 +194,7 @@ pub(crate) fn now_unix() -> i64 {
 
 /// Seconds since boot, from `/proc/uptime`.
 #[must_use]
+#[cfg(any(feature = "dbus", test))]
 pub(crate) fn uptime_seconds() -> Option<f64> {
     std::fs::read_to_string("/proc/uptime")
         .ok()?

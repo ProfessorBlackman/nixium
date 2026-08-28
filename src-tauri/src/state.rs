@@ -9,6 +9,7 @@ use std::time::Instant;
 use nix_core::error::Result;
 use nix_core::metrics::{Alerts, Pipeline, Subscription};
 use nix_core::op;
+use nix_core::pkg::store::MeasureStore;
 use nix_core::process::ProcessSampler;
 use nix_core::protect::Guard;
 use nix_core::reclaim::{Registry, Session};
@@ -57,6 +58,11 @@ pub(crate) struct AppState {
     /// there is no way to interrupt a blocking bus read cleanly. A flag rather than a handle, because
     /// there is nothing to hold.
     pub(crate) units_watching: Mutex<bool>,
+    /// Measured package sizes, loaded once and written back when one is taken. `PKG-1`.
+    ///
+    /// Held in state rather than reopened per call so a measurement is written once rather than after
+    /// a read-modify-write of the whole file for each package the user clicks.
+    pub(crate) measured: Mutex<MeasureStore>,
 }
 
 impl AppState {
@@ -88,6 +94,13 @@ impl AppState {
             alerts: Mutex::new(Alerts::new()),
             processes: Mutex::new((ProcessSampler::new(), None)),
             units_watching: Mutex::new(false),
+            // A cache that cannot be found is an empty cache, not a startup failure: the only cost is
+            // re-measuring, and the path it falls back to fails on save, which is where it is reported.
+            measured: Mutex::new(
+                MeasureStore::discover().unwrap_or_else(|_| {
+                    MeasureStore::at("/nonexistent/nix/measured-packages.json")
+                }),
+            ),
         }
     }
 

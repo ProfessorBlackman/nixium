@@ -238,6 +238,12 @@ they are the linker discarding unreached code. The shipped helper is still isola
 `cargo build -p nix-helper` puts zbus nowhere in its graph at all — but a `--workspace` build cannot
 demonstrate that, and the measurement had been taken there.
 
+**It paid for itself immediately.** The first `cargo build -p nix-core` after adding it reported three
+things the unified build cannot see: an unconditional `use crate::error::Cause` and two `pub(crate)`
+functions, all three used only by the D-Bus code and therefore dead in exactly the configuration the
+helper links. Warnings rather than errors, and invisible for as long as nothing compiled that
+configuration — which is the shape of every defect in this file that took hours instead of minutes.
+
 **Guard.** The feature-off run, in both `Makefile` and CI. Against
 [09-patterns.md §12](09-patterns.md), the entry that matters here is a different one: the fix was
 verified in the direction that would have caught the original mistake, by asking for one gated test

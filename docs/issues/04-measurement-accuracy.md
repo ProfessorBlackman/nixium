@@ -212,3 +212,96 @@ reading a D-Bus property changes nothing. The general lesson belongs with
 
 This is the defect §D10 predicted in the other direction. Choosing D-Bus was partly about not parsing
 text — and the failure still came from a string, just one in an attribute instead of in output.
+
+---
+
+## 9. `Installed-Size` is not a measurement, so "post-install growth" was never computable
+
+**Phase 5** · **Serious** · **Found by** measuring before building
+
+`PKG-1` was specified around a pair of numbers and the meaning of their difference. From `SPEC.md` §D2:
+
+> the gap between them *is* information: it is post-install growth
+
+The feature was going to show, per package, the manager's recorded size and a measured size, and label
+the difference growth. Before writing the walk, a throwaway script measured 40 real packages three ways:
+
+| | recorded | file contents | committed to disk |
+| --- | --- | --- | --- |
+| 40-package sample | 115.2 MB | **92.4 MB** (0.80×) | 198.9 MB (1.73×) |
+| `bash` | 1.91 MB | 1.59 MB | 1.59 MB |
+| `flat-remix-gtk` (30,547 files) | 96.3 MB | 76.1 MB | **181.3 MB** |
+
+The premise is wrong in a way that is not a rounding difference. Debian's `Installed-Size` is computed
+**at build time** from the packaging tree, with each file rounded up to a kibibyte and directories
+counted. It is an estimate of what installing will cost, not an observation of what is installed. So
+against file contents it reads systematically **high** — four packages in five appear to have shrunk —
+and against disk occupancy it reads **low**, badly so for anything made of small files.
+
+Had this shipped as designed, the growth column would have been `saturating_sub`, which renders every
+one of those overestimates as `0`. The feature would have reported *no growth anywhere*, on almost the
+entire inventory, and looked completely plausible doing it. There would have been nothing to notice.
+
+**Resolved** by changing which two numbers are reported. Both now come from the same `stat`:
+**apparent** bytes, the sum of the files' lengths, and **disk** bytes, from `st_blocks`. The second is
+what removing the package returns, and it is the one Stacer never had. The recorded figure is kept,
+still sorts the list, and its distance from the committed figure is reported **signed** — an
+overestimate and an exact match must not be the same display. `flat-remix-gtk` costs 2.4× its content
+in disk and 85 MB more than dpkg claims, which is a fact worth a column.
+
+Verified against `du -c --block-size=1` on the same file list before any of it was built on, because a
+headline number derived from my own arithmetic is not evidence.
+
+**Guard.** Seven tests on the walk — directories counted but never measured, no descent through a
+directory, symlinks contributing nothing, hard links once, missing paths raised rather than skipped,
+sparse files not underflowing — plus `a_manager_overestimate_is_reported_as_negative_not_as_agreement`,
+which is the specific defect the saturating version would have had, and one test against this machine
+asserting the property on whichever installed package has the most files.
+
+Against [09-patterns.md §3](09-patterns.md), which was written after `STO-18`'s premise turned out to
+be wrong: this is the second feature whose specification was falsified by a measurement that took ten
+minutes. The pattern is not "measure first" in the abstract — it is that **a specification which names
+a quantity has made a claim about the world**, and the cost of checking it is far below the cost of
+building on it.
+
+---
+
+## 10. A package name is not a package
+
+**Phase 5** · **Serious** · **Found by** running against this machine
+
+`Package` carried `name`, `version` and `manager`, and everything keyed on the name. Listing the real
+dpkg database while building `PKG-1`:
+
+```
+$ dpkg-query -W -f='${Package}\t${db:Status-Status}\n' | awk -F'\t' '$2=="installed"{print $1}' \
+    | sort | uniq -d | wc -l
+41
+```
+
+**41 names on this machine are installed twice** — once for `amd64`, once for `i386`. `libc6:amd64` is
+13.3 MB and `libc6:i386` is 12.2 MB, and to the inventory they were one package with two contradictory
+sizes, whichever arrived second winning.
+
+The consequences ranked from cosmetic to serious: two identical-looking rows; a measurement cache where
+one architecture's figure is served for the other; and a removal built on `apt-get remove libc6`, which
+is ambiguous for a `Multi-Arch: same` package and not the request the user made by clicking a row.
+
+**Resolved** by giving `Package` an `arch` and an identity. `id` is `name:arch`, which dpkg and apt both
+accept for **any** installed package — verified, including on non-multi-arch ones — so nothing needs a
+special case for whether qualification was necessary.
+
+It is a stored field rather than a method, and that was a second decision. Methods do not cross into
+TypeScript, which
+[02-rust-typescript-boundary.md §5](02-rust-typescript-boundary.md) is a defect from, and the
+alternative was the frontend rebuilding `name:arch` in its own language where it could drift from the
+Rust. So it is computed once, in `Package::new`, which is the only way to construct one.
+
+**Guard.** `identity_is_arch_qualified_where_the_manager_qualifies` for the rule, and
+`every_packages_stored_identity_matches_its_name_and_arch` against every package installed on this
+machine — the risk of a derived field being stored is that it disagrees with what it is derived from,
+so that is what gets checked. The parse fixture now carries both `libc6` rows, so the case is present
+in the golden file rather than only on machines that happen to have i386 libraries.
+
+Shipped code was not affected: the only name-keyed lookup in Phase 2 is the kernel grouping, and kernel
+packages are never `Multi-Arch: same`. Checked rather than assumed.

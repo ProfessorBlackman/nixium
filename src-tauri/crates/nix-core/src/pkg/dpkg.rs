@@ -19,11 +19,12 @@
 //! than *both*.
 
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 use crate::error::Result;
 use crate::space::Manager;
 
-use super::{Backend, Package, RemovalPreview, ResidualConfig, query};
+use super::{Backend, Measured, Package, RemovalPreview, ResidualConfig, measure_paths, query};
 
 /// Prefixes of the packages that make up a kernel, longest first so `linux-modules-extra-` is
 /// matched before `linux-modules-`.
@@ -193,10 +194,22 @@ pub fn removable_kernels(packages: &[Package], running: Option<&KernelVersion>) 
     sets
 }
 
-/// Parse `dpkg-query -W -f='${Package}\t${Version}\t${Installed-Size}\t${db:Status-Status}\t${db:Status-Want}\n'`.
+/// The query behind [`parse_installed`], kept next to the parser that depends on its field order.
+///
+/// `${binary:Summary}` is **last** on purpose. The parser splits on tabs positionally, and a summary
+/// is the one field whose content comes from a package maintainer rather than from dpkg; last means a
+/// stray tab in a description can only corrupt the description. Every one of the 2,658 rows on this
+/// machine has exactly seven fields, but that is a fact about this machine, not a guarantee.
+pub const INSTALLED_QUERY: &str = concat!(
+    "-f=${Package}\t${Architecture}\t${Version}\t${Installed-Size}\t",
+    "${db:Status-Status}\t${db:Status-Want}\t${binary:Summary}\n"
+);
+
+/// Parse the output of [`INSTALLED_QUERY`].
 ///
 /// `Installed-Size` is in **kibibytes**, which is the field's documented unit and an easy thousand-
-/// fold error to make.
+/// fold error to make. It is also a build-time estimate rather than a measurement — see the module
+/// documentation of [`crate::pkg`].
 #[must_use]
 pub fn parse_installed(output: &str) -> Vec<Package> {
     output
@@ -204,10 +217,14 @@ pub fn parse_installed(output: &str) -> Vec<Package> {
         .filter_map(|line| {
             let mut fields = line.split('\t');
             let name = fields.next()?.trim();
+            let arch = fields.next()?.trim();
             let version = fields.next()?.trim();
             let size = fields.next()?.trim();
             let status = fields.next()?.trim();
             let want = fields.next().unwrap_or("").trim();
+            // Everything left is the summary, rejoined: a maintainer's tab cannot shift a field it
+            // comes after.
+            let summary = fields.collect::<Vec<_>>().join(" ");
 
             // Only genuinely installed packages. `config-files` means removed-but-configured, which
             // is residual configuration and reported separately.
@@ -215,17 +232,64 @@ pub fn parse_installed(output: &str) -> Vec<Package> {
                 return None;
             }
 
-            Some(Package {
-                name: name.to_string(),
-                version: version.to_string(),
-                recorded_bytes: size.parse::<u64>().unwrap_or(0).saturating_mul(1024),
-                measured_bytes: None,
+            Some(Package::new(
+                name.to_string(),
+                arch.to_string(),
+                version.to_string(),
+                summary.trim().to_string(),
+                size.parse::<u64>().unwrap_or(0).saturating_mul(1024),
                 // `deinstall` means marked for removal; anything else that is installed and wanted
                 // counts as explicit for display purposes.
-                explicit: want == "install",
-                manager: Manager::Apt,
-            })
+                want == "install",
+                Manager::Apt,
+            ))
         })
+        .collect()
+}
+
+/// Where dpkg keeps its per-package metadata, including the file lists.
+const DPKG_INFO: &str = "/var/lib/dpkg/info";
+
+/// The `.list` file holding a package's file list, if one exists.
+///
+/// Multi-arch-`same` packages get an arch-qualified name (`libc6:amd64.list`), everything else gets a
+/// plain one (`bash.list`) — and which applies is not derivable from anything in the inventory query,
+/// so both are tried. All 2,417 installed packages on this machine resolve.
+fn list_file(info_dir: &Path, id: &str, name: &str) -> Option<PathBuf> {
+    let qualified = info_dir.join(format!("{id}.list"));
+    if qualified.is_file() {
+        return Some(qualified);
+    }
+    let plain = info_dir.join(format!("{name}.list"));
+    plain.is_file().then_some(plain)
+}
+
+/// Fill in [`Package::changed_at`] from each package's file-list mtime.
+///
+/// dpkg records no install date. The `.list` file is rewritten whenever the package's contents are
+/// unpacked, so its mtime is **the last install or upgrade** — which is a real, useful fact, and not
+/// the one the word "installed" would promise. One `stat` per package: 2,417 of them cost under
+/// 10 ms, so this is not worth making lazy.
+pub fn fill_changed_at(info_dir: &Path, packages: &mut [Package]) {
+    for pkg in packages {
+        pkg.changed_at = list_file(info_dir, &pkg.id, &pkg.name)
+            .and_then(|path| std::fs::metadata(path).ok())
+            .and_then(|meta| meta.modified().ok())
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|since| since.as_secs());
+    }
+}
+
+/// Parse a `.list` file, or `dpkg-query -L` output: one absolute path per line.
+///
+/// dpkg writes `/.` for the root directory, which is not a path worth measuring.
+#[must_use]
+pub fn parse_file_list(output: &str) -> Vec<PathBuf> {
+    output
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with('/') && *line != "/.")
+        .map(PathBuf::from)
         .collect()
 }
 
@@ -373,14 +437,10 @@ impl Backend for DpkgBackend {
     }
 
     fn installed(&self) -> Result<Vec<Package>> {
-        let output = query(
-            "dpkg-query",
-            &[
-                "-W",
-                "-f=${Package}\t${Version}\t${Installed-Size}\t${db:Status-Status}\t${db:Status-Want}\n",
-            ],
-        )?;
-        Ok(parse_installed(&output))
+        let output = query("dpkg-query", &["-W", INSTALLED_QUERY])?;
+        let mut packages = parse_installed(&output);
+        fill_changed_at(Path::new(DPKG_INFO), &mut packages);
+        Ok(packages)
     }
 
     fn residual_config(&self) -> Result<Vec<ResidualConfig>> {
@@ -419,6 +479,27 @@ impl Backend for DpkgBackend {
         let output = query("apt-get", &args)?;
         Ok(parse_removal_simulation(&output))
     }
+
+    fn measure(&self, id: &str) -> Result<Measured> {
+        // The `.list` file directly, not `dpkg-query -L`: same content, no subprocess (§P4), and it
+        // is the file whose mtime already gave us `changed_at`.
+        let name = id.split_once(':').map_or(id, |(name, _)| name);
+        let listing = match list_file(Path::new(DPKG_INFO), id, name) {
+            Some(path) => std::fs::read_to_string(&path).map_err(|e| {
+                crate::error::AppError::from_io(&e, "read a package's file list").with_path(&path)
+            })?,
+            None => {
+                return Err(crate::error::AppError::new(
+                    crate::error::ErrorCode::NotFound,
+                    format!("dpkg has no file list for {id}."),
+                )
+                .with_remedy("Check the package name, including its architecture suffix."));
+            }
+        };
+
+        let paths = parse_file_list(&listing);
+        Ok(measure_paths(paths.iter().map(PathBuf::as_path)))
+    }
 }
 
 #[cfg(test)]
@@ -430,21 +511,48 @@ mod tests {
     /// tests, and real output is the only fixture worth having: it contains the awkward cases —
     /// metapackages, `config-files` entries, a headers package with no flavour suffix — that
     /// invented samples never do.
+    /// Real `dpkg-query` output, captured from this machine, in the field order of
+    /// [`INSTALLED_QUERY`].
+    ///
+    /// The kernel names here are the real ones on purpose, and are the one place in the suite
+    /// where that is true — see `docs/issues/01-privilege-and-security.md` §5. These tests exercise
+    /// **version ordering** and the running-kernel rule, which a synthetic name cannot: comparing
+    /// `nix-test-not-a-real-kernel` against itself proves nothing. Nothing in this module
+    /// constructs an `Op`, a `Session` or an `Elevation`, so no name here can reach the helper;
+    /// the fixtures that *do* feed operations are synthetic without exception.
+    ///
+    /// `libc6` appears twice, for two architectures. That is not padding — 41 packages on this
+    /// machine are installed for both, and it is what makes a name-keyed inventory wrong.
+    /// Real `dpkg-query` output, captured from this machine, in the field order of
+    /// [`INSTALLED_QUERY`].
+    ///
+    /// The kernel names here are the real ones on purpose, and this is the one fixture in the suite
+    /// where that is true — see `docs/issues/01-privilege-and-security.md` §5. These tests exercise
+    /// **version ordering** and the running-kernel rule, and a synthetic name cannot: comparing
+    /// `nix-test-not-a-real-kernel` against itself proves nothing about which kernel is newer. What
+    /// makes that safe is a boundary rather than a convention — nothing in this module constructs an
+    /// `Op`, a `Session` or an `Elevation`, so no name here has a path to the helper, and the fixtures
+    /// that *do* feed operations are synthetic without exception.
+    ///
+    /// `libc6` appears twice, for two architectures. Not padding: 41 packages on this machine are
+    /// installed for both, and it is what makes a name-keyed inventory wrong.
     const REAL_DPKG_OUTPUT: &str = "\
-linux-headers-5.15.0-190\t5.15.0-190.200\t76518\tinstalled\tinstall
-linux-headers-5.15.0-190-generic\t5.15.0-190.200\t24696\tinstalled\tinstall
-linux-headers-6.8.0-136-generic\t6.8.0-136.136~22.04.1\t28744\tinstalled\tinstall
-linux-headers-6.8.0-138-generic\t6.8.0-138.138~22.04.1\t28745\tinstalled\tinstall
-linux-headers-generic\t5.15.0.190.169\t22\tinstalled\tinstall
-linux-headers-generic-hwe-22.04\t6.8.0-138.138~22.04.1\t24\tinstalled\tinstall
-linux-image-6.8.0-136-generic\t6.8.0-136.136~22.04.1\t14892\tinstalled\tinstall
-linux-image-6.8.0-138-generic\t6.8.0-138.138~22.04.1\t14893\tinstalled\tinstall
-linux-modules-6.8.0-136-generic\t6.8.0-136.136~22.04.1\t98304\tinstalled\tinstall
-linux-modules-6.8.0-138-generic\t6.8.0-138.138~22.04.1\t98310\tinstalled\tinstall
-linux-modules-extra-6.8.0-138-generic\t6.8.0-138.138~22.04.1\t221184\tinstalled\tinstall
-linux-image-5.15.0-130-generic\t5.15.0-130.140~20.04.1\t11337\tconfig-files\tdeinstall
-firefox\t1:1snap1-0ubuntu5\t228\tinstalled\tinstall
-bridge-utils\t1.7.1-1ubuntu2\t105\tconfig-files\tdeinstall
+linux-headers-5.15.0-190\tamd64\t5.15.0-190.200\t76518\tinstalled\tinstall\tHeader files related to Linux kernel version 5.15.0
+linux-headers-5.15.0-190-generic\tamd64\t5.15.0-190.200\t24696\tinstalled\tinstall\tLinux kernel headers for version 5.15.0 on 64 bit x86 SMP
+linux-headers-6.8.0-136-generic\tamd64\t6.8.0-136.136~22.04.1\t28744\tinstalled\tinstall\tLinux kernel headers for version 6.8.0 on 64 bit x86 SMP
+linux-headers-6.8.0-138-generic\tamd64\t6.8.0-138.138~22.04.1\t28745\tinstalled\tinstall\tLinux kernel headers for version 6.8.0 on 64 bit x86 SMP
+linux-headers-generic\tamd64\t5.15.0.190.169\t22\tinstalled\tinstall\tGeneric Linux kernel headers
+linux-headers-generic-hwe-22.04\tamd64\t6.8.0-138.138~22.04.1\t24\tinstalled\tinstall\tGeneric Linux kernel headers
+linux-image-6.8.0-136-generic\tamd64\t6.8.0-136.136~22.04.1\t14892\tinstalled\tinstall\tSigned kernel image generic
+linux-image-6.8.0-138-generic\tamd64\t6.8.0-138.138~22.04.1\t14893\tinstalled\tinstall\tSigned kernel image generic
+linux-modules-6.8.0-136-generic\tamd64\t6.8.0-136.136~22.04.1\t98304\tinstalled\tinstall\tLinux kernel extra modules for version 6.8.0 on 64 bit x86 SMP
+linux-modules-6.8.0-138-generic\tamd64\t6.8.0-138.138~22.04.1\t98310\tinstalled\tinstall\tLinux kernel extra modules for version 6.8.0 on 64 bit x86 SMP
+linux-modules-extra-6.8.0-138-generic\tamd64\t6.8.0-138.138~22.04.1\t221184\tinstalled\tinstall\tLinux kernel extra modules for version 6.8.0 on 64 bit x86 SMP
+linux-image-5.15.0-130-generic\tamd64\t5.15.0-130.140~20.04.1\t11337\tconfig-files\tdeinstall\tSigned kernel image generic
+firefox\tamd64\t1:1snap1-0ubuntu5\t228\tinstalled\tinstall\tTransitional package - firefox -> firefox snap
+bridge-utils\tamd64\t1.7.1-1ubuntu2\t105\tconfig-files\tdeinstall\tUtilities for configuring the Linux Ethernet bridge
+libc6\tamd64\t2.35-0ubuntu3.11\t13594\tinstalled\tinstall\tGNU C Library: Shared libraries
+libc6\ti386\t2.35-0ubuntu3.11\t12482\tinstalled\tinstall\tGNU C Library: Shared libraries
 ";
 
     /// The kernel this fixture is from.
@@ -468,8 +576,48 @@ bridge-utils\t1.7.1-1ubuntu2\t105\tconfig-files\tdeinstall
         assert_eq!(firefox.recorded_bytes, 228 * 1024);
         assert_eq!(firefox.manager, Manager::Apt);
         assert!(
-            firefox.measured_bytes.is_none(),
+            firefox.measured.is_none(),
             "nothing is measured until asked"
+        );
+        assert_eq!(firefox.arch, "amd64");
+        assert_eq!(
+            firefox.summary,
+            "Transitional package - firefox -> firefox snap"
+        );
+
+        // # Regression
+        //
+        // `Package` carried no architecture, so the 41 names this machine has installed for two
+        // architectures collapsed into indistinguishable rows — same name, different sizes, and
+        // whichever one a removal picked was luck.
+        let libc: Vec<&Package> = packages.iter().filter(|p| p.name == "libc6").collect();
+        assert_eq!(libc.len(), 2, "two architectures, two packages");
+        assert_ne!(
+            libc[0].id,
+            libc[1].id,
+            "and two identities: {:?}",
+            libc.iter().map(|p| &p.id).collect::<Vec<_>>()
+        );
+        assert_ne!(
+            libc[0].recorded_bytes, libc[1].recorded_bytes,
+            "they are not even the same size, so collapsing them loses real information"
+        );
+    }
+
+    /// A maintainer's description is the one field whose content dpkg does not control, so it goes
+    /// last and a tab inside it cannot shift the fields that matter.
+    #[test]
+    fn a_tab_inside_a_summary_cannot_corrupt_another_field() {
+        let line = "thing\tamd64\t1.0\t512\tinstalled\tinstall\ta summary\twith a tab\n";
+        let packages = parse_installed(line);
+
+        assert_eq!(packages.len(), 1);
+        assert_eq!(packages[0].name, "thing");
+        assert_eq!(packages[0].recorded_bytes, 512 * 1024);
+        assert!(packages[0].explicit);
+        assert_eq!(
+            packages[0].summary, "a summary with a tab",
+            "the stray tab is absorbed into the field it appeared in"
         );
     }
 
@@ -548,7 +696,8 @@ bridge-utils\t1.7.1-1ubuntu2\t105\tconfig-files\tdeinstall
 
     #[test]
     fn malformed_lines_are_skipped_rather_than_fatal() {
-        let output = "garbage\nname\tversion\n\nfirefox\t1.0\t100\tinstalled\tinstall\n";
+        let output =
+            "garbage\nname\tversion\n\nfirefox\tamd64\t1.0\t100\tinstalled\tinstall\tA browser\n";
         let packages = parse_installed(output);
         assert_eq!(packages.len(), 1);
         assert_eq!(packages[0].name, "firefox");

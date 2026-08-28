@@ -516,6 +516,34 @@ than to maintain:
 The reclaim harness (row 4) is the one that makes the whole product credible. Build it at 1.14, not
 at M9.
 
+### 9.1 The isolated pass, before 1.0 ships
+
+Everything in that table runs on the developer's own machine, and a growing set of paths cannot be
+verified there at all. The destructive privileged operations, the `cow` parsers for filesystems this
+machine does not have, the systemd timer install, `apt-get remove` against a real dpkg database, an
+edit to the real `/etc/hosts` — each is either unexercised or exercised only against a
+directly-spawned helper in tests.
+
+**Decision: they are validated in a throwaway VM once the first version is feature-complete, not
+before, and not on the developer's machine.** The `docs/issues/README.md` open-items table is the
+list; every row there marked unexercised is an item on that pass.
+
+The reasoning is not caution for its own sake. There is already one entry in the defect log —
+[`01-privilege-and-security.md §5`](issues/01-privilege-and-security.md) — where a unit test escalated
+through a cached polkit authorisation and removed a kernel package from this machine. The guards added
+after it are structural and hold, but they hold against the mistake that was already made. A
+destructive path that has never run as root will fail in some way nobody predicted, and the only
+question is what it takes down with it.
+
+What the isolated pass gives that no guard does: **a machine whose loss costs nothing**, so the
+verification can be the real thing — actually reclaim, actually remove, actually write — rather than a
+test that stops one step short of the part that matters. A snapshot before each operation makes each
+one repeatable, which is the other thing this machine cannot offer.
+
+Until that pass runs, the rule from `ARCHITECTURE.md` stands unchanged: **no destructive privileged
+path ships having never been exercised.** Anything still unexercised at the end of Phase 5 either gets
+the isolated pass or ships as an advisory, the way the ostree prune did.
+
 ---
 
 ## 10. Risk register

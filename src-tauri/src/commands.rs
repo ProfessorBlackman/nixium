@@ -28,9 +28,12 @@ use nix_core::error::{AppError, ErrorCode, Result};
 use nix_core::helper::{self, Op, OpResult};
 use nix_core::logging::{self, Diagnostics};
 use nix_core::op::{Completion, OperationId, Progress};
+use nix_core::pkg;
 use nix_core::protect::Refusal;
 use nix_core::reclaim::{Preview, Report, Ticket};
 use nix_core::settings::Settings;
+// `Manager` is `tauri::Manager` here, so the package manager enum is renamed rather than shadowing it.
+use nix_core::space::Manager as PkgManager;
 use nix_core::{detail, find, fs as nixfs, history, journal, metrics, process, scan, timer, units};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -340,6 +343,90 @@ pub(crate) fn unit_logs(
     after: Option<String>,
 ) -> Result<journal::Page> {
     journal::entries(scope, &unit, limit.unwrap_or(100), after.as_deref())
+}
+
+// ---- Installed software. `PKG-1` ----
+
+/// The installed-software inventory, with any measurements already taken. `PKG-1`.
+///
+/// Live every time rather than cached: the whole query costs 71 ms for 2,658 rows here, which is
+/// cheaper than any staleness rule would be to reason about. Only *measurements* are cached, keyed by
+/// version, so they cannot describe a package that has since been upgraded.
+///
+/// Every backend on the machine, not the first one found — the mistake that meant Stacer's users only
+/// ever saw one manager.
+#[tauri::command]
+pub(crate) fn packages_list(state: State<'_, AppState>) -> Result<Vec<pkg::Package>> {
+    let mut all = Vec::new();
+    let mut store = state.measured.lock().unwrap_or_else(|e| e.into_inner());
+
+    for backend in pkg::backends() {
+        let manager = backend.manager();
+        let mut packages = backend.installed()?;
+
+        // Attach what has already been measured, and forget entries for versions no longer installed
+        // so the store cannot grow one entry per upgrade forever.
+        let current: Vec<(String, String)> = packages
+            .iter()
+            .map(|p| (p.id.clone(), p.version.clone()))
+            .collect();
+        store.retain_current(manager, &current);
+
+        for package in &mut packages {
+            package.measured = store.get(manager, &package.id, &package.version);
+        }
+        all.extend(packages);
+    }
+
+    // Largest first: this is a storage tool, and the answer to "what is taking up room" should not
+    // need a click to reveal.
+    all.sort_unstable_by_key(|p| std::cmp::Reverse(p.display_bytes()));
+    Ok(all)
+}
+
+/// Walk one package's files and report what is really on disk. `PKG-1`, decision D2.
+///
+/// Deliberately per-package and on demand. Measuring the whole inventory means stat-ing every file
+/// dpkg knows about — several hundred thousand here — and the recorded figure is good enough to sort
+/// by, so this answers the question the user actually asks: *is this one as big as it claims?*
+///
+/// The result is **added to** the package, never substituted for the manager's own number. See
+/// `nix_core::pkg` for why the two are different metrics and why their difference is not "growth".
+#[tauri::command]
+pub(crate) fn package_measure(
+    state: State<'_, AppState>,
+    manager: PkgManager,
+    id: String,
+    version: String,
+) -> Result<pkg::Measured> {
+    let backends = pkg::backends();
+    let backend = backends
+        .iter()
+        .find(|b| b.manager() == manager)
+        .ok_or_else(|| AppError::unsupported(manager.name()))?;
+
+    let measured = backend.measure(&id)?;
+
+    let mut store = state.measured.lock().unwrap_or_else(|e| e.into_inner());
+    store.put(manager, &id, &version, measured);
+    // A cache that cannot be written is a missed optimisation, not a failed measurement: the figure is
+    // already in hand, so it is returned and the failure only logged.
+    if let Err(e) = store.save() {
+        tracing::warn!(error = %e, "could not persist a measured package size");
+    }
+
+    Ok(measured)
+}
+
+/// Configuration left behind by packages removed without `--purge`. `STO-9`, surfaced here too.
+#[tauri::command]
+pub(crate) fn packages_residual() -> Result<Vec<pkg::ResidualConfig>> {
+    let mut all = Vec::new();
+    for backend in pkg::backends() {
+        all.extend(backend.residual_config()?);
+    }
+    all.sort_unstable_by_key(|r| std::cmp::Reverse(r.bytes));
+    Ok(all)
 }
 
 // ---- The process table. `PRC-1`, `PRC-2` ----

@@ -749,7 +749,7 @@ as their own phase.*
 
 | ID | Feature | Pri |
 | --- | --- | --- |
-| PKG-1 | Installed software inventory | P0 |
+| PKG-1 | Installed software inventory | P0 — done |
 | PKG-2 | Removal with cascade preview | P0 |
 | PKG-3 | Multi-backend coverage | P1 |
 | PKG-4 | Startup applications | P1 |
@@ -763,11 +763,31 @@ install date, explicit-vs-dependency, sortable by size. Machine-readable queries
 round-tripped package names through a padded UI label.
 
 Size is reported **twice, deliberately** (D2): the package database figure by default, plus a
-per-row **Measure** action that walks the package's file list on disk (via the helper for system
-paths). Both are shown and labelled distinctly — "2.1 GB installed" vs "2.4 GB measured" — because
-the gap between them *is* information: it is post-install growth. Measured results are cached
-against the package version. *Accepts:* names are never derived from rendered text; the two
-figures are never conflated or silently substituted.
+per-row **Measure** action that walks the package's file list on disk. Both are shown and labelled
+distinctly, and measured results are cached against the package version. *Accepts:* names are never
+derived from rendered text; the two figures are never conflated or silently substituted.
+
+*Delivered, with the second figure changed.* The plan named the pair "recorded" and "measured" and read
+their difference as post-install growth. Measuring 40 real packages first showed that premise does not
+hold — `Installed-Size` is a **build-time estimate**, rounded per file and counting directories, so file
+contents sum to **0.80×** the recorded figure and four packages in five look like they *shrank*. The
+pair now reported is content bytes and **committed** bytes, both measured from the same `stat`:
+
+| | `flat-remix-gtk`, 30,547 files |
+| --- | --- |
+| Files contain | 76.1 MB |
+| dpkg records | 96.3 MB |
+| **Disk actually committed** | **181.3 MB** |
+
+Only the last figure answers "what do I get back if I remove this", and it is 85 MB more than the
+package manager's own number. Verified against `du` before anything was built on it. The recorded
+figure is still shown and still sorts the list, and the difference is reported **signed** — an
+overestimate and an exact match must not look alike.
+
+Identity is arch-qualified (`libc6:amd64`), because 41 package names on this machine are installed for
+two architectures at once with different sizes, and a bare name is not an identity. Install dates are
+labelled **"last updated"**, since dpkg keeps no install date and the figure is the file list's mtime,
+which an upgrade rewrites.
 
 **PKG-2 Removal with cascade preview.** Show exactly what else goes (`apt-get -s remove`,
 `dnf remove --assumeno`, `pacman -Rp`), require confirmation, report per-package results.
@@ -933,7 +953,7 @@ more than the answers do.
 | # | Question | Decision | Why |
 | --- | --- | --- | --- |
 | **D1** | Privileged helper in Phase 0, or Phase 1 read-only first? | **Phase 0.** | More work up front, but avoids building a throwaway escalation path — and it removes the main argument for PackageKit (D4). |
-| **D2** | Installed package size — database, or on-disk measurement? | **Both, explicitly.** DB figure by default, per-row *Measure* action for the on-disk walk. | The gap between them is post-install growth, which is information. Never conflate or silently substitute the two. |
+| **D2** | Installed package size — database, or on-disk measurement? | **Both, explicitly** — DB figure by default, per-row *Measure* action for the walk. Which two figures, **revised on measurement**: see below. | Never conflate or silently substitute them. The original reading of the gap as post-install growth was wrong, and the corrected pair is more useful. |
 | **D3** | btrfs depth in v1 — report-only, or snapshot-aware reclaim? | **Report-aware, reclaim-naive, never dishonest.** STO-17 raised to **P0**. | Fedora is Tier 1 and btrfs by default, so `statvfs` numbers are already wrong there. Where exclusivity can't be proven, suppress the estimate instead of faking it. Snapshot deletion → backlog. |
 | **D4** | PackageKit, or per-manager implementations? | **Per-manager, behind a common trait.** | It hides exactly the detail we need, two of six backends bypass it, coverage is uneven — and D1 already bought us polkit integration. |
 | **D5** | Growth history — session timer, or systemd user timer? | **Opt-in systemd user timer**, with session-timer collection as the fallback tier. | On a session timer the series is one sample every few weeks, so the feature ships, works, and never produces a useful reading. A bounded periodic one-shot is not the resident daemon the non-goal protects against. Flatpak and non-systemd systems need the fallback regardless. |

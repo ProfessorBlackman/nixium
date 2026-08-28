@@ -37,6 +37,10 @@ import type { Page } from "../bindings/Page";
 import type { Scope } from "../bindings/Scope";
 import type { Timer } from "../bindings/Timer";
 import type { Unit } from "../bindings/Unit";
+import type { Package } from "../bindings/Package";
+import type { Measured } from "../bindings/Measured";
+import type { Manager } from "../bindings/Manager";
+import type { ResidualConfig } from "../bindings/ResidualConfig";
 import type { UnitFile } from "../bindings/UnitFile";
 import type { Process } from "../bindings/Process";
 import type { TreeNode } from "../bindings/TreeNode";
@@ -49,7 +53,7 @@ import type { Series } from "../bindings/Series";
 import type { State as TimerState } from "../bindings/State";
 import type { SpaceEntry } from "../bindings/SpaceEntry";
 
-export type { Action, AppError, CachedScan, Completion, Diagnostics, DuplicateReport, Filesystem, GrowthReport, Detail, Metric, Preview, PreviewItem, Process, ProcessState, Progress, Reading, Refusal, Report, Rule, Sample, ScanResult, Series, Settings, Page, Scope, Signal, SpaceEntry, Ticket, Timer, TimerState, TreeNode, Unit, UnitFile };
+export type { Action, AppError, CachedScan, Completion, Diagnostics, DuplicateReport, Filesystem, GrowthReport, Detail, Metric, Preview, PreviewItem, Process, ProcessState, Progress, Reading, Refusal, Report, Rule, Sample, ScanResult, Series, Settings, Page, Scope, Signal, SpaceEntry, Ticket, Timer, TimerState, TreeNode, Unit, UnitFile, Package, Measured, Manager, ResidualConfig };
 export type { Capabilities };
 export type { CowSnapshot };
 export type { CowKind } from "../bindings/CowKind";
@@ -150,6 +154,10 @@ export const api = {
   unitAct: (scope: Scope, unit: string, action: Action) =>
     call<void>("unit_act", { scope, unit, action }),
   unitsWatch: () => call<void>("units_watch"),
+  packagesList: () => call<Package[]>("packages_list"),
+  packageMeasure: (manager: Manager, id: string, version: string) =>
+    call<Measured>("package_measure", { manager, id, version }),
+  packagesResidual: () => call<ResidualConfig[]>("packages_residual"),
   unitLogs: (scope: Scope, unit: string, limit?: number, after?: string) =>
     call<Page>("unit_logs", { scope, unit, limit: limit ?? null, after: after ?? null }),
   processesList: () => call<Process[]>("processes_list"),

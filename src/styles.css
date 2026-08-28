@@ -1553,3 +1553,103 @@ button.danger:hover:not(:disabled) {
 .log-list li.is-problem .log-message {
   color: var(--risky);
 }
+
+/* Installed software (PKG-1).
+   Two size columns side by side, because the point of the view is that they differ. Tabular figures
+   so the digits line up down the column — a size table where they do not is unreadable at a glance. */
+.pkg-scroll {
+  max-height: 28rem;
+  overflow: auto;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  margin-top: 0.6rem;
+}
+
+.pkg-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.pkg-table th,
+.pkg-table td {
+  text-align: left;
+  padding: 0.35rem 0.55rem;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: top;
+}
+
+.pkg-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pkg-table tbody tr {
+  cursor: pointer;
+}
+
+.pkg-table tbody tr:hover {
+  background: var(--surface-alt);
+}
+
+.pkg-table tbody tr.is-selected {
+  background: var(--accent-soft);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.pkg-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pkg-id {
+  font-family: var(--font-mono);
+}
+
+.pkg-version {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.pkg-summary {
+  font-size: 0.75rem;
+  margin-top: 0.1rem;
+}
+
+.pkg-date {
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+/* Dependency, not something the user chose. Quiet: it is context, not a warning. */
+.pkg-dep {
+  margin-left: 0.4rem;
+  padding: 0 0.3rem;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  font-size: 0.6875rem;
+  color: var(--ink-mute);
+  vertical-align: 0.05rem;
+}
+
+.pkg-pairs {
+  display: grid;
+  grid-template-columns: minmax(0, 12rem) minmax(0, 1fr);
+  gap: 0.3rem 0.9rem;
+  margin: 0.6rem 0 0;
+  font-size: 0.8125rem;
+}
+
+.pkg-pairs dt {
+  color: var(--ink-mute);
+}
+
+.pkg-pairs dd {
+  margin: 0;
+}
