@@ -91,6 +91,9 @@ pub struct Settings {
     /// Opt-in periodic collection of category totals (`STO-16`). Off by default: it installs a
     /// systemd user timer, which is a change to the user's system.
     pub growth_history_enabled: bool,
+    /// Threshold alerts (`MON-6`). Empty by default: a monitoring tool that starts notifying about
+    /// thresholds nobody chose is one whose notifications get switched off wholesale.
+    pub alert_rules: Vec<crate::metrics::Rule>,
 }
 
 impl Default for Settings {
@@ -103,6 +106,7 @@ impl Default for Settings {
             protected_paths: Vec::new(),
             show_pseudo_filesystems: false,
             growth_history_enabled: false,
+            alert_rules: Vec::new(),
         }
     }
 }

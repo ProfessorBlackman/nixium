@@ -24,15 +24,21 @@
 //! empty axis on each navigation, so the ring buffers are backend-side and a subscriber is handed the
 //! whole window on its first read.
 
+mod alerts;
 mod cpu;
 mod disk;
 mod memory;
 mod net;
+mod power;
+mod sensors;
 
+pub use alerts::{Alerts, Metric, Outcome, Rule};
 pub use cpu::{CpuReading, CpuTimes};
 pub use disk::{DiskReading, DiskTotals};
 pub use memory::{MemoryReading, sample as memory_sample};
 pub use net::{InterfaceReading, NetReading};
+pub use power::{Battery, ChargeState, PowerReading, sample as power_sample};
+pub use sensors::{Fan, SensorReading, Temperature, sample as sensors_sample};
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -155,6 +161,10 @@ pub struct Reading {
     pub load: LoadReading,
     pub disk: DiskReading,
     pub network: NetReading,
+    /// `MON-4`. Empty on hardware with no sensors, which is a real answer.
+    pub sensors: SensorReading,
+    /// `MON-5`. No batteries on a desktop, and the panel is hidden rather than shown empty.
+    pub power: PowerReading,
 }
 
 /// Owns every sampler, ticks them together, and keeps the history.
@@ -187,6 +197,31 @@ struct Shared {
     observer: Mutex<Option<Observer>>,
 }
 
+/// Ticks between sensor readings.
+///
+/// Reading temperatures is **slow, and slow in the kernel rather than in this code**. Measured per
+/// chip on this machine:
+///
+/// | Chip | One pass |
+/// | --- | --- |
+/// | `nvme` | 14.2 ms |
+/// | `acpitz` | 11.6 ms |
+/// | `coretemp` | 1.8 ms |
+/// | `pch_cannonlake` | 1.6 ms |
+///
+/// The two slow ones are not slow because of anything here: an NVMe temperature is an admin command
+/// to the drive, and an ACPI thermal zone is an AML method the kernel evaluates on each read. Seventeen
+/// sensors across eight chips comes to about **32 ms of wall time** for one complete pass.
+///
+/// It is mostly *blocked* rather than burning CPU, which is why sampling everything every second still
+/// measured 0.83% of one core against a 1% budget. But a thread blocked for 32 ms is a thread not doing
+/// anything else, so this reads them every few seconds and carries the value between — which is honest
+/// for a level, and would not be for a rate.
+const SENSOR_EVERY: u64 = 5;
+
+/// Ticks between power readings. A battery percentage does not move in half a minute.
+const POWER_EVERY: u64 = 30;
+
 struct State {
     cpu: cpu::CpuSampler,
     disk: disk::DiskSampler,
@@ -194,6 +229,11 @@ struct State {
     history: Ring<Reading>,
     subscribers: usize,
     last_tick: Option<Instant>,
+    /// Ticks taken since sampling started, so the slow families know when their turn is.
+    ticks: u64,
+    /// Carried between ticks, so a reading always has a value rather than gaps between refreshes.
+    sensors: SensorReading,
+    power: PowerReading,
 }
 
 impl State {
@@ -205,6 +245,9 @@ impl State {
             history: Ring::new(HISTORY),
             subscribers: 0,
             last_tick: None,
+            ticks: 0,
+            sensors: SensorReading::default(),
+            power: PowerReading::default(),
         }
     }
 
@@ -215,6 +258,9 @@ impl State {
         self.net = net::NetSampler::new();
         self.history.clear();
         self.last_tick = None;
+        self.ticks = 0;
+        self.sensors = SensorReading::default();
+        self.power = PowerReading::default();
     }
 }
 
@@ -340,8 +386,9 @@ impl Pipeline {
     /// Take one reading immediately, outside the tick. For tests.
     #[cfg(test)]
     fn tick_once(&self) {
+        let (sensors, power) = (sensors::sample(), power::sample());
         if let Ok(mut state) = self.shared.state.lock() {
-            tick(&mut state);
+            tick(&mut state, Some(sensors), Some(power));
         }
     }
 }
@@ -354,11 +401,33 @@ impl Drop for Pipeline {
 }
 
 /// One sample of every family, appended to the history. Returns it, when there was one.
-fn tick(state: &mut State) -> Option<Reading> {
+///
+/// `slow` carries sensors and power when they were due this tick. They are sampled by the caller,
+/// **outside the state lock**, because a complete sensor pass blocks for about 32 ms on this hardware
+/// and holding the lock across that would stall a subscriber joining or leaving for the same time.
+fn tick(
+    state: &mut State,
+    sensors: Option<SensorReading>,
+    power: Option<PowerReading>,
+) -> Option<Reading> {
     let elapsed = state
         .last_tick
         .map_or(TICK, |previous| previous.elapsed().max(TICK / 10));
     state.last_tick = Some(Instant::now());
+
+    // Stored **before** the early return below. A sensor reading is valid whether or not the CPU had a
+    // delta this tick, and discarding it here meant the very first sensor sample — taken on tick zero,
+    // the one tick that never produces a reading — was thrown away, leaving the panel empty until the
+    // next refresh five seconds later.
+    //
+    // Each family independently, so a tick where only power was due does not wipe the sensors carried
+    // forward, which is what passing a pair and defaulting the absent half would do.
+    if let Some(sensors) = sensors {
+        state.sensors = sensors;
+    }
+    if let Some(power) = power {
+        state.power = power;
+    }
 
     // Each sampler returns `None` until it has a delta, so a first tick produces nothing rather than
     // a reading built from lifetime averages.
@@ -369,6 +438,8 @@ fn tick(state: &mut State) -> Option<Reading> {
         .ok()
         .and_then(|text| parse_loadavg(&text))
         .unwrap_or_default();
+
+    state.ticks += 1;
 
     let at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -381,6 +452,8 @@ fn tick(state: &mut State) -> Option<Reading> {
         load,
         disk: state.disk.sample(elapsed).unwrap_or_default(),
         network: state.net.sample(elapsed).unwrap_or_default(),
+        sensors: state.sensors.clone(),
+        power: state.power.clone(),
     };
     state.history.push(reading.clone());
     Some(reading)
@@ -409,7 +482,19 @@ fn run(shared: &Arc<Shared>) {
             return;
         }
 
-        let fresh = tick(&mut state);
+        // Whether the slow families are due, decided under the lock but sampled outside it.
+        let ticks = state.ticks;
+        let sensors_due = ticks % SENSOR_EVERY == 0;
+        let power_due = ticks % POWER_EVERY == 0;
+        drop(state);
+
+        let sensors = sensors_due.then(sensors::sample);
+        let power = power_due.then(power::sample);
+
+        let Ok(mut state) = shared.state.lock() else {
+            return;
+        };
+        let fresh = tick(&mut state, sensors, power);
         drop(state);
 
         // Outside the state lock: an observer that blocks — an IPC channel with a slow reader — must
@@ -466,6 +551,62 @@ mod tests {
     }
 
     // ---- the pipeline ----
+
+    /// # Regression
+    ///
+    /// Sensors and power refresh on different cadences — every five ticks and every thirty. The first
+    /// version passed both as one pair and defaulted the half that was not due, so a tick where only
+    /// power refreshed **wiped the temperatures** that had been carried forward, and the sensor panel
+    /// blanked every thirty seconds.
+    #[test]
+    fn refreshing_one_slow_family_does_not_wipe_the_other() {
+        let pipeline = Pipeline::without_worker();
+        let _subscription = pipeline.subscribe();
+
+        let sensors = SensorReading {
+            temperatures: vec![Temperature {
+                chip: "coretemp".into(),
+                label: "Package id 0".into(),
+                celsius: 60.0,
+                high_celsius: None,
+                critical_celsius: Some(100.0),
+            }],
+            fans: Vec::new(),
+        };
+        let power = PowerReading {
+            on_mains: Some(true),
+            batteries: Vec::new(),
+        };
+
+        {
+            let mut state = pipeline.shared.state.lock().unwrap();
+            // Prime both, then two ticks so there is a CPU delta and a reading to inspect.
+            tick(&mut state, Some(sensors.clone()), Some(power.clone()));
+            tick(&mut state, None, None);
+        }
+
+        let reading = pipeline
+            .latest()
+            .expect("two ticks produce a reading; an early return here would pass silently");
+        assert_eq!(
+            reading.sensors.temperatures.len(),
+            1,
+            "a tick that refreshed neither must carry both forward"
+        );
+        assert_eq!(reading.power.on_mains, Some(true));
+
+        // And a tick refreshing only power must leave the sensors alone.
+        {
+            let mut state = pipeline.shared.state.lock().unwrap();
+            tick(&mut state, None, Some(power));
+        }
+        let reading = pipeline.latest().unwrap();
+        assert_eq!(
+            reading.sensors.temperatures.len(),
+            1,
+            "the sensor panel must not blank every thirtieth second"
+        );
+    }
 
     /// §P9: nothing samples until a view is mounted.
     #[test]

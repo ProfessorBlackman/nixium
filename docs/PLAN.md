@@ -17,8 +17,9 @@ followed — is in [issues/](issues/README.md).
 | **M3** First safe reclaim (tasks 1.7–1.10) | **complete** |
 | **M4** Storage core complete (tasks 1.11–1.14) — **Phase 1 done** | **complete** |
 | **M5** Storage depth (Phase 2) — **Phase 2 done** | **complete** |
-| M6 Monitoring (Phase 3) | **in progress** — MON-1 done; MON-2 – MON-7 remain |
-| M7 – M9 | not started |
+| **M6** Monitoring (Phase 3) — **Phase 3 done** | **complete** |
+| M7 Processes & services (Phase 4) | not started — **next** |
+| M8 – M9 | not started |
 
 Phase 0 shipped all eleven tasks: the three-crate workspace and quality gates, the error taxonomy,
 the IPC contract with its progress/cancellation primitive, the app shell with lazily-mounted views,

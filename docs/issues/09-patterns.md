@@ -1,6 +1,6 @@
 # What generalises
 
-Forty-nine entries is enough to see structure. This is the part worth re-reading.
+Fifty-one entries is enough to see structure. This is the part worth re-reading.
 
 ---
 
@@ -190,7 +190,7 @@ Thursday.
 
 ## 10. Encode the guard in the toolchain, not in memory
 
-Ten of forty-nine entries were caught by a gate. Those cost minutes. The ones that cost hours were
+Eleven of fifty-one entries were caught by a gate. Those cost minutes. The ones that cost hours were
 caught by reasoning, and the two worst were nearly not caught at all.
 
 Gates currently in force:

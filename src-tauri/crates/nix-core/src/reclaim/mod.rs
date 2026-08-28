@@ -355,6 +355,20 @@ impl Session {
         Self::default()
     }
 
+    /// The last preview's headline figures, if one has been computed this session.
+    ///
+    /// Exists so the dashboard can lead with "X reclaimable" **without running a preview on mount**,
+    /// which `MON-2` forbids: a dashboard that scans when you look at it is a dashboard you avoid
+    /// looking at. `None` until something has actually asked, and the caller says when.
+    #[must_use]
+    pub fn last_preview(&self) -> Option<(u64, u64)> {
+        self.outstanding
+            .lock()
+            .ok()?
+            .as_ref()
+            .map(|preview| (preview.total_bytes, preview.promisable_bytes))
+    }
+
     /// Compute what would happen, and hold it for execution.
     pub fn preview(
         &self,

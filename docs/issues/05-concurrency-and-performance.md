@@ -307,7 +307,64 @@ uses directories.
 
 ---
 
-## 10. Test fixtures caused an I/O storm
+## 10. Reading temperatures is slow, in the kernel
+
+**M6 / MON-1** · **Moderate** · **Found by** the CPU budget getting close to its limit
+
+Adding sensors and power to each tick took the pipeline from **0.167% of one core to 0.83%**, against
+a 1% budget. Measured per chip on this machine:
+
+| Chip | One pass |
+| --- | --- |
+| `nvme` | 14.2 ms |
+| `acpitz` | 11.6 ms |
+| `coretemp` | 1.8 ms |
+| `pch_cannonlake` | 1.6 ms |
+
+Neither slow one is slow because of anything in this code. An NVMe temperature is an **admin command
+to the drive**; an ACPI thermal zone is an **AML method the kernel evaluates on every read**.
+Seventeen sensors across eight chips is about 32 ms of wall time for a complete pass.
+
+It is mostly *blocked* rather than burning CPU — which is why the CPU figure was 0.83% and not 3% —
+but a thread blocked for 32 ms is a thread doing nothing else, and it was holding the state lock
+while it did so.
+
+**Resolved** on both counts: the slow families refresh on their own cadence (5 s for sensors, 30 s for
+power) and are sampled **outside the state lock**, so a subscriber joining or leaving is never delayed
+by an ACPI call. Back to **0.58% of one core**. Carrying a value between refreshes is honest here
+because these report *levels* — a temperature five seconds old is still a true temperature, which
+would not be so for a rate.
+
+**Guard.** The budget itself, and the measurements written into the constants' documentation so the
+cadence reads as a decision rather than an arbitrary number.
+
+---
+
+## 11. Two slow families on different cadences, and one wiped the other
+
+**M6 / MON-1** · **Moderate** · **Found by** writing the test for the cadence
+
+Sensors refresh every fifth tick and power every thirtieth. The first implementation passed both to
+the tick as one pair, defaulting whichever was not due — so **every thirtieth tick, when power
+refreshed and sensors did not, the temperatures were wiped** and the panel blanked.
+
+**Resolved** by passing each family as its own `Option`, so a tick refreshes what is due and leaves the
+rest alone.
+
+Writing the guard for that then found a second one in the same function. The carried values were
+stored *after* the early return that fires when the CPU has no delta yet — and tick zero, the one tick
+that never produces a reading, is exactly the tick on which the first sensor sample is taken. So the
+first reading was thrown away and the panel stayed empty for five seconds after every start. Both are
+fixed by storing the carried values before the early return, since a sensor reading is valid whether
+or not the CPU had a delta.
+
+**Guard.** `refreshing_one_slow_family_does_not_wipe_the_other`, **verified to fire**. It originally
+ended with `let Some(reading) = pipeline.latest() else { return }` — an escape that would have let it
+pass silently on any machine where the reading was absent. Now it `expect`s, with a message saying so.
+
+---
+
+## 12. Test fixtures caused an I/O storm
 
 **M2** · **Friction** · **Found by** the diagnosis above
 
@@ -323,7 +380,7 @@ a correctness test does not need a performance fixture.
 
 ---
 
-## 11. Fixture temporary directories collided between parallel tests
+## 13. Fixture temporary directories collided between parallel tests
 
 **Phase 0** · **Moderate** · **Found by** intermittent test failures
 

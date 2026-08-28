@@ -6,7 +6,7 @@
 use std::sync::Mutex;
 
 use nix_core::error::Result;
-use nix_core::metrics::{Pipeline, Subscription};
+use nix_core::metrics::{Alerts, Pipeline, Subscription};
 use nix_core::op;
 use nix_core::protect::Guard;
 use nix_core::reclaim::{Registry, Session};
@@ -36,6 +36,12 @@ pub(crate) struct AppState {
     /// Dropping it is what pauses sampling, so this is `None` whenever no view wants metrics — the
     /// state and the behaviour cannot drift apart, because the state *is* the behaviour.
     pub(crate) metrics_subscription: Mutex<Option<Subscription>>,
+    /// Firing state for the threshold alerts (`MON-6`).
+    ///
+    /// Held here rather than in the frontend because hysteresis and cooldown are *memory*: a rule
+    /// that forgets it already fired notifies every second, which is the behaviour the whole design
+    /// exists to prevent.
+    pub(crate) alerts: Mutex<Alerts>,
 }
 
 impl AppState {
@@ -64,6 +70,7 @@ impl AppState {
             startup_warning: Mutex::new(warning),
             metrics: Pipeline::new(),
             metrics_subscription: Mutex::new(None),
+            alerts: Mutex::new(Alerts::new()),
         }
     }
 

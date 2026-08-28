@@ -43,7 +43,7 @@ pub(crate) struct NetCounters {
     pub tx_bytes: u64,
 }
 
-/// One interface's throughput over the last interval.
+/// One interface's throughput and link state over the last interval.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct InterfaceReading {
@@ -54,6 +54,37 @@ pub struct InterfaceReading {
     pub sent_per_second: u64,
     /// Backed by hardware. Only these are summed into the totals.
     pub physical: bool,
+    /// `up`, `down` or `unknown` — the kernel's own word. `MON-7`.
+    pub operstate: String,
+    /// Whether a cable or association is actually present, which is not the same as being `up`.
+    pub carrier: bool,
+    /// Link speed in megabits, where the driver reports one. Wireless drivers generally do not, and
+    /// that is `None` rather than a link running at 0 Mb/s.
+    #[ts(type = "number | null")]
+    pub speed_mbps: Option<u32>,
+    pub mac: Option<String>,
+    #[ts(type = "number | null")]
+    pub mtu: Option<u32>,
+    /// IPv6 addresses, from `/proc/net/if_inet6`.
+    ///
+    /// **IPv4 is deliberately absent.** There is no per-interface IPv4 address anywhere in `sysfs` or
+    /// `procfs`. Getting one means `getifaddrs` or an `rtnetlink` conversation — the first needs
+    /// `libc`, the second hand-built netlink messages, and so either `unsafe` or a new dependency in a
+    /// program that ships privileged code. Showing what is genuinely available and naming what is
+    /// missing beats quietly presenting an incomplete list called "addresses".
+    pub ipv6: Vec<String>,
+}
+
+impl InterfaceReading {
+    /// Whether this interface is actually carrying traffic — up, with a link.
+    ///
+    /// What `MON-7` uses to decide which interface to feature, **re-evaluated every tick**. Stacer
+    /// picked the first non-loopback interface once at startup and never looked again: unplug the
+    /// Ethernet, join Wi-Fi, and it charted a dead interface until restarted.
+    #[must_use]
+    pub fn is_active(&self) -> bool {
+        self.carrier && self.operstate != "down"
+    }
 }
 
 /// What the UI is given for one tick.
@@ -67,6 +98,70 @@ pub struct NetReading {
     pub sent_per_second: u64,
     /// Every interface, physical or not, biggest first.
     pub interfaces: Vec<InterfaceReading>,
+}
+
+impl NetReading {
+    /// The interface worth featuring: hardware, with a link, carrying the most traffic. `MON-7`.
+    ///
+    /// Chosen from **this** reading rather than remembered, which is the whole of the acceptance
+    /// criterion — unplug the Ethernet and join Wi-Fi and the answer changes on the next tick.
+    ///
+    /// Physical is part of the test because virtual interfaces are almost always "active": on this
+    /// machine twenty-nine of thirty-one report a carrier and an `up` state, so activity alone picks
+    /// a Docker `veth` at random.
+    #[must_use]
+    pub fn featured(&self) -> Option<&InterfaceReading> {
+        self.interfaces
+            .iter()
+            .filter(|i| i.physical && i.is_active())
+            .max_by_key(|i| i.received_per_second.saturating_add(i.sent_per_second))
+    }
+}
+
+/// Link details read alongside the counters.
+#[derive(Debug, Clone, Default)]
+struct Link {
+    physical: bool,
+    operstate: String,
+    carrier: bool,
+    speed_mbps: Option<u32>,
+    mac: Option<String>,
+    mtu: Option<u32>,
+    ipv6: Vec<String>,
+}
+
+/// Parse `/proc/net/if_inet6` into per-interface IPv6 addresses.
+///
+/// Each line is a 32-character hex address, then index, prefix length, scope, flags, and the
+/// interface name:
+///
+/// ```text
+/// fe80000000000000a71e535bf81de1a5 03 40 20 80 wlp0s20f3
+/// ```
+#[must_use]
+pub(crate) fn ipv6_addresses(path: &Path) -> HashMap<String, Vec<String>> {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return HashMap::new();
+    };
+
+    let mut found: HashMap<String, Vec<String>> = HashMap::new();
+    for line in text.lines() {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        let (Some(hex), Some(name)) = (fields.first(), fields.get(5)) else {
+            continue;
+        };
+        if hex.len() != 32 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+            continue;
+        }
+        // Written as the eight colon-separated quads an address is spelled in. Not compressed to
+        // `::`: an expanded address is unambiguous, and this is a diagnostic panel.
+        let groups: Vec<String> = (0..8).map(|i| hex[i * 4..i * 4 + 4].to_string()).collect();
+        found
+            .entry((*name).to_string())
+            .or_default()
+            .push(groups.join(":"));
+    }
+    found
 }
 
 /// Whether an interface is backed by hardware.
@@ -116,12 +211,13 @@ impl NetSampler {
             .unwrap_or_else(|| Path::new("/sys/class/net"))
     }
 
-    fn read_counters(&self) -> (HashMap<String, NetCounters>, HashMap<String, bool>) {
+    fn read_counters(&self) -> (HashMap<String, NetCounters>, HashMap<String, Link>) {
         let mut counters = HashMap::new();
-        let mut physical = HashMap::new();
+        let mut links = HashMap::new();
         let Ok(entries) = std::fs::read_dir(self.root()) else {
-            return (counters, physical);
+            return (counters, links);
         };
+        let addresses = ipv6_addresses(Path::new("/proc/net/if_inet6"));
 
         for entry in entries.flatten() {
             let dir = entry.path();
@@ -139,7 +235,27 @@ impl NetSampler {
             let (Some(rx), Some(tx)) = (stat("rx_bytes"), stat("tx_bytes")) else {
                 continue;
             };
-            physical.insert(name.clone(), is_physical(&dir));
+            let text = |file: &str| -> Option<String> {
+                let value = std::fs::read_to_string(dir.join(file))
+                    .ok()?
+                    .trim()
+                    .to_string();
+                (!value.is_empty()).then_some(value)
+            };
+            links.insert(
+                name.clone(),
+                Link {
+                    physical: is_physical(&dir),
+                    operstate: text("operstate").unwrap_or_else(|| "unknown".into()),
+                    // `carrier` is unreadable rather than zero on a down interface, so this is a
+                    // parse-or-false rather than a parse-or-error.
+                    carrier: text("carrier").is_some_and(|v| v == "1"),
+                    speed_mbps: text("speed").and_then(|v| v.parse().ok()),
+                    mac: text("address"),
+                    mtu: text("mtu").and_then(|v| v.parse().ok()),
+                    ipv6: addresses.get(&name).cloned().unwrap_or_default(),
+                },
+            );
             counters.insert(
                 name,
                 NetCounters {
@@ -148,12 +264,12 @@ impl NetSampler {
                 },
             );
         }
-        (counters, physical)
+        (counters, links)
     }
 
     /// Take a reading. `None` until there is a previous one to subtract.
     pub(crate) fn sample(&mut self, elapsed: std::time::Duration) -> Option<NetReading> {
-        let (now, physical) = self.read_counters();
+        let (now, links) = self.read_counters();
         let first = self.previous.is_empty();
         let seconds = elapsed.as_secs_f64().max(f64::EPSILON);
 
@@ -177,11 +293,18 @@ impl NetSampler {
                 clippy::cast_possible_truncation,
                 clippy::cast_sign_loss
             )]
+            let link = links.get(name).cloned().unwrap_or_default();
             let reading = InterfaceReading {
                 name: name.clone(),
                 received_per_second: (rx as f64 / seconds) as u64,
                 sent_per_second: (tx as f64 / seconds) as u64,
-                physical: physical.get(name).copied().unwrap_or(false),
+                physical: link.physical,
+                operstate: link.operstate,
+                carrier: link.carrier,
+                speed_mbps: link.speed_mbps,
+                mac: link.mac,
+                mtu: link.mtu,
+                ipv6: link.ipv6,
             };
 
             // Only hardware contributes to the totals: a container's bytes pass through a veth, a
@@ -237,6 +360,8 @@ mod tests {
             if kind == "loopback" { "772" } else { "1" },
         )
         .unwrap();
+        std::fs::write(dir.join("operstate"), "up").unwrap();
+        std::fs::write(dir.join("carrier"), "1").unwrap();
         if kind == "physical" {
             // A directory stands in for the symlink; `exists()` is what is checked.
             std::fs::create_dir_all(dir.join("device")).unwrap();
@@ -366,6 +491,187 @@ mod tests {
 
         let reading = sampler.sample(std::time::Duration::from_secs(1)).unwrap();
         assert_eq!(reading.interfaces[0].name, "busy");
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    // ---- `MON-7`: link details ----
+
+    /// Golden line, §P8. Captured from this machine's `/proc/net/if_inet6`.
+    #[test]
+    fn ipv6_addresses_are_parsed_and_grouped_per_interface() {
+        let dir = sandbox("inet6");
+        let file = dir.join("if_inet6");
+        std::fs::write(
+            &file,
+            "fe80000000000000a71e535bf81de1a5 03 40 20 80 wlp0s20f3\n\
+             fe80000000000000cc28fcfffe772f80 21 40 20 80 vetha1cfd38\n\
+             20010db8000000000000000000000001 03 40 00 80 wlp0s20f3\n",
+        )
+        .unwrap();
+
+        let found = ipv6_addresses(&file);
+        let wifi = found.get("wlp0s20f3").unwrap();
+        assert_eq!(wifi.len(), 2, "an interface can hold several addresses");
+        assert_eq!(wifi[0], "fe80:0000:0000:0000:a71e:535b:f81d:e1a5");
+        assert_eq!(found.get("vetha1cfd38").unwrap().len(), 1);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_malformed_inet6_line_is_skipped() {
+        let dir = sandbox("inet6bad");
+        let file = dir.join("if_inet6");
+        std::fs::write(
+            &file,
+            "notlongenough 03 40 20 80 eth0\n\
+             zzzz000000000000a71e535bf81de1a5 03 40 20 80 eth0\n\
+             fe80000000000000a71e535bf81de1a5 03 40 20 80 eth0\n",
+        )
+        .unwrap();
+        assert_eq!(
+            ipv6_addresses(&file).get("eth0").unwrap().len(),
+            1,
+            "a short address and a non-hex one are not addresses"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_missing_inet6_file_yields_no_addresses() {
+        assert!(ipv6_addresses(Path::new("/definitely/not/here")).is_empty());
+    }
+
+    #[test]
+    fn link_state_is_read_alongside_the_counters() {
+        let root = sandbox("link");
+        interface(&root, "eth0", "physical", 0, 0);
+        std::fs::write(root.join("eth0/speed"), "1000").unwrap();
+        std::fs::write(root.join("eth0/address"), "60:dd:8e:ed:73:e9").unwrap();
+        std::fs::write(root.join("eth0/mtu"), "1500").unwrap();
+
+        let mut sampler = NetSampler::rooted_at(root.clone());
+        sampler.sample(std::time::Duration::from_secs(1));
+        interface(&root, "eth0", "physical", 100, 100);
+        std::fs::write(root.join("eth0/speed"), "1000").unwrap();
+        std::fs::write(root.join("eth0/address"), "60:dd:8e:ed:73:e9").unwrap();
+        std::fs::write(root.join("eth0/mtu"), "1500").unwrap();
+
+        let reading = sampler.sample(std::time::Duration::from_secs(1)).unwrap();
+        let eth = &reading.interfaces[0];
+        assert_eq!(eth.operstate, "up");
+        assert!(eth.carrier);
+        assert_eq!(eth.speed_mbps, Some(1000));
+        assert_eq!(eth.mac.as_deref(), Some("60:dd:8e:ed:73:e9"));
+        assert_eq!(eth.mtu, Some(1500));
+        assert!(eth.is_active());
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// A wireless driver reports no speed. That is unknown, not zero.
+    #[test]
+    fn an_absent_speed_is_unknown_rather_than_zero() {
+        let root = sandbox("nospeed");
+        interface(&root, "wlan0", "physical", 0, 0);
+        let mut sampler = NetSampler::rooted_at(root.clone());
+        sampler.sample(std::time::Duration::from_secs(1));
+        interface(&root, "wlan0", "physical", 1, 1);
+
+        let reading = sampler.sample(std::time::Duration::from_secs(1)).unwrap();
+        assert_eq!(reading.interfaces[0].speed_mbps, None);
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// # Regression
+    ///
+    /// Stacer chose an interface once at startup. Unplugging Ethernet and joining Wi-Fi left it
+    /// charting a dead one until restarted, so activity is judged per tick.
+    #[test]
+    fn an_interface_losing_its_link_stops_being_active() {
+        let root = sandbox("switch");
+        interface(&root, "eth0", "physical", 0, 0);
+        interface(&root, "wlan0", "physical", 0, 0);
+        let mut sampler = NetSampler::rooted_at(root.clone());
+        sampler.sample(std::time::Duration::from_secs(1));
+
+        // The cable comes out; the wireless associates.
+        interface(&root, "eth0", "physical", 0, 0);
+        std::fs::write(root.join("eth0/carrier"), "0").unwrap();
+        std::fs::write(root.join("eth0/operstate"), "down").unwrap();
+        interface(&root, "wlan0", "physical", 5000, 5000);
+
+        let reading = sampler.sample(std::time::Duration::from_secs(1)).unwrap();
+        let eth = reading
+            .interfaces
+            .iter()
+            .find(|i| i.name == "eth0")
+            .unwrap();
+        let wlan = reading
+            .interfaces
+            .iter()
+            .find(|i| i.name == "wlan0")
+            .unwrap();
+        assert!(!eth.is_active(), "no carrier and down is not active");
+        assert!(wlan.is_active());
+        assert_eq!(
+            reading.interfaces.iter().filter(|i| i.is_active()).count(),
+            1,
+            "the featured interface follows the link, without a restart"
+        );
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// Activity alone is not enough: on this machine 29 of 31 interfaces are "active".
+    #[test]
+    fn the_featured_interface_is_physical_and_carrying_traffic() {
+        let root = sandbox("featured");
+        interface(&root, "wlan0", "physical", 0, 0);
+        interface(&root, "docker0", "virtual", 0, 0);
+        for i in 0..5 {
+            interface(&root, &format!("veth{i}"), "virtual", 0, 0);
+        }
+
+        let mut sampler = NetSampler::rooted_at(root.clone());
+        sampler.sample(std::time::Duration::from_secs(1));
+
+        // The veths are busier than the card, and every one of them is up with a carrier.
+        interface(&root, "wlan0", "physical", 1000, 1000);
+        interface(&root, "docker0", "virtual", 9000, 9000);
+        for i in 0..5 {
+            interface(&root, &format!("veth{i}"), "virtual", 9000, 9000);
+        }
+
+        let reading = sampler.sample(std::time::Duration::from_secs(1)).unwrap();
+        assert_eq!(
+            reading.featured().map(|i| i.name.as_str()),
+            Some("wlan0"),
+            "a Docker veth is not the machine's network connection"
+        );
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn nothing_is_featured_when_no_hardware_has_a_link() {
+        let root = sandbox("nolink");
+        interface(&root, "eth0", "physical", 0, 0);
+        let mut sampler = NetSampler::rooted_at(root.clone());
+        sampler.sample(std::time::Duration::from_secs(1));
+
+        interface(&root, "eth0", "physical", 10, 10);
+        std::fs::write(root.join("eth0/carrier"), "0").unwrap();
+        std::fs::write(root.join("eth0/operstate"), "down").unwrap();
+
+        let reading = sampler.sample(std::time::Duration::from_secs(1)).unwrap();
+        assert!(
+            reading.featured().is_none(),
+            "an unplugged machine has no featured interface, rather than a dead one"
+        );
 
         std::fs::remove_dir_all(&root).ok();
     }

@@ -528,12 +528,12 @@ costs listing detail, never accounting.
 | ID | Feature | Pri |
 | --- | --- | --- |
 | MON-1 | Live metrics pipeline | P0 — done |
-| MON-2 | Overview dashboard | P0 |
-| MON-3 | History charts | P0 |
-| MON-4 | Sensors — temperature & fans | P1 |
-| MON-5 | Battery & power | P1 |
-| MON-6 | Threshold alerts | P1 |
-| MON-7 | Per-interface network | P2 |
+| MON-2 | Overview dashboard | P0 — done |
+| MON-3 | History charts | P0 — done |
+| MON-4 | Sensors — temperature & fans | P1 — done |
+| MON-5 | Battery & power | P1 — done |
+| MON-6 | Threshold alerts | P1 — done |
+| MON-7 | Per-interface network | P2 — done |
 
 **MON-1 Live metrics pipeline.** One sampler task per metric family, single owner of delta
 state, fixed tick, 60-sample ring buffers held in the backend, paused when nothing subscribes.
@@ -589,6 +589,31 @@ desktop notifications, hysteresis, and per-alert cooldown held in real state.
 **MON-7 Per-interface network.** All interfaces with rates, addresses and link state; user
 selects which to feature. Stacer picked the first non-loopback interface once at startup and
 never re-evaluated. *Accepts:* switching Ethernet → Wi-Fi is reflected without restart.
+
+**Phase 3 complete.** What the remaining six added, and what each one had to get right:
+
+- **MON-2** leads with storage, because this is a storage-first product — Stacer's dashboard led with
+  CPU and buried the disk, telling you about the resource you could do least about. Nothing is scanned
+  on mount: filesystem figures come from `statvfs`, and the reclaimable figure is whatever the last
+  preview found or an honest "not measured yet".
+- **MON-3** decays its maxima. An axis that only grows is flattened permanently by one burst — download
+  at 100 MB/s and every later chart of a 200 KB/s link is a flat line. The per-core palette is generated
+  by golden-angle hue rotation, so sixty-four cores render as well as four; Stacer indexed a fixed table
+  and asserted past twenty.
+- **MON-4** reads every `hwmon` chip, not the first. This machine has eight and **no fan sensors at
+  all** — an empty list is the right answer, not `0 RPM`.
+- **MON-5** understands both battery forms. The kernel reports either `energy_*` (µWh) or `charge_*`
+  (µAh); this laptop reports **only charge**, so an implementation reading `energy_now` — the one most
+  examples show — displays nothing on it. Health (74% here) is a separate question from charge (97%).
+- **MON-6** is a state machine, not an `if`. Hysteresis stops flapping, cooldown stops repetition, and a
+  rule already firing stays silent — the criterion in as many words.
+- **MON-7** decides the featured interface from the current reading. Activity alone is not enough: 29 of
+  this machine's 31 interfaces report a carrier and an `up` state, so the test is physical *and* active.
+
+Known gap, stated rather than hidden: **per-interface IPv4 addresses are absent.** There is no such
+field anywhere in `sysfs` or `procfs`; obtaining one means `getifaddrs` or hand-built `rtnetlink`, so
+either `unsafe` or a new dependency in a program that ships privileged code. IPv6 comes from
+`/proc/net/if_inet6`, and what is missing is named.
 
 ---
 

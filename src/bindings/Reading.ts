@@ -4,6 +4,8 @@ import type { DiskReading } from "./DiskReading";
 import type { LoadReading } from "./LoadReading";
 import type { MemoryReading } from "./MemoryReading";
 import type { NetReading } from "./NetReading";
+import type { PowerReading } from "./PowerReading";
+import type { SensorReading } from "./SensorReading";
 
 /**
  * One tick: every metric family, sampled at the same moment.
@@ -12,4 +14,12 @@ export type Reading = {
 /**
  * Seconds since the Unix epoch.
  */
-at: number, cpu: CpuReading, memory: MemoryReading, load: LoadReading, disk: DiskReading, network: NetReading, };
+at: number, cpu: CpuReading, memory: MemoryReading, load: LoadReading, disk: DiskReading, network: NetReading, 
+/**
+ * `MON-4`. Empty on hardware with no sensors, which is a real answer.
+ */
+sensors: SensorReading, 
+/**
+ * `MON-5`. No batteries on a desktop, and the panel is hidden rather than shown empty.
+ */
+power: PowerReading, };

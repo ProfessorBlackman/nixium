@@ -1168,3 +1168,138 @@ button.danger:hover:not(:disabled) {
   font-family: var(--font-mono);
   white-space: nowrap;
 }
+
+/* ---- Monitoring. MON-2 through MON-7. ---------------------------------------------------------- */
+
+.chart {
+  position: relative;
+  margin: 0.5rem 0 0.7rem;
+}
+
+.chart-caption {
+  position: absolute;
+  top: 0;
+  right: 0.2rem;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  color: var(--ink-mute);
+  pointer-events: none;
+}
+
+/* Filesystem usage bars. Usage, not capacity — a bar that fills as a disk fills. */
+.fs-list,
+.sensor-list,
+.iface-list {
+  list-style: none;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.8125rem;
+}
+
+.fs-list li,
+.sensor-list li {
+  display: grid;
+  grid-template-columns: minmax(6rem, 12rem) minmax(0, 1fr) auto;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.fs-mount,
+.sensor-name {
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fs-bar,
+.sensor-bar {
+  display: block;
+  height: 0.55rem;
+  border-radius: 2px;
+  background: var(--surface-alt);
+  border: 1px solid var(--rule);
+  overflow: hidden;
+}
+
+.fs-fill,
+.sensor-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+/* Past ninety percent full, and past eighty-five percent of the hardware's own critical
+   temperature, the bar changes colour. Both thresholds come from the thing being measured rather
+   than from a number invented here. */
+.fs-fill.is-full,
+.sensor-fill.is-hot {
+  background: var(--risky);
+}
+
+.fs-figures,
+.sensor-value {
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  color: var(--ink-mute);
+}
+
+.iface-list li {
+  display: grid;
+  grid-template-columns: minmax(6rem, 10rem) minmax(5rem, auto) minmax(0, 1fr);
+  gap: 0.6rem;
+  align-items: baseline;
+  padding: 0.2rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.iface-list li.is-featured {
+  font-weight: 600;
+}
+
+.iface-name {
+  font-family: var(--font-mono);
+}
+
+.iface-state,
+.iface-rates {
+  color: var(--ink-mute);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.iface-mac {
+  grid-column: 1 / -1;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  color: var(--ink-mute);
+}
+
+/* Alert rules. MON-6. */
+.alert-list {
+  list-style: none;
+  margin: 0.6rem 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.8125rem;
+}
+
+.alert-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  gap: 0.8rem;
+  align-items: center;
+  padding: 0.3rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.alert-threshold {
+  font-family: var(--font-mono);
+  color: var(--ink-mute);
+  white-space: nowrap;
+}

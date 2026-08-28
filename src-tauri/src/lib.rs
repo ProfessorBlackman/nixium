@@ -56,6 +56,8 @@ pub fn run() {
             commands::filesystems,
             commands::scan_start,
             commands::scan_cached,
+            commands::alerts_evaluate,
+            commands::reclaim_last_total,
             commands::metrics_subscribe,
             commands::metrics_unsubscribe,
             commands::metrics_history,

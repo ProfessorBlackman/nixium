@@ -255,6 +255,15 @@ pub(crate) fn duplicates_find(
     id
 }
 
+/// The last reclaim preview's totals, without computing one. `MON-2`.
+///
+/// `None` until a preview has been run this session. The dashboard says "not measured yet" rather
+/// than scanning on mount, which the acceptance criterion forbids.
+#[tauri::command]
+pub(crate) fn reclaim_last_total(state: State<'_, AppState>) -> Option<(u64, u64)> {
+    state.reclaim.last_preview()
+}
+
 // ---- Live metrics. `MON-1` ----
 
 /// Event carrying one metrics reading.
@@ -313,6 +322,77 @@ pub(crate) fn metrics_history(state: State<'_, AppState>) -> Vec<metrics::Readin
 #[tauri::command]
 pub(crate) fn metrics_sampling(state: State<'_, AppState>) -> bool {
     state.metrics.is_sampling()
+}
+
+/// Evaluate the alert rules against the latest reading. `MON-6`.
+///
+/// Returns only rules that **just** crossed — a rule already firing, one inside its cooldown, and one
+/// that merely cleared all return nothing, which is the acceptance criterion. Called by the frontend
+/// on each tick, so the state machine lives in one place rather than being reimplemented there.
+#[tauri::command]
+pub(crate) fn alerts_evaluate(state: State<'_, AppState>) -> Vec<metrics::Metric> {
+    let rules = state.settings().alert_rules;
+    if rules.is_empty() {
+        return Vec::new();
+    }
+    let Some(reading) = state.metrics.latest() else {
+        return Vec::new();
+    };
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
+
+    let mut alerts = match state.alerts.lock() {
+        Ok(alerts) => alerts,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+
+    let mut fired = Vec::new();
+    for rule in &rules {
+        let Some(value) = value_for(&rule.metric, &reading) else {
+            continue;
+        };
+        if alerts.evaluate(rule, value, now).notifies() {
+            fired.push(rule.metric.clone());
+        }
+    }
+    fired
+}
+
+/// The current value of a metric, or `None` when this machine cannot answer.
+///
+/// A rule watching a filesystem that has been unmounted, or a temperature on hardware that has none,
+/// evaluates to nothing rather than to zero — which would fire a free-space alert on a disk that is
+/// simply not there.
+fn value_for(metric: &metrics::Metric, reading: &metrics::Reading) -> Option<f64> {
+    match metric {
+        metrics::Metric::CpuUsage => Some(f64::from(reading.cpu.total)),
+        metrics::Metric::MemoryPressure => reading.memory.pressure().map(f64::from),
+        metrics::Metric::SwapPressure => reading.memory.swap_pressure().map(f64::from),
+        metrics::Metric::Temperature => reading
+            .sensors
+            .temperatures
+            .iter()
+            .map(|t| f64::from(t.celsius))
+            .fold(None, |best: Option<f64>, c| {
+                Some(best.map_or(c, |b| b.max(c)))
+            }),
+        metrics::Metric::DiskUsage { mount } => nixfs::filesystems(false)
+            .ok()?
+            .into_iter()
+            .find(|fs| fs.mount_point.to_string_lossy() == *mount)
+            .and_then(|fs| fs.used_fraction()),
+        metrics::Metric::DiskSpaceRemaining { mount } => nixfs::filesystems(false)
+            .ok()?
+            .into_iter()
+            .find(|fs| fs.mount_point.to_string_lossy() == *mount)
+            .map(|fs| {
+                #[allow(clippy::cast_precision_loss)]
+                let available = fs.available as f64;
+                available
+            }),
+    }
 }
 
 // ---- Growth history. `STO-16` ----

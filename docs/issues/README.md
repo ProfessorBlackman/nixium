@@ -45,23 +45,23 @@ says so plainly rather than implying one.
 | [02-rust-typescript-boundary.md](02-rust-typescript-boundary.md) | generated bindings and type drift | 7 |
 | [03-reclaim-pipeline.md](03-reclaim-pipeline.md) | preview, guards and execution | 6 |
 | [04-measurement-accuracy.md](04-measurement-accuracy.md) | sizes, and not overstating them | 7 |
-| [05-concurrency-and-performance.md](05-concurrency-and-performance.md) | rayon, cancellation, scan cost, memory, attribution | 11 |
+| [05-concurrency-and-performance.md](05-concurrency-and-performance.md) | rayon, cancellation, scan cost, memory, sampling | 13 |
 | [06-toolchain-and-lints.md](06-toolchain-and-lints.md) | the gates, and being caught by them | 6 |
 | [07-tests-that-were-wrong.md](07-tests-that-were-wrong.md) | tests that passed for the wrong reason | 3 |
 | [08-documentation-accuracy.md](08-documentation-accuracy.md) | claims about Stacer that were not true | 4 |
 | [09-patterns.md](09-patterns.md) | what generalises, and what to do about it | — |
 
-Forty-nine entries: **6 critical, 13 serious, 18 moderate, 12 friction**.
+Fifty-one entries: **6 critical, 13 serious, 20 moderate, 12 friction**.
 
 ## The tally by finding mechanism
 
 | Found by | Count | Note |
 | --- | --- | --- |
-| A gate in the toolchain (lint, clippy, budget, CI, a hook) | 10 | Cheapest possible — catches before any reasoning is needed |
+| A gate in the toolchain (lint, clippy, budget, CI, a hook) | 11 | Cheapest possible — catches before any reasoning is needed |
 | Running against this machine rather than a fixture | 12 | Wrong numbers, and 4.2 GiB of memory nobody had measured |
 | Reasoning about the code while changing something nearby | 9 | Includes the helper's read hole and one near-miss never shipped |
 | Reading generated output rather than trusting it compiled | 5 | The entire Rust↔TypeScript cluster |
-| Writing a test and finding it disagreed with the code | 5 | Three were the test's fault, two the code's |
+| Writing a test and finding it disagreed with the code | 6 | Three were the test's fault, three the code's |
 | Verifying a documented claim against the source, or proofreading | 5 | Every Stacer claim re-checked turned out wrong |
 | An external tool refusing what was written | 1 | The artifact skill's CSS rule |
 | The user reading output I had been filtering | 1 | A build warning on every compile for months |
