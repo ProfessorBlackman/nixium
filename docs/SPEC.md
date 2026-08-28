@@ -755,7 +755,7 @@ as their own phase.*
 | PKG-4 | Startup applications | P1 — done |
 | PKG-5 | Repository management | P2 — done |
 | SYS-1 | Hosts file editor | P1 — done |
-| SYS-2 | File search | P2 |
+| SYS-2 | File search | P2 — done |
 
 **PKG-1 Installed software inventory.** Name, version, **installed size** (STO-10), summary,
 install date, explicit-vs-dependency, sortable by size. Machine-readable queries only
@@ -991,6 +991,42 @@ carry size and category attribution for free. Streaming, no row cap. Stacer shel
 so "invert" silently returned nothing. Filters: name/glob/regex, size, times, type, owner,
 permissions. *Accepts:* results stream; the query is cancellable; every filter maps to real
 behaviour.
+
+*Delivered, and the last criterion is the one with a story.* Stacer's search built a `find` command
+line, and its invert checkbox appended a flag that does not exist:
+
+```cpp
+if (ui->checkInvert->isChecked()) {
+    findQuery.append("-invert");
+}
+```
+
+`find` has no `-invert` predicate; it exits with a usage error. So ticking that box did not invert
+anything — it made the search return **nothing at all**, silently, indistinguishable from a query that
+matched no files. Here the filters are code, there is no command line to get wrong, and inversion is a
+boolean applied to the combined predicate — asserted by a test that checks the matched and inverted
+sets *partition* everything examined.
+
+**No row cap.** Stacer rendered `foundFiles.mid(1, 2000)`. A search that silently stops at a round
+number makes "is it in there?" unanswerable. Results stream in batches of 256, the caller can stop the
+walk by returning `false`, and a `limit` is opt-in and reported as `truncated` when it bites.
+
+**Unprivileged.** Stacer ran `find` through `sudoExec` for roots outside `$HOME` — a password prompt
+and a root traversal to look for a file. Searching is a read: this walks as the user and **counts what
+it could not enter**, so a partial result says it is partial rather than being quietly wrong.
+
+Two things that took measuring. A directory's `st_size` is 4,096 on ext4 regardless of contents, so a
+`min_bytes` of 1 KB matched every directory on the machine — directories now report **zero** bytes, the
+same rule as `pkg::measure_paths`, and "empty" for a directory means *no entries* rather than no bytes.
+And the glob matcher backtracks iteratively on the most recent `*` rather than recursively, because the
+recursive form is exponential on `a*a*a*…*b` against a non-matching subject, which is a pattern a user
+can type.
+
+**Regex is behind a feature.** `regex` reaches only `nix-app` today, via tauri; adding it to nix-core
+unconditionally would put a regex engine in the binary that runs as root. So it is gated the way `zbus`
+is (§D10), and a regex query in a build without it returns `Unsupported` — never a silent empty result,
+which is the exact failure this feature exists to avoid. Substring and glob matching are hand-written
+and always available.
 
 ---
 
