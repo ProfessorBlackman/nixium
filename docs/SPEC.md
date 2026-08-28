@@ -850,8 +850,8 @@ nix 1.0 succeeds if:
 
 ## 9. Resolved decisions
 
-All eight decisions are settled. Recorded here with rationale, because the *reasons* constrain
-future work more than the answers do.
+All decisions are settled. Recorded here with rationale, because the *reasons* constrain future work
+more than the answers do.
 
 | # | Question | Decision | Why |
 | --- | --- | --- | --- |
@@ -884,10 +884,52 @@ Re-open D8 if the team turns out to have no React familiarity; that is the one i
 | STO-16 respecified: user timer, opt-in, bounded job, fallback tier | D5 |
 | Scan **persistence** moved from STO-18 into STO-2 (Phase 1), so cached-first works without depending on a Phase 2 feature; STO-18 keeps the incremental-rescan optimisation | D6 |
 | STO-18 superseded by a direct scan optimisation (2x, measured); its ratio criterion replaced by an absolute one; **STO-19 bounded scan memory** added at P0 | measurement, see STO-18 |
+| systemd reached over **D-Bus**, not by running `systemctl`; the dependency feature-gated in `nix-core` rather than in a new crate | D10 |
 | SYS-3 cut; Phase 6 (System tools) folded into Phase 5; Release readiness renumbered 7 → 6 | D7 |
 | SYS-2 reframed as a filter over the storage index rather than a standalone search tool | D7 |
 | Non-goal reworded from "always-on daemon" to "resident daemon or system service" | D5 |
 | Total: 58 features / 8 phases → **57 features / 7 phases** | D7 |
+
+---
+
+### D10 — systemd over D-Bus, not by running `systemctl`
+
+**Decided** for Phase 4, on measurements rather than on principle, because the two arguments usually
+given for D-Bus both turned out to be false here.
+
+**Not for speed.** Listing this machine's 764 units: `systemctl` 23 ms, D-Bus 26 ms — and the D-Bus
+figure includes spawning `busctl`, so a native call is quicker still. Both are twenty times inside
+`SVC-1`'s 500 ms budget. Speed does not distinguish them.
+
+**Not for polkit either.** `systemctl` *is* a D-Bus client, so running it unprivileged hits the same
+`org.freedesktop.systemd1.manage-units` action, with the same `auth_admin_keep`. Either approach means
+nix writes **no privileged code for service management at all**, which is what §P6 actually asks for.
+That win is shared.
+
+What decides it is the two things left:
+
+1. **No text to parse.** `ListUnits` returns typed data. `systemctl` returns a table built for humans
+   that **truncates columns to terminal width** unless `--no-pager --plain --full` are all remembered.
+   Parsing it is the same class of hazard as reading `/proc/meminfo` by line index, which is the
+   defect §P8 exists because of. systemd guarantees its D-Bus interface is stable and explicitly does
+   not guarantee CLI output.
+2. **Signals instead of polling.** `SVC-3` is a *live* view. D-Bus emits `JobNew`, `JobRemoved` and
+   `PropertiesChanged`; `systemctl` would mean a subprocess every second or two, which is precisely
+   what §P4 forbids in a steady-state loop.
+
+**The cost, stated.** `zbus` brings an async executor into a crate that is otherwise std threads
+throughout, and needs the workspace MSRV moved from 1.85 to 1.87 — a one-line change, since the
+toolchain is already 1.98.
+
+**Where it lives, and why that needed checking.** `nix-helper` depends on `nix-core`, so anything added
+to core risks linking an async runtime and a D-Bus stack into the binary that runs as root. Tested
+rather than assumed: with the dependency optional behind a `dbus` feature that only `nix-app` enables,
+a whole-workspace build produces **zero `zbus` symbols in the helper** and 47,547 in the app. Edition
+2024's resolver does not unify the feature across the two binaries.
+
+So a feature gate is enough and there is no fourth crate — the rule that all system access lives in
+`nix-core` survives intact, and the privileged binary's dependency tree stays at 52 crates against the
+app's 293.
 
 ---
 
