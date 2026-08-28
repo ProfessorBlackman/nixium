@@ -17,7 +17,7 @@ pub(crate) use crate::space::{Manager, ReclaimKind, RemovableKind, VacuumLimit};
 /// Bumped whenever the message shape changes incompatibly. The client refuses to talk to a helper
 /// that reports a different version, because a version-skewed privileged process is exactly the
 /// thing not to guess about.
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// The **allow-list**. This enum is the security boundary of the entire privileged surface.
 ///
@@ -115,6 +115,26 @@ pub enum Op {
     /// that judgement is safer than reproducing it. nix's own derivation is used only to show the
     /// user what to expect, and is qualified as an upper bound because of exactly this.
     FlatpakUninstallUnused,
+
+    /// Signal a process belonging to another user. `PRC-2`.
+    ///
+    /// The signal is a **typed enum, never a number**: "send signal 9 to pid 1" and "send signal *n*
+    /// to pid *p*" are very different things to hand a privileged process, and the generality of the
+    /// second buys nothing.
+    ///
+    /// The helper re-checks the protected set and the process's state for itself, so `init` and
+    /// `kthreadd` are refused even by a caller that names them deliberately, and a zombie is refused
+    /// rather than answered with a success the signal did not earn.
+    SignalProcess {
+        pid: u32,
+        signal: crate::signal::Signal,
+    },
+
+    /// Change a process's niceness with privilege. `PRC-2`.
+    ///
+    /// Needed even for the user's own process when the niceness goes *down*: the kernel lets anyone be
+    /// more polite and nobody be less. The helper re-checks the range and the protected set.
+    ReniceProcess { pid: u32, niceness: i32 },
 }
 
 impl Op {
@@ -134,6 +154,8 @@ impl Op {
             Self::ListSnapRevisions => "list_snap_revisions",
             Self::RemoveSnapRevision { .. } => "remove_snap_revision",
             Self::FlatpakUninstallUnused => "flatpak_uninstall_unused",
+            Self::SignalProcess { .. } => "signal_process",
+            Self::ReniceProcess { .. } => "renice_process",
         }
     }
 
@@ -151,6 +173,8 @@ impl Op {
                 | Self::RemovePackages { .. }
                 | Self::RemoveSnapRevision { .. }
                 | Self::FlatpakUninstallUnused
+                | Self::SignalProcess { .. }
+                | Self::ReniceProcess { .. }
         )
     }
 }

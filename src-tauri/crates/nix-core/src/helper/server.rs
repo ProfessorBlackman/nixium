@@ -579,6 +579,50 @@ fn flatpak_uninstall_unused() -> Result<u64> {
     Ok(before.saturating_sub(after))
 }
 
+/// A process's current state, for the checks below.
+///
+/// Read here rather than trusted from the caller: whether a process is a zombie decides whether a
+/// signal can do anything, and that is not a fact the unprivileged side gets to assert.
+fn state_of(pid: u32) -> Result<crate::process::ProcessState> {
+    let line = std::fs::read_to_string(format!("/proc/{pid}/stat"))
+        .map_err(|e| AppError::from_io(&e, format!("read the state of process {pid}")))?;
+    crate::process::state_from_stat(&line)
+        .ok_or_else(|| AppError::internal(format!("Could not read the state of process {pid}.")))
+}
+
+/// Signal a process as root, having re-derived what is permitted. `PRC-2`.
+fn signal_process(pid: u32, signal: crate::signal::Signal) -> Result<()> {
+    // The same protected set the unprivileged side applies, checked again by the process that would
+    // actually carry it out. `init` and `kthreadd` are refused here even if a caller names them.
+    if !crate::signal::is_signalable_pid(pid) {
+        return Err(AppError::new(
+            ErrorCode::HelperRejected,
+            format!("Process {pid} is never signalable."),
+        )
+        .with_remedy(
+            "The helper keeps its own list of processes that must not be signalled, whatever it is              asked. Signalling init from a task manager is not something nix will do as root.",
+        ));
+    }
+    crate::signal::send(pid, state_of(pid)?, signal)
+}
+
+/// Renice as root, having re-derived what is permitted.
+fn renice_process(pid: u32, niceness: i32) -> Result<()> {
+    if !crate::signal::is_signalable_pid(pid) {
+        return Err(AppError::new(
+            ErrorCode::HelperRejected,
+            format!("Process {pid} is never reniceable."),
+        ));
+    }
+    if !crate::signal::NICE_RANGE.contains(&niceness) {
+        return Err(AppError::new(
+            ErrorCode::HelperRejected,
+            format!("{niceness} is outside the niceness range the kernel accepts."),
+        ));
+    }
+    crate::signal::renice(pid, niceness)
+}
+
 /// Execute one validated operation.
 fn dispatch(op: &Op) -> Result<OpResult> {
     match op {
@@ -644,6 +688,16 @@ fn dispatch(op: &Op) -> Result<OpResult> {
         Op::FlatpakUninstallUnused => Ok(OpResult::Reclaimed {
             bytes: flatpak_uninstall_unused()?,
         }),
+
+        Op::SignalProcess { pid, signal } => {
+            signal_process(*pid, *signal)?;
+            Ok(OpResult::Reclaimed { bytes: 0 })
+        }
+
+        Op::ReniceProcess { pid, niceness } => {
+            renice_process(*pid, *niceness)?;
+            Ok(OpResult::Reclaimed { bytes: 0 })
+        }
 
         Op::JournalVacuum { limit } => {
             // The limit is typed, so the flag is constructed here from a number rather than
@@ -1570,5 +1624,71 @@ mod tests {
                 revision.name, revision.revision
             );
         }
+    }
+
+    // ---- `PRC-2`: signals and renice ----
+
+    /// The rule that matters: the helper keeps its own protected set.
+    #[test]
+    fn the_helper_refuses_to_signal_init_even_when_asked_directly() {
+        for pid in [1, 2] {
+            let error = signal_process(pid, crate::signal::Signal::Term)
+                .expect_err("init and kthreadd must be refused");
+            assert_eq!(
+                error.code,
+                ErrorCode::HelperRejected,
+                "pid {pid} must be refused by the helper's own list, not by anything downstream"
+            );
+        }
+    }
+
+    #[test]
+    fn the_helper_refuses_to_renice_init() {
+        assert_eq!(
+            renice_process(1, 5).unwrap_err().code,
+            ErrorCode::HelperRejected
+        );
+    }
+
+    #[test]
+    fn the_helper_refuses_a_niceness_outside_the_kernels_range() {
+        for bad in [-21, 20, i32::MIN, i32::MAX] {
+            assert_eq!(
+                renice_process(std::process::id(), bad).unwrap_err().code,
+                ErrorCode::HelperRejected,
+                "{bad} must be refused before it reaches setpriority"
+            );
+        }
+    }
+
+    /// A signal to a process that does not exist must fail rather than report success.
+    #[test]
+    fn the_helper_reports_a_missing_process_rather_than_succeeding() {
+        let pid = 4_194_301;
+        if std::path::Path::new(&format!("/proc/{pid}")).exists() {
+            return;
+        }
+        assert!(
+            signal_process(pid, crate::signal::Signal::Term).is_err(),
+            "no silent no-op, which is the specification's criterion"
+        );
+    }
+
+    /// Reading a state from a real `stat` line, including the awkward names on this machine.
+    #[test]
+    fn the_helper_reads_a_process_state_for_itself() {
+        let sleeping = crate::process::state_from_stat(
+            "1 (systemd) S 0 1 1 0 -1 4194560 34457 0 0 0 841 559 0 0 20 0 1 0 24 172380160 3216",
+        );
+        assert_eq!(sleeping, Some(crate::process::ProcessState::Sleeping));
+
+        let zombie = crate::process::state_from_stat(
+            "999 (next-server (v1) Z 1 999 999 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 24 0 0",
+        );
+        assert_eq!(
+            zombie,
+            Some(crate::process::ProcessState::Zombie),
+            "a name containing a bracket must not defeat the state read"
+        );
     }
 }

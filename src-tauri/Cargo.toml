@@ -31,7 +31,9 @@ tracing-appender = "0.2"
 ts-rs = "11"
 # statvfs and the metadata syscalls. Chosen over `libc` because its API is safe, so nothing here
 # needs to relax the workspace's `unsafe_code = "deny"`.
-rustix = { version = "1", features = ["fs"] }
+# `process` joins `fs` for PRC-2: `kill_process` and `setpriority_process`, both safe wrappers, so
+# signalling and renicing need no `unsafe` and no `libc`.
+rustix = { version = "1", features = ["fs", "process"] }
 # Parallel directory traversal. `rayon::scope` gives correct termination for a recursive fan-out,
 # which is the part that is easy to get wrong by hand.
 rayon = "1"

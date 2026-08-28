@@ -621,8 +621,8 @@ either `unsafe` or a new dependency in a program that ships privileged code. IPv
 
 | ID | Feature | Pri |
 | --- | --- | --- |
-| PRC-1 | Process table | P0 |
-| PRC-2 | Process actions | P0 |
+| PRC-1 | Process table | P0 — backend done |
+| PRC-2 | Process actions | P0 — backend done |
 | PRC-3 | Process detail | P1 |
 | PRC-4 | Process tree | P2 |
 | SVC-1 | systemd unit inventory | P0 |
@@ -637,9 +637,46 @@ reports an average since process start, which Stacer displayed as if it were liv
 name, user, or state. *Accepts:* selection, scroll position and sort survive refreshes; column
 choices persist.
 
+**Measured against `ps` on this machine**, which is the point of computing it properly:
+
+| Process | nix, instantaneous | `ps`, lifetime average |
+| --- | --- | --- |
+| python | **104%** | 75% |
+| pycharm | **10%** | 31% |
+| `kcompactd0` | **15%** | not listed at all |
+
+`ps` would have a user believe their IDE is using three times what it is, and misses a kernel thread
+that is busy right now. The figure is a percentage of **one core**, as `top` reports it, so a process
+on four cores reads 400%.
+
+Two things the reading has to get right. `/proc/<pid>/stat`'s second field is the executable name in
+brackets and **may contain spaces and brackets** — this machine currently runs one called
+`next-server (v1`, with a space and an unmatched bracket — so the line is split on the *last* bracket,
+not the first and not on whitespace. And **a pid is not an identity**: they are reused, so delta state
+is keyed on `(pid, start time)`, or a freshly started process would inherit its predecessor's counters
+and show an enormous spike.
+
+A complete pass costs about 43 ms for 655 processes, of which 16.7 ms is reading `stat` and is the data
+itself. The table refreshes every two seconds while its view is open — `top` defaults to three — and
+not at all when it is closed (§P9).
+
 **PRC-2 Process actions.** Signal (TERM, then optional KILL escalation), renice, with
 confirmation for non-own processes and a real result. *Accepts:* a failed signal reports errno;
 no silent no-op.
+
+**The specific no-op this is aimed at:** `kill(2)` **succeeds against a zombie**. The process has
+already exited, the signal goes nowhere, and the call returns success — so a task manager reporting
+"terminated" there is untrue about the one action a user most wants to be sure of. A zombie is refused
+with an explanation before anything is sent, and every other failure carries the real `errno`, because
+`EPERM` and `ESRCH` mean different things and a user can act on the difference.
+
+`init` and `kthreadd` are never signalled, checked on both sides — here so nothing wrong is offered,
+and again inside the helper so nothing wrong can be carried out. `TERM` to `systemd` as root begins a
+shutdown, so "it would be harmless" is not true.
+
+Renicing **downward** is privileged even for your own process: the kernel lets anyone be more polite
+and nobody be less. That surprise is explained in the error rather than surfacing as a bare permission
+failure. Both use `rustix`'s safe wrappers, so signalling needs no `unsafe` and no `libc`.
 
 **PRC-3 Process detail.** Per-process CPU/memory/IO history, open files, threads, environment,
 cgroup, and **disk footprint** — the link back to the storage model.
