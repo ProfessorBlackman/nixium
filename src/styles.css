@@ -846,6 +846,43 @@ select {
 
 /* ---------- reclaim ---------- */
 
+/* Pick on the left, review on the right.
+   Both children scroll independently and neither drives the page's height, so a 40-item preview
+   cannot push the action out of reach and a long selection cannot push the item list off-screen.
+   `minmax(0, …)` on both tracks because grid items default to `min-width: auto`, which lets a long
+   path in a cell refuse to shrink and widen the whole column past its share. */
+.reclaim-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 23rem);
+  gap: 0.9rem;
+  align-items: start;
+}
+
+/* The shared height bound. `min()` against the viewport so the pair fits on a laptop screen, with a
+   rem ceiling so it does not become an unreadably tall wall on a large monitor. */
+.reclaim-columns > * {
+  max-height: min(62vh, 40rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* One column below this width. Two 300px columns are worse than one readable one, and the confirm
+   card carries the caveats — it must never be the narrow thing squeezed to fit. */
+@media (max-width: 62rem) {
+  .reclaim-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* And the height cap comes off with the second column. Two independently scrolling boxes stacked
+     vertically is a worse experience than one page that scrolls — the cap exists to keep the two
+     columns level, and there are no longer two columns. The panel's sticky action still works,
+     because it sticks to the view's own scroll container once the card stops being one. */
+  .reclaim-columns > * {
+    max-height: none;
+    overflow-y: visible;
+  }
+}
+
 .reclaim-list {
   list-style: none;
   margin: 0;
@@ -853,6 +890,8 @@ select {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
+  /* Room for the scrollbar, so it never sits on top of a checkbox. */
+  padding-right: 0.2rem;
 }
 
 .reclaim-item {
@@ -923,6 +962,40 @@ select {
 .card-confirm {
   border-color: var(--rule-strong);
   border-top: 3px solid var(--accent);
+  /* The card is the scroll container, which is what lets the action inside it stick. Padding moves
+     to the children so the sticky header can paint edge to edge and cover the rows passing under. */
+  padding: 0;
+}
+
+/* The action, pinned to the top of the card.
+   It carries the button *and* both caveats: a button that stayed put while the warnings scrolled
+   away would be a worse design than one that scrolled with them. */
+.confirm-action {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 1.1rem 1.25rem 0.8rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--rule);
+}
+
+.confirm-action button {
+  width: 100%;
+}
+
+/* Tight under the button: "from 7 items" is the button's own subtitle, not a separate paragraph. */
+.confirm-action > p {
+  margin: 0.45rem 0 0;
+}
+
+.confirm-action > p + p {
+  margin-top: 0.5rem;
+}
+
+/* Inside the scrolling half of the confirm card, so it gets the padding the card gave up. */
+.card-confirm .confirm-list {
+  margin: 0;
+  padding: 0.7rem 1.25rem 1.1rem;
 }
 
 .confirm-list,

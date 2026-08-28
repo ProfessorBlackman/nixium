@@ -15,17 +15,22 @@
  * - `risky`  — needs its own confirmation, and is excluded from "select all".
  * - `never`  — cannot reach this view at all; the backend refuses it before the preview.
  *
- * # Why the action sits above the list
+ * # The confirm stage is two columns
  *
- * The confirm panel used to be last, so reaching the button meant scrolling past every item first.
- * That was deliberate, and it was also the reason nobody could find the button. It now sits directly
- * under the totals, where it is the first thing in reach.
+ * Choosing what to reclaim and reviewing what you chose are one task done in both directions, so
+ * they sit side by side: the item list on the left, the confirm panel on the right. **Each scrolls
+ * on its own.** Stacked, a forty-item preview pushed the action off the bottom of the screen and a
+ * long selection pushed the item list off the top; independently scrolled, neither can put the other
+ * out of reach.
  *
- * What moved is the **whole panel**, not the button on its own, and that distinction is the point.
- * The panel carries the itemised selection and both caveats — risky items, and bytes that only go to
- * the trash — so they are still the text immediately above the button rather than something left
- * behind at the bottom of the page. A bare button at the top would have been live on first render,
- * with the safe items pre-checked, above a list the user had not read.
+ * Inside the confirm panel the action is **pinned to the top**, and what is pinned is the button
+ * *together with both caveats* — risky items, and bytes that only reach the trash. A button that
+ * stayed visible while those two scrolled away would be a worse design than one that scrolled with
+ * them: the warnings are what make pressing it an informed act, and the safe items arrive
+ * pre-checked, so the button is live from the first render. Only the itemised list moves.
+ *
+ * Below one column the grid collapses to a single column. Two cramped columns are worse than one
+ * readable one, and the confirm panel is the last thing that should be squeezed to fit.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -208,17 +213,73 @@ export default function Reclaim() {
             </div>
           </div>
 
-          <div className="card card-confirm">
-            <h2>Confirm</h2>
-            {selectedItems.length === 0 ? (
-              <p className="muted">Nothing selected.</p>
-            ) : (
-              <>
-                <p>
-                  Reclaim <strong>{formatBytes(selectedBytes)}</strong> from{" "}
-                  <strong>{selectedItems.length}</strong> item
-                  {selectedItems.length === 1 ? "" : "s"}.
-                </p>
+          {/* The two panels that are worked in together: pick on the left, review on the right.
+              Each scrolls on its own so neither can push the other out of reach. */}
+          <div className="reclaim-columns">
+            <ul className="reclaim-list">
+              {preview.items.map((item) => (
+                <li key={item.id} className={`reclaim-item safety-${item.safety}`}>
+                  <label className="reclaim-check">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(item.id)}
+                      onChange={() => toggle(item)}
+                    />
+                    <span className="reclaim-body">
+                      <span className="reclaim-head">
+                        <strong>{item.label}</strong>
+                        <span className={`safety-tag safety-${item.safety}`} title={SAFETY_EXPLAINS[item.safety]}>
+                          {SAFETY_LABEL[item.safety]}
+                        </span>
+                        {/* A qualified size is shown as an upper bound, never as a bare figure:
+                            on a copy-on-write filesystem the space may not come back at all. */}
+                        <span className="reclaim-bytes">
+                          {item.reclaimable.confidence === "exact"
+                            ? formatBytes(item.bytes)
+                            : `up to ${formatBytes(item.bytes)}`}
+                        </span>
+                      </span>
+                      {item.path && <code className="reclaim-path">{item.path}</code>}
+                      {/* A cost is shown wherever there is one — a rating that says "this costs
+                          something" without saying what gives nothing to decide with. */}
+                      {item.cost && <span className="reclaim-cost">{item.cost}</span>}
+                      {item.reclaimable.confidence !== "exact" && (
+                        <span className="reclaim-sharing">{item.reclaimable.reason}</span>
+                      )}
+                    </span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+
+            <div className="card card-confirm">
+              {/* Sticky, and it holds more than the button. The itemised selection below can be long
+                  enough to scroll, and a button that stayed visible while the two caveats scrolled
+                  away would be worse than one that scrolled with them — the warnings are the reason
+                  pressing it is an informed act. So the action and both caveats pin together, and
+                  only the list of items moves. */}
+              <div className="confirm-action">
+                {/* The card lost its visible heading when the button took the top slot. Kept for
+                    document structure, since a panel with no accessible name is worse than a
+                    redundant one. */}
+                <h2 className="visually-hidden">Confirm</h2>
+                <button
+                  type="button"
+                  className="danger"
+                  disabled={selectedItems.length === 0}
+                  onClick={() => void execute()}
+                >
+                  Reclaim {selectedItems.length > 0 ? formatBytes(selectedBytes) : "nothing"}
+                </button>
+
+                {selectedItems.length === 0 ? (
+                  <p className="muted">Nothing selected. Tick something in the list.</p>
+                ) : (
+                  <p className="muted">
+                    from {selectedItems.length} item{selectedItems.length === 1 ? "" : "s"}
+                  </p>
+                )}
+
                 {hasRisky && (
                   <p className="caveat">
                     Your selection includes items marked risky. These may break something that is
@@ -229,11 +290,14 @@ export default function Reclaim() {
                     filesystem, so it frees nothing until the trash is emptied. */}
                 {selectedTrashable > 0 && (
                   <p className="caveat">
-                    {formatBytes(selectedTrashable)} of this goes to the trash, which is reversible but
-                    on the same disk — so that space comes back only once you empty it. nix offers
-                    emptying the trash as its own item.
+                    {formatBytes(selectedTrashable)} of this goes to the trash, which is reversible
+                    but on the same disk — so that space comes back only once you empty it. nix
+                    offers emptying the trash as its own item.
                   </p>
                 )}
+              </div>
+
+              {selectedItems.length > 0 && (
                 <ul className="confirm-list">
                   {selectedItems.map((i) => (
                     <li key={i.id}>
@@ -242,53 +306,9 @@ export default function Reclaim() {
                     </li>
                   ))}
                 </ul>
-              </>
-            )}
-            <button
-              type="button"
-              className="danger"
-              disabled={selectedItems.length === 0}
-              onClick={() => void execute()}
-            >
-              Reclaim {selectedItems.length > 0 ? formatBytes(selectedBytes) : "nothing"}
-            </button>
+              )}
+            </div>
           </div>
-
-          <ul className="reclaim-list">
-            {preview.items.map((item) => (
-              <li key={item.id} className={`reclaim-item safety-${item.safety}`}>
-                <label className="reclaim-check">
-                  <input
-                    type="checkbox"
-                    checked={selected.has(item.id)}
-                    onChange={() => toggle(item)}
-                  />
-                  <span className="reclaim-body">
-                    <span className="reclaim-head">
-                      <strong>{item.label}</strong>
-                      <span className={`safety-tag safety-${item.safety}`} title={SAFETY_EXPLAINS[item.safety]}>
-                        {SAFETY_LABEL[item.safety]}
-                      </span>
-                      {/* A qualified size is shown as an upper bound, never as a bare figure:
-                          on a copy-on-write filesystem the space may not come back at all. */}
-                      <span className="reclaim-bytes">
-                        {item.reclaimable.confidence === "exact"
-                          ? formatBytes(item.bytes)
-                          : `up to ${formatBytes(item.bytes)}`}
-                      </span>
-                    </span>
-                    {item.path && <code className="reclaim-path">{item.path}</code>}
-                    {/* A cost is shown wherever there is one — a rating that says "this costs
-                        something" without saying what gives nothing to decide with. */}
-                    {item.cost && <span className="reclaim-cost">{item.cost}</span>}
-                    {item.reclaimable.confidence !== "exact" && (
-                      <span className="reclaim-sharing">{item.reclaimable.reason}</span>
-                    )}
-                  </span>
-                </label>
-              </li>
-            ))}
-          </ul>
 
           {preview.advisories.length > 0 && (
             <div className="card">
