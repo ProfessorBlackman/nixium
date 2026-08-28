@@ -250,3 +250,48 @@ reason.
 that way — a test that got as far as `apt-get remove` would remove a package from whatever machine ran
 it, which this project has already done once (§5). It is on the isolated-VM list in
 [`PLAN.md` §9.1](../PLAN.md).
+
+---
+
+## 7. The `/tmp` staging path, and why the replacement is a sibling
+
+**Phase 5** · **Critical** (in Stacer; avoided here) · **Found by** reading Stacer's source before writing the equivalent
+
+Not a defect in nix. It is in this file because avoiding it was the design work of `SYS-1`, and because
+the shape of it generalises.
+
+Stacer's hosts editor wrote its new file to a **fixed, predictable path under `/tmp`** and then moved it
+into place as root. `/tmp` is world-writable and sticky, and the name did not vary, so any local user
+could create a symlink at that path and wait: the next time an administrator saved their hosts file, a
+root process would write through the link to wherever it pointed.
+
+What nix does instead, and the reason for each part:
+
+| Choice | Why |
+| --- | --- |
+| Stage **beside the target**, in `/etc` | Nothing unprivileged can create a file there, so there is no race to win |
+| `create_new(true)` — `O_EXCL` | If the name somehow exists, fail rather than follow or truncate it |
+| Same directory, not `/tmp` | `rename` is only atomic within one filesystem; a `/tmp` on `tmpfs` makes the move a copy, and a copy has a window where the file is half-written |
+| Mode, uid and gid copied from the original **before** the rename | The file is never visible at the target path with the wrong permissions |
+| `symlink_metadata` first, refuse anything that is not a regular file | A symlink or bind mount at `/etc/hosts` — routine in containers — would be moved aside or fail partway |
+| Remove the staging file if any step fails | A stray `.hosts.nix-*.tmp` in `/etc` is litter in the worst possible directory |
+
+The mode copy is the one whose consequence is easiest to underestimate. A freshly created file is
+`0600 root:root`. `/etc/hosts` at `0600` does not fail loudly — it breaks name resolution for every
+unprivileged process on the machine, quietly, until someone thinks to check the permissions of a file
+nobody expects to have changed.
+
+**Guard.** Seven tests drive the replacement against a temporary file: contents written, the
+compare-and-swap refusing a stale precondition and leaving the other edit intact, `0644` preserved, an
+unusual `0640` carried over rather than normalised, no staging file left after success *or* after
+failure, and a symlink refused with the link and its target both untouched.
+
+The mode test was verified by sabotage — removing the `set_permissions` call makes it fail with
+`left: 384, right: 420`. Safe to do here, unlike the escalation guards of §5, because
+`replace_atomically` takes a path and the test gives it one in `/tmp`; `/etc/hosts` is named in exactly
+one place, by the caller the protocol dispatches.
+
+That split is itself the point worth keeping: **the function that does the dangerous thing takes a
+parameter, and the function that names the dangerous target takes none.** It is what made the mechanics
+testable on a machine I intend to keep, and it is the pattern to reach for the next time something
+privileged needs verifying.

@@ -67,6 +67,8 @@ pub fn run() {
             commands::packages_residual,
             commands::packages_removal_preview,
             commands::packages_remove,
+            commands::hosts_load,
+            commands::hosts_save,
             commands::processes_list,
             commands::processes_forget,
             commands::process_signal,

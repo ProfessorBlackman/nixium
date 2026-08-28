@@ -41,7 +41,7 @@ says so plainly rather than implying one.
 
 | File | Covers | Entries |
 | --- | --- | --- |
-| [01-privilege-and-security.md](01-privilege-and-security.md) | the privileged helper's boundary | 6 |
+| [01-privilege-and-security.md](01-privilege-and-security.md) | the privileged helper's boundary | 7 |
 | [02-rust-typescript-boundary.md](02-rust-typescript-boundary.md) | generated bindings and type drift | 7 |
 | [03-reclaim-pipeline.md](03-reclaim-pipeline.md) | preview, guards and execution | 6 |
 | [04-measurement-accuracy.md](04-measurement-accuracy.md) | sizes, and not overstating them | 10 |
@@ -51,7 +51,7 @@ says so plainly rather than implying one.
 | [08-documentation-accuracy.md](08-documentation-accuracy.md) | claims about Stacer that were not true | 5 |
 | [09-patterns.md](09-patterns.md) | what generalises, and what to do about it | — |
 
-Sixty-one entries: **7 critical, 16 serious, 23 moderate, 15 friction**.
+Sixty-two entries: **8 critical, 16 serious, 23 moderate, 15 friction**.
 
 ## The tally by finding mechanism
 
@@ -63,7 +63,7 @@ Sixty-one entries: **7 critical, 16 serious, 23 moderate, 15 friction**.
 | Reading generated output rather than trusting it compiled | 6 | The Rust↔TypeScript cluster, and a test count I misread |
 | Writing a test and finding it disagreed with the code | 6 | Three were the test's fault, three the code's |
 | Measuring before building, and finding the specification wrong | 1 | `PKG-1`'s premise, falsified in ten minutes — as `STO-18`'s was, under its own row |
-| Verifying a documented claim against the source, or proofreading | 6 | Every Stacer claim re-checked turned out wrong — and one claim about nix's own build |
+| Verifying a documented claim against the source, or proofreading | 7 | Every Stacer claim re-checked turned out wrong — and one claim about nix's own build |
 | An external tool refusing what was written | 1 | The artifact skill's CSS rule |
 | The user reading output I had been filtering | 1 | A build warning on every compile for months |
 | The machine doing the thing | 1 | A test escalated silently and removed a kernel |
@@ -104,6 +104,6 @@ way the ostree prune did.
 | `cow` parsers for btrfs, ZFS, LVM | This machine is ext4 with none of those tools; parsers are written to documented output formats and have never seen real output |
 | `pkg::flatpak` runtime derivation | This machine has a flatpak installation with nothing installed in it |
 | The `pkexec` path — **read operations verified** | Run for real on 2026-08-27 via `make install-helper && make helper-smoke`: helper starts as `uid=0`, protocol 4 handshake, an allow-listed read succeeds, `/etc/shadow` is refused, and three operations took **one** password prompt — `auth_admin_keep` working, which is the Stacer defect it exists to fix. The audit log landed at the root-owned `/var/log/nix/helper-audit.log`, world-readable so a user can inspect it and root-owned so they cannot edit it |
-| The helper's **destructive** operations | Still unexercised as root. `PackageManagerClean`, `JournalVacuum`, `ReclaimFile`, `RemovePackages`, `RemoveSelected` and `RemoveSnapRevision` have only ever run against a directly-spawned helper in tests. `RemoveSelected`'s **refusal** paths *are* fully tested unprivileged, since they all complete before apt is invoked — it is the success path that is unreachable, and must stay so: a test that got to `apt-get remove` would remove a package from whatever machine ran it. The safest first real test is `apt-get clean` — 985 MiB here, entirely regenerable |
+| The helper's **destructive** operations | Still unexercised as root. `WriteHostsFile`'s mechanics *are* tested — `replace_atomically` takes a path, so the compare-and-swap, mode preservation, staging cleanup and symlink refusal all run against a temporary file; what is unexercised is that path being `/etc/hosts` under real `pkexec`. `PackageManagerClean`, `JournalVacuum`, `ReclaimFile`, `RemovePackages`, `RemoveSelected` and `RemoveSnapRevision` have only ever run against a directly-spawned helper in tests. `RemoveSelected`'s **refusal** paths *are* fully tested unprivileged, since they all complete before apt is invoked — it is the success path that is unreachable, and must stay so: a test that got to `apt-get remove` would remove a package from whatever machine ran it. The safest first real test is `apt-get clean` — 985 MiB here, entirely regenerable |
 | Installing the growth-history systemd units | Would enable a daily job on the developer's own machine, which is not a side effect to create unasked. The unit text, orphan detection and the `nix snapshot` subcommand are all exercised; `systemctl enable` is not |
 | Dependency NOTICE attribution | Apache-2.0 §4(d); deferred to M9, recorded in `packaging/README.md` |

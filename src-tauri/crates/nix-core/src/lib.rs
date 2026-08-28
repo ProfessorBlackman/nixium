@@ -53,6 +53,7 @@ pub mod fixture;
 pub mod fs;
 pub mod helper;
 pub mod history;
+pub mod hosts;
 pub mod journal;
 pub mod logging;
 pub mod metrics;

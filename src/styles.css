@@ -1805,3 +1805,90 @@ button.danger:hover:not(:disabled) {
   user-select: all;
   overflow-x: auto;
 }
+
+/* The hosts file (SYS-1).
+   Monospaced addresses in a tabular column so they line up, and a visibly quieter row for a disabled
+   entry — a commented-out line should read as parked, not as active. */
+.hosts-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.hosts-table th,
+.hosts-table td {
+  text-align: left;
+  padding: 0.35rem 0.55rem;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: top;
+}
+
+.hosts-table thead th {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.hosts-on {
+  width: 2.5rem;
+  text-align: center;
+}
+
+.hosts-ip {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.hosts-names {
+  font-family: var(--font-mono);
+}
+
+.hosts-comment {
+  font-size: 0.75rem;
+  margin-top: 0.1rem;
+}
+
+/* Parked, not active. Kept legible rather than faded to the point of being hard to read — the user
+   may well be looking for exactly this row. */
+.hosts-table tr.is-disabled .hosts-ip,
+.hosts-table tr.is-disabled .hosts-names {
+  color: var(--ink-faint);
+  text-decoration: line-through;
+}
+
+/* A comment, a blank line, or something nix cannot parse. Shown verbatim and not editable. */
+.hosts-verbatim code {
+  color: var(--ink-mute);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.hosts-tag {
+  margin-left: 0.5rem;
+  padding: 0 0.3rem;
+  border: 1px solid var(--review);
+  border-radius: 2px;
+  background: var(--review-soft);
+  color: var(--review);
+  font-size: 0.6875rem;
+}
+
+.hosts-actions {
+  white-space: nowrap;
+  text-align: right;
+}
+
+.hosts-actions button + button {
+  margin-left: 0.35rem;
+}
+
+.hosts-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: 0 0.9rem;
+  margin-bottom: 0.4rem;
+}
+
+.hosts-form .field {
+  max-width: none;
+}

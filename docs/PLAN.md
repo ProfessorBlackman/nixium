@@ -19,7 +19,8 @@ followed — is in [issues/](issues/README.md).
 | **M5** Storage depth (Phase 2) — **Phase 2 done** | **complete** |
 | **M6** Monitoring (Phase 3) — **Phase 3 done** | **complete** |
 | **M7** Processes & services (Phase 4) — **Phase 4 done** | **complete** |
-| M8 – M9 | not started |
+| M8 Software & system tools (Phase 5) | **in progress** — PKG-1, PKG-2, SYS-1 done; PKG-3 to PKG-5, SYS-2 remain |
+| M9 1.0 (Phase 6) | not started |
 
 Phase 0 shipped all eleven tasks: the three-crate workspace and quality gates, the error taxonomy,
 the IPC contract with its progress/cancellation primitive, the app shell with lazily-mounted views,

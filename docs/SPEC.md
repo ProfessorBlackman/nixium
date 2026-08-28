@@ -319,7 +319,7 @@ with a reclaim method (§5.5 invariant 3); user exclusions survive a rescan.
 | STO-14 | Developer build artifacts | P1 — done |
 | STO-15 | Large files & duplicates | P1 — done |
 | STO-16 | Growth history | P2 — done |
-| STO-17 | btrfs, LVM & ZFS awareness | **P0** |
+| STO-17 | btrfs, LVM & ZFS awareness | **P0** — built, **unverified** |
 | STO-18 | Incremental rescan | ~~P1~~ superseded |
 | STO-19 | Bounded scan memory | **P0** — done |
 
@@ -754,7 +754,7 @@ as their own phase.*
 | PKG-3 | Multi-backend coverage | P1 |
 | PKG-4 | Startup applications | P1 |
 | PKG-5 | Repository management | P2 |
-| SYS-1 | Hosts file editor | P1 |
+| SYS-1 | Hosts file editor | P1 — done |
 | SYS-2 | File search | P2 |
 
 **PKG-1 Installed software inventory.** Name, version, **installed size** (STO-10), summary,
@@ -871,6 +871,41 @@ sources; an edit never rewrites a different line.
 removes the line, external-change detection, and an **atomic privileged write preserving mode
 and ownership** — never a fixed `/tmp` staging path (Stacer's created a symlink race).
 *Accepts:* a concurrent external edit is detected and surfaced rather than overwritten.
+
+*Delivered.* Every line carries its **original text**, and rendering emits that verbatim for any line
+the user has not edited — so tab-versus-space alignment, unusual spacing and lines nix cannot parse all
+survive untouched, and only edited lines are canonically formatted. That is stronger than "comments are
+preserved", and it is a testable property rather than an intention: `render(parse(text)) == text`,
+asserted against the real `/etc/hosts` as well as a captured copy. This machine's file uses tabs on its
+first two lines and spaces on the rest, which is exactly what a reformatting editor destroys.
+
+A commented-out entry is presented as a **disabled entry**, not as opaque comment text, because that is
+what writing it that way meant. Address validation is what makes the inference safe: the line becomes an
+entry only if what follows the `#` really parses as an IP, so the distribution's own
+`# The following lines are desirable for IPv6 capable hosts` stays a comment. Addresses go through
+`IpAddr`, which accepts exactly what the resolver accepts and normalises `0:0:0:0:0:0:0:1` to `::1` so
+one address cannot appear twice under two spellings.
+
+**The concurrent-edit check compares the whole file, not a digest.** The client sends the exact bytes it
+read; the helper re-reads and refuses unless they still match. A hosts file is a few hundred bytes — 233
+here — so there is nothing to save by hashing and no collision left to reason about. A hash would have
+been the reflexive choice and strictly worse.
+
+**The write, and the bug it exists not to have.** Stacer staged its hosts write at a predictable path
+under world-writable `/tmp` and moved it into place as root, so any local user could plant a symlink
+there and be written through. nix stages the replacement **beside the target in `/etc`**, with
+`O_EXCL`: nothing unprivileged can create a file there to be raced, and `rename` is only atomic within
+one filesystem — a `/tmp` on `tmpfs` turns the move into a copy, and a copy has a half-written window.
+Mode, uid and gid are read from the original and applied before the rename, so the file is never visible
+at the target path with the wrong permissions; a fresh file would be `0600 root:root`, and a `0600`
+`/etc/hosts` breaks name resolution for every unprivileged process on the machine. A symlink or bind
+mount at the target is refused with an explanation rather than replaced.
+
+The content is validated **on both sides of the privilege boundary, by the same function**. In the app it
+gives the user an actionable error before any password prompt; in the helper it is what stops the
+operation being a way to write arbitrary content to a root-owned file that decides where name lookups
+go. An unparsed line is tolerated on the way *in* — the user's existing file is not ours to reject — but
+may never be introduced on the way out.
 
 **SYS-2 File search.** A **filter over the storage index**, not a separate tool — the walker is
 STO-2's walker, which is what makes this nearly free once Phase 1 exists, and it means results

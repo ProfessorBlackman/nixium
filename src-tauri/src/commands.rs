@@ -34,7 +34,9 @@ use nix_core::reclaim::{Preview, Report, Ticket};
 use nix_core::settings::Settings;
 // `Manager` is `tauri::Manager` here, so the package manager enum is renamed rather than shadowing it.
 use nix_core::space::Manager as PkgManager;
-use nix_core::{detail, find, fs as nixfs, history, journal, metrics, process, scan, timer, units};
+use nix_core::{
+    detail, find, fs as nixfs, history, hosts, journal, metrics, process, scan, timer, units,
+};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -506,6 +508,56 @@ pub(crate) fn packages_residual() -> Result<Vec<pkg::ResidualConfig>> {
     }
     all.sort_unstable_by_key(|r| std::cmp::Reverse(r.bytes));
     Ok(all)
+}
+
+// ---- The hosts file. `SYS-1` ----
+
+/// Read and parse `/etc/hosts`.
+///
+/// Unprivileged: the file is world-readable, so only writing needs the helper. The document carries
+/// the exact bytes it was read from, which is what makes the save a compare-and-swap.
+#[tauri::command]
+pub(crate) fn hosts_load() -> Result<hosts::HostsFile> {
+    hosts::HostsFile::load()
+}
+
+/// Write `/etc/hosts`, refusing if it changed since it was read. `SYS-1`.
+///
+/// The frontend sends the whole document back, `original` included. That field is not decoration: it
+/// is the precondition, and the helper re-reads the file and compares against it byte for byte. An
+/// edit made in a terminal while this window was open is therefore **detected and reported**, never
+/// silently overwritten.
+///
+/// Validated here as well as in the helper. Here it gives the user an error they can act on before a
+/// password prompt; there it is what stops the operation being an arbitrary privileged write.
+#[tauri::command]
+pub(crate) fn hosts_save(file: hosts::HostsFile) -> Result<hosts::HostsFile> {
+    let content = file.render();
+    hosts::validate_document(&content)?;
+
+    // Nothing to do is not worth a password prompt.
+    if content == file.original {
+        return Ok(file);
+    }
+
+    let transport = helper::Transport::production()?;
+    let mut client = helper::Client::connect(&transport)?;
+    match client.request(&Op::WriteHostsFile {
+        expected: file.original.clone(),
+        content,
+    })? {
+        OpResult::Reclaimed { .. } => {}
+        other => {
+            return Err(AppError::internal(format!(
+                "The helper answered a hosts write with {other:?}"
+            )));
+        }
+    }
+
+    // Re-read rather than assuming the render is now the file. It is also how the caller gets a
+    // document whose `original` matches disk, so a second save in the same session has a valid
+    // precondition instead of the one from before the first.
+    hosts::HostsFile::load()
 }
 
 // ---- The process table. `PRC-1`, `PRC-2` ----

@@ -23,6 +23,7 @@ const Processes = lazy(() => import("../views/Processes"));
 const Services = lazy(() => import("../views/Services"));
 const SettingsView = lazy(() => import("../views/SettingsView"));
 const Software = lazy(() => import("../views/Software"));
+const Hosts = lazy(() => import("../views/Hosts"));
 const About = lazy(() => import("../views/About"));
 
 /** A view's stable identifier. Never a display name — that is the Stacer bug. */
@@ -34,6 +35,7 @@ export type ViewId =
   | "processes"
   | "services"
   | "software"
+  | "hosts"
   | "reclaim"
   | "settings"
   | "about";
@@ -48,6 +50,7 @@ const VIEWS: ViewDef[] = [
   { id: "processes", title: "Processes", hint: "What is running, and what it costs" },
   { id: "services", title: "Services", hint: "systemd units, timers and their logs" },
   { id: "software", title: "Software", hint: "What is installed, and what it really costs" },
+  { id: "hosts", title: "Hosts", hint: "Names this machine resolves itself" },
   { id: "reclaim", title: "Reclaim", hint: "Free space safely" },
   { id: "settings", title: "Settings", hint: "Preferences" },
   { id: "about", title: "About", hint: "Versions and diagnostics" },
@@ -69,6 +72,8 @@ function ViewBody({ id }: { id: ViewId }) {
       return <Services />;
     case "software":
       return <Software />;
+    case "hosts":
+      return <Hosts />;
     case "reclaim":
       return <Reclaim />;
     case "settings":

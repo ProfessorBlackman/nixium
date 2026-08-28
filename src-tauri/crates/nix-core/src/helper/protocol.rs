@@ -102,6 +102,28 @@ pub enum Op {
     /// what it cannot do is make the helper's own simulation come out differently.
     RemoveSelected { packages: Vec<String> },
 
+    /// Write `/etc/hosts`. `SYS-1`.
+    ///
+    /// # Compare-and-swap, on the whole file
+    ///
+    /// `expected` is the exact bytes the client read before editing. The helper re-reads the file and
+    /// refuses unless they still match, so a change made in a terminal between load and save is
+    /// **detected and surfaced rather than overwritten** — the acceptance criterion for `SYS-1`.
+    ///
+    /// The comparison is byte-for-byte on the whole file rather than on a digest. A hosts file is a
+    /// few hundred bytes, so there is nothing to save and no collision left to reason about.
+    ///
+    /// # What the helper checks about the content
+    ///
+    /// `content` is arbitrary text from an unprivileged process, aimed at a file that decides where
+    /// name lookups go. So the helper parses it with the **same validator the client used** and
+    /// refuses anything that is not a well-formed hosts file — every line an entry, a comment or
+    /// blank, every address a real address, every name a real name. Without that check this operation
+    /// is a way to write anything at all to a root-owned file.
+    ///
+    /// The path is a constant. It is never taken from the caller.
+    WriteHostsFile { expected: String, content: String },
+
     /// List the packages the helper considers removable for a category.
     ///
     /// The same derivation the removal uses, so the list a user sees is exactly the list that can
@@ -174,6 +196,7 @@ impl Op {
             Self::JournalVacuum { .. } => "journal_vacuum",
             Self::RemovePackages { .. } => "remove_packages",
             Self::RemoveSelected { .. } => "remove_selected",
+            Self::WriteHostsFile { .. } => "write_hosts_file",
             Self::ListRemovable { .. } => "list_removable",
             Self::ListSnapRevisions => "list_snap_revisions",
             Self::RemoveSnapRevision { .. } => "remove_snap_revision",
@@ -196,6 +219,7 @@ impl Op {
                 | Self::JournalVacuum { .. }
                 | Self::RemovePackages { .. }
                 | Self::RemoveSelected { .. }
+                | Self::WriteHostsFile { .. }
                 | Self::RemoveSnapRevision { .. }
                 | Self::FlatpakUninstallUnused
                 | Self::SignalProcess { .. }

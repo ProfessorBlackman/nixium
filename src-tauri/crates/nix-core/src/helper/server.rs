@@ -482,6 +482,141 @@ fn remove_selected(requested: &[String]) -> Result<u64> {
     Ok(preview.freed_bytes)
 }
 
+/// Replace `/etc/hosts`, atomically, if it still holds what the caller last read. `SYS-1`.
+///
+/// # The staging file is a sibling, not something in `/tmp`
+///
+/// Stacer's hosts editor staged its write at a fixed path under `/tmp` and then moved it into place
+/// as root. `/tmp` is world-writable and the name was predictable, so any local user could plant a
+/// symlink there and have a root process write through it. That is the bug this function exists not
+/// to have.
+///
+/// The staging file is created **in `/etc`**, alongside the target, for two reasons: nothing
+/// unprivileged can create a file there to be raced, and `rename` is only atomic within one
+/// filesystem — a `/tmp` that is `tmpfs` makes the move a copy, and a copy has a window where the
+/// file is half-written.
+///
+/// `O_EXCL` on creation, so if the name somehow exists the call fails rather than following or
+/// truncating it.
+///
+/// # Mode and ownership are carried over, not assumed
+///
+/// A fresh file would be `0600 root:root`, and `/etc/hosts` must stay readable by everyone or name
+/// resolution breaks for every unprivileged process on the machine. So the original's mode, uid and
+/// gid are read first and applied to the replacement — read from the file rather than hard-coded,
+/// because a machine that has deliberately changed them should keep its choice.
+fn write_hosts_file(expected: &str, content: &str) -> Result<()> {
+    // The content must be a hosts file. Without this the operation is an arbitrary privileged write,
+    // and the fact that the client already checked is not a reason for the helper not to.
+    crate::hosts::validate_document(content)?;
+
+    // The path is pinned here and nowhere else. `replace_atomically` takes one so its mechanics can be
+    // tested against a temporary file, and this is the only caller that supplies the real target.
+    replace_atomically(
+        std::path::Path::new(crate::hosts::HOSTS_PATH),
+        expected,
+        content,
+    )
+}
+
+/// Replace a file with new contents, if it still holds what the caller last read.
+///
+/// Split out from [`write_hosts_file`] purely so it can be exercised: the checks below are the ones
+/// that matter, and a function that can only be called against `/etc/hosts` cannot be tested on a
+/// machine anyone intends to keep. **Private, and reachable from exactly one caller** — nothing in the
+/// protocol can name a path.
+fn replace_atomically(path: &Path, expected: &str, content: &str) -> Result<()> {
+    // `Write` is already in scope at module level.
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+
+    use crate::error::IoContext;
+
+    // (2) A regular file, checked without following a link. If `/etc/hosts` is a symlink or a bind
+    // mount — both happen, in containers especially — replacing it by rename would either move the
+    // link aside or fail partway. Refusing with an explanation is better than either.
+    let meta = std::fs::symlink_metadata(path)
+        .doing(format!("inspect {}", path.display()))
+        .map_err(|e| e.with_path(path))?;
+    if !meta.file_type().is_file() {
+        return Err(AppError::new(
+            ErrorCode::HelperRejected,
+            format!(
+                "{} is not a regular file on this system, so nix will not replace it.",
+                path.display()
+            ),
+        )
+        .with_path(path)
+        .with_remedy("Edit it with a text editor instead — a symlink or bind mount needs care."));
+    }
+
+    // (3) Compare-and-swap. The caller says what it read; if the file no longer holds that, someone
+    // else has edited it and their change is not ours to discard.
+    let on_disk = std::fs::read_to_string(path)
+        .doing(format!("read {}", path.display()))
+        .map_err(|e| e.with_path(path))?;
+    if on_disk != expected {
+        return Err(AppError::refused(
+            "The hosts file changed on disk since it was opened, so nothing was written.",
+        )
+        .with_path(path)
+        .with_remedy("Reload it to see the current contents, then make the change again."));
+    }
+
+    // (4) Stage alongside the target.
+    let directory = path.parent().unwrap_or(Path::new("."));
+    // The target's own name is in the staging name, so two replacements running in one process — two
+    // tests, in practice — cannot pick the same path and have one delete the other's file.
+    let target_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("hosts");
+    let staging = directory.join(format!(".{target_name}.nix-{}.tmp", std::process::id()));
+
+    let outcome = (|| -> Result<()> {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true) // O_EXCL: never follow or truncate something already there.
+            .mode(0o600) // Narrow while it is being written; widened to match the original below.
+            .open(&staging)
+            .doing("create the replacement hosts file")
+            .map_err(|e| e.with_path(&staging))?;
+
+        file.write_all(content.as_bytes())
+            .doing("write the replacement hosts file")
+            .map_err(|e| e.with_path(&staging))?;
+
+        // Carry over the original's mode and ownership before the rename, so the file is never
+        // visible at the target path with the wrong permissions.
+        file.set_permissions(std::fs::Permissions::from_mode(meta.mode() & 0o7777))
+            .doing("set the replacement's permissions")
+            .map_err(|e| e.with_path(&staging))?;
+
+        // On disk before the rename, so a power loss cannot leave the target pointing at a file whose
+        // contents never reached the platter.
+        file.sync_all()
+            .doing("flush the replacement hosts file")
+            .map_err(|e| e.with_path(&staging))?;
+        drop(file);
+
+        std::os::unix::fs::chown(&staging, Some(meta.uid()), Some(meta.gid()))
+            .doing("set the replacement's ownership")
+            .map_err(|e| e.with_path(&staging))?;
+
+        std::fs::rename(&staging, path)
+            .doing("put the new hosts file in place")
+            .map_err(|e| e.with_path(path))?;
+
+        // And the directory entry itself, so the rename survives a crash too.
+        if let Ok(dir) = std::fs::File::open(directory) {
+            dir.sync_all().ok();
+        }
+        Ok(())
+    })();
+
+    if outcome.is_err() {
+        // A failed write must not leave a staging file behind in /etc.
+        std::fs::remove_file(&staging).ok();
+    }
+    outcome
+}
+
 /// Where snapd keeps its download cache. Mode 0700 and root-owned, so only the helper can see it.
 const SNAPD_CACHE: &str = "/var/lib/snapd/cache";
 
@@ -748,6 +883,11 @@ fn dispatch(op: &Op) -> Result<OpResult> {
         Op::RemoveSelected { packages } => Ok(OpResult::Reclaimed {
             bytes: remove_selected(packages)?,
         }),
+
+        Op::WriteHostsFile { expected, content } => {
+            write_hosts_file(expected, content)?;
+            Ok(OpResult::Reclaimed { bytes: 0 })
+        }
 
         Op::ListSnapRevisions => Ok(OpResult::SnapRevisions {
             revisions: derive_snap_revisions()?
@@ -1790,6 +1930,213 @@ mod tests {
     #[test]
     fn an_empty_selection_does_nothing_rather_than_invoking_apt() {
         assert_eq!(remove_selected(&[]).expect("empty is not an error"), 0);
+    }
+
+    // ---- `SYS-1`: replacing the hosts file ----
+    //
+    // These drive `replace_atomically` against a temporary file. That is the whole reason it takes a
+    // path: the checks below are the ones that matter, and `/etc/hosts` on this machine is not a
+    // suitable subject. Nothing in the protocol can name a path — `write_hosts_file` pins the constant
+    // and is the function's only real caller.
+
+    fn hosts_scratch(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("nix-hosts-{tag}-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_replacement_writes_the_new_contents() {
+        let dir = hosts_scratch("write");
+        let path = dir.join("hosts");
+        std::fs::write(&path, "127.0.0.1 localhost\n").unwrap();
+
+        replace_atomically(
+            &path,
+            "127.0.0.1 localhost\n",
+            "127.0.0.1 localhost\n10.0.0.5 db\n",
+        )
+        .expect("a matching precondition writes");
+
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "127.0.0.1 localhost\n10.0.0.5 db\n"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// `SYS-1`'s acceptance criterion: a concurrent external edit is detected and surfaced rather than
+    /// overwritten.
+    #[test]
+    fn an_edit_made_underneath_is_detected_and_the_file_is_left_alone() {
+        let dir = hosts_scratch("cas");
+        let path = dir.join("hosts");
+        std::fs::write(&path, "127.0.0.1 localhost\n").unwrap();
+
+        // Someone edits it in a terminal after the client loaded it.
+        std::fs::write(&path, "127.0.0.1 localhost\n8.8.8.8 dns\n").unwrap();
+
+        let error = replace_atomically(&path, "127.0.0.1 localhost\n", "127.0.0.1 elsewhere\n")
+            .expect_err("a stale precondition must be refused");
+        assert_eq!(error.code, ErrorCode::Refused);
+
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "127.0.0.1 localhost\n8.8.8.8 dns\n",
+            "the other edit must survive untouched"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// `/etc/hosts` must stay world-readable or name resolution breaks for every unprivileged process
+    /// on the machine. A freshly created file would be 0600.
+    #[test]
+    fn the_replacement_keeps_the_originals_mode() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = hosts_scratch("mode");
+        let path = dir.join("hosts");
+        std::fs::write(&path, "127.0.0.1 localhost\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        replace_atomically(&path, "127.0.0.1 localhost\n", "127.0.0.1 other\n").unwrap();
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o7777;
+        assert_eq!(
+            mode, 0o644,
+            "a 0600 hosts file breaks lookups for every other user"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// An unusual mode is the machine's choice and is carried over rather than normalised.
+    #[test]
+    fn an_unusual_mode_is_carried_over_rather_than_replaced_with_a_default() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = hosts_scratch("oddmode");
+        let path = dir.join("hosts");
+        std::fs::write(&path, "127.0.0.1 localhost\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)).unwrap();
+
+        replace_atomically(&path, "127.0.0.1 localhost\n", "127.0.0.1 other\n").unwrap();
+
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o7777,
+            0o640
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// # Regression
+    ///
+    /// Stacer staged its hosts write at a predictable path under world-writable `/tmp` and moved it
+    /// into place as root, so any local user could plant a symlink and be written through. The staging
+    /// file here is a sibling of the target, where nothing unprivileged can create anything — and
+    /// `rename` is only atomic within one filesystem anyway.
+    #[test]
+    fn the_staging_file_is_a_sibling_and_is_not_left_behind() {
+        let dir = hosts_scratch("staging");
+        let path = dir.join("hosts");
+        std::fs::write(&path, "127.0.0.1 localhost\n").unwrap();
+
+        replace_atomically(&path, "127.0.0.1 localhost\n", "127.0.0.1 other\n").unwrap();
+
+        let leftovers: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|name| name != "hosts")
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "a successful write left files behind: {leftovers:?}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// And a *failed* write must not leave one either — a stray `.hosts.nix-*.tmp` in `/etc` would be
+    /// litter in the one directory where litter is least welcome.
+    #[test]
+    fn a_refused_write_leaves_no_staging_file() {
+        let dir = hosts_scratch("nolitter");
+        let path = dir.join("hosts");
+        std::fs::write(&path, "127.0.0.1 localhost\n").unwrap();
+
+        // Refused at the precondition, which happens before staging.
+        assert!(replace_atomically(&path, "something else\n", "127.0.0.1 x\n").is_err());
+
+        let entries: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(entries, vec!["hosts"], "found {entries:?}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A symlink or bind mount is refused rather than replaced. Rename would move the link aside,
+    /// which silently detaches whatever was managing it.
+    #[test]
+    fn a_symlink_is_refused_rather_than_replaced() {
+        let dir = hosts_scratch("symlink");
+        let real = dir.join("real-hosts");
+        let link = dir.join("hosts");
+        std::fs::write(&real, "127.0.0.1 localhost\n").unwrap();
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let error = replace_atomically(&link, "127.0.0.1 localhost\n", "127.0.0.1 x\n")
+            .expect_err("a symlink must be refused");
+        assert_eq!(error.code, ErrorCode::HelperRejected);
+
+        assert!(
+            std::fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "the link itself must still be a link"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&real).unwrap(),
+            "127.0.0.1 localhost\n",
+            "and the target must be untouched"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The check that stops this operation being a general-purpose privileged write. Reached through
+    /// `write_hosts_file`, which is what the protocol dispatches, so this covers the real path — and it
+    /// refuses before looking at the file at all, which is why it is safe to call here.
+    #[test]
+    fn content_that_is_not_a_hosts_file_is_refused_before_anything_is_touched() {
+        for hostile in [
+            "#!/bin/sh\nrm -rf /\n",
+            "127.0.0.1 localhost\nnot a hosts line\n",
+            "127.0.0.1 localhost\0\n",
+            "127.0.0.1 localhost",
+        ] {
+            let error = write_hosts_file("whatever the file holds", hostile)
+                .expect_err("only a well-formed hosts file may be written");
+            assert_eq!(
+                error.code,
+                ErrorCode::InvalidInput,
+                "{hostile:?} was refused for the wrong reason: {}",
+                error.message
+            );
+        }
+    }
+
+    /// And the refusal above must come from the content check rather than from the precondition, or
+    /// the test proves nothing about content validation.
+    #[test]
+    fn the_content_check_runs_before_the_precondition_check() {
+        let error = write_hosts_file("this will never match /etc/hosts", "garbage\n").unwrap_err();
+        assert_eq!(
+            error.code,
+            ErrorCode::InvalidInput,
+            "bad content must be refused as invalid input, not as a stale precondition"
+        );
     }
 
     // ---- `PRC-2`: signals and renice ----
