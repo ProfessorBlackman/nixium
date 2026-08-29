@@ -55,4 +55,12 @@ tray_enabled: boolean,
  * Ignored entirely when [`Settings::tray_enabled`] is false: hiding to a tray that is not there
  * leaves a process with no way back to it, which is the worst of both.
  */
-close_to_tray: boolean, };
+close_to_tray: boolean, 
+/**
+ * Whether the first-run introduction has been shown. `PLT-4`.
+ *
+ * Stored rather than inferred from the settings file's existence, because those are different
+ * questions: a user who deletes their settings has not become a new user, and one restoring a
+ * backup should not be introduced to the tool again.
+ */
+introduced: boolean, };

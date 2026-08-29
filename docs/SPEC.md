@@ -1074,10 +1074,10 @@ and always available.
 | PLT-1 | Internationalisation | P1 — **partly done** |
 | PLT-2 | Accessibility & keyboard | P0 — done |
 | PLT-3 | Tray & background behaviour | P1 — done |
-| PLT-4 | First-run experience | P2 |
+| PLT-4 | First-run experience | P2 — done |
 | PLT-5 | Packaging & distribution | P0 — done |
 | PLT-6 | Performance budget verification | P0 — done |
-| PLT-7 | Documentation & in-app help | P1 |
+| PLT-7 | Documentation & in-app help | P1 — done |
 
 **PLT-1 Internationalisation.** Harvest Stacer's 26 existing Qt `.ts` locale files into JSON
 rather than restarting translation. Live language switching (Stacer required a restart), RTL
@@ -1180,6 +1180,26 @@ assert both directions against a real `Pipeline`.
 **PLT-4 First-run experience.** Explain what nix will and won't touch, offer a first scan, set
 up protected paths. Establishing trust before the first destructive action is the point.
 
+*Delivered as one screen, shown before the shell rather than over it.* A dialog floating above a
+populated window invites dismissing it to reach what is underneath, and the point is to be read.
+
+It leads with the **limits**, not the features: what is never touched (your files, the running and
+newest kernels, anything in protected paths), what happens before anything is deleted (a preview,
+sizes that say "up to" where space is shared, an arithmetic check against the filesystem afterwards),
+and two things people are surprised by — that authorisation is once per batch, and that trashing frees
+nothing until the trash is emptied.
+
+Deliberately **not a wizard**. A multi-step tour of a thirteen-view tool is one people click through
+without reading, which is worse than none: it converts "I was not told" into "I was told and ignored
+it" while leaving them equally uninformed.
+
+The flag is stored rather than inferred from whether a settings file exists — a user who deletes their
+settings has not become a new user, and one restoring a backup should not be introduced again. It is
+written *before* dismissing, so a failed write means the screen returns; showing it twice is a small
+annoyance, never showing it because a write failed defeats the purpose.
+
+The screen says it can be read again in About, so About has a button that does exactly that.
+
 **PLT-5 Packaging & distribution.** `.deb`, `.rpm`, AppImage, Flatpak, AUR. Desktop entry,
 icon theme sizes, polkit policy file installed correctly per format. *Accepts:* each artefact
 installs and runs on its Tier-1 target in CI.
@@ -1233,6 +1253,25 @@ they measured the test suite. Idle CPU read **196% of one core**; memory read **
 
 **PLT-7 Documentation & in-app help.** Per-category explanations of what reclaiming actually
 does — inline, at the point of decision, not in a manual.
+
+*Delivered as a **required** trait method.* `Category::explains()` has no default: a category that
+cannot say what it deletes has no business offering to delete it, and a default of `""` would let one
+ship silent — the state this exists to end. Adding a category now means writing the sentence, and the
+compiler insists.
+
+All 22 implementations written, and two tests make it hard to fob off. Every real category's
+explanation must be at least 80 characters, must not merely restate its own label, and must be a
+sentence; and no two may share one, because copy-paste is the obvious way to satisfy a compiler without
+saying anything.
+
+The shape is *what goes, what happens next time it is needed, what you would notice* — never a
+definition of the term. "Removes cached package files" tells a user nothing they could not guess from
+the label; what they cannot guess is whether it comes back, and how expensive it is when it does.
+
+The explanations ride on the `Preview`, built in the same pass as the items, so an item can never
+appear with no explanation available for it. Rendered under the first item of each category, in the
+flow of the list rather than behind a tooltip — a decision aid you have to hover to find is one people
+decide without.
 
 ---
 

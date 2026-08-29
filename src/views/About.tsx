@@ -17,6 +17,7 @@ import {
   type Capabilities,
   type Versions,
 } from "../lib/ipc";
+import { t } from "../lib/i18n";
 import { notify } from "../lib/notices";
 import { useOperation } from "../lib/useOperation";
 
@@ -30,6 +31,7 @@ const DEMO_ERRORS = [
 ] as const;
 
 export default function About() {
+  const [reintroducing, setReintroducing] = useState(false);
   const [versions, setVersions] = useState<Versions | null>(null);
   const [caps, setCaps] = useState<Capabilities | null>(null);
   const [diag, setDiag] = useState<Diagnostics | null>(null);
@@ -46,6 +48,25 @@ export default function About() {
       })
       .catch((thrown) => notify.error(toAppError(thrown)));
   }, []);
+
+  /**
+   * Clear the "introduced" flag and reload, which brings the first-run screen back.
+   *
+   * A reload rather than rendering the screen from here: `App` decides what to show based on that
+   * flag, and a second place that can put the introduction on screen would be a second thing to keep
+   * in step with it.
+   */
+  async function showIntroduction() {
+    setReintroducing(true);
+    try {
+      const current = await api.settingsGet();
+      await api.settingsSave({ ...current, introduced: false });
+      window.location.reload();
+    } catch (thrown) {
+      notify.error(toAppError(thrown));
+      setReintroducing(false);
+    }
+  }
 
   async function probeHelper() {
     setProbing(true);
@@ -146,6 +167,18 @@ export default function About() {
             </dd>
           </dl>
         )}
+      </div>
+
+      <div className="card">
+        <h2>{t("What nix will and will not do")}</h2>
+        <p className="muted">
+          {t(
+            "The introduction shown on first run — what is never touched, what happens before anything is deleted, and what the sizes mean. The first-run screen says this can be read again here, so it can be.",
+          )}
+        </p>
+        <button type="button" disabled={reintroducing} onClick={() => void showIntroduction()}>
+          {reintroducing ? t("Opening…") : t("Show it again")}
+        </button>
       </div>
 
       <div className="card">

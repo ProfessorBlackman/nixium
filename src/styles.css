@@ -2168,3 +2168,53 @@ button.danger:hover:not(:disabled) {
   font-size: 0.75rem;
   max-width: 70ch;
 }
+
+/* The first-run introduction (PLT-4).
+   A full page rather than a modal over the shell: it says what nix will and will not do before the
+   user is near a button that deletes something, and a dialog floating over a populated window invites
+   dismissing it to get at what is underneath. */
+.firstrun {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  height: 100%;
+  overflow-y: auto;
+  background: var(--ground);
+  padding: 2rem 1.5rem;
+}
+
+.firstrun-panel {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-top: 3px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 1.6rem 1.8rem;
+  max-width: 46rem;
+}
+
+.firstrun-panel h1 {
+  margin: 0 0 0.4rem;
+  font-size: 1.35rem;
+  letter-spacing: -0.015em;
+}
+
+.firstrun-panel h2 {
+  margin: 1.3rem 0 0.4rem;
+  font-size: 0.9375rem;
+}
+
+.firstrun-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.8125rem;
+  color: var(--ink-mid);
+}
+
+.firstrun-list li {
+  margin-bottom: 0.35rem;
+  max-width: 68ch;
+}
+
+.firstrun-panel .row {
+  margin-top: 1.4rem;
+}
