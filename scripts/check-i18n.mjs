@@ -44,7 +44,7 @@ const roots = [join(here, "..", "src", "views"), join(here, "..", "src", "compon
  * A ratchet does not need an accurate inventory. It needs a number that cannot go up, and one that
  * falls when a view is genuinely converted. Both hold with the over-count in it.
  */
-const CEILING = 81;
+const CEILING = 78;
 
 /** Things that look like prose but are not shown to anyone. */
 const IGNORE = [
@@ -62,8 +62,21 @@ for (const root of roots) {
   for (const name of readdirSync(root).filter((f) => f.endsWith(".tsx"))) {
     const text = readFileSync(join(root, name), "utf8");
 
-    // Strip the module doc comment: it is prose, and it is not rendered.
-    let body = text.replace(/^\/\*\*[\s\S]*?\*\//m, "");
+    /*
+     * Strip comments — all of them, not just the module header.
+     *
+     * An earlier version stripped only the first block comment, so prose in every *other* comment was
+     * counted as untranslated interface text. Documenting a component therefore raised its score,
+     * which is a perverse incentive in a ratchet whose whole job is to fall. It surfaced when adding
+     * grouped navigation: three of the four "untranslated strings" it reported were sentences from the
+     * comment explaining the grouping.
+     *
+     * Whole-line `//` comments only. A trailing `// …` cannot be stripped by pattern without also
+     * eating the `//` in a `https://` inside a string.
+     */
+    let body = text
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/[^\n]*$/gm, "");
 
     /*
      * Strip top-level `const` tables when the file translates computed values.

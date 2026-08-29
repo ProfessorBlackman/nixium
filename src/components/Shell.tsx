@@ -56,21 +56,67 @@ type ViewDef = { id: ViewId; title: string; hint: string };
  * language switching "mostly works".
  */
 
-const VIEWS: ViewDef[] = [
-  { id: "overview", title: "Overview", hint: "Storage and system at a glance" },
-  { id: "explorer", title: "Space explorer", hint: "Where your disk went" },
-  { id: "find", title: "Find", hint: "Largest files, duplicates and search" },
-  { id: "trends", title: "Trends", hint: "What grew, and when" },
-  { id: "processes", title: "Processes", hint: "What is running, and what it costs" },
-  { id: "services", title: "Services", hint: "systemd units, timers and their logs" },
-  { id: "software", title: "Software", hint: "What is installed, and what it really costs" },
-  { id: "repositories", title: "Sources", hint: "Where software comes from" },
-  { id: "startup", title: "Startup", hint: "What runs when you log in" },
-  { id: "hosts", title: "Hosts", hint: "Names this machine resolves itself" },
-  { id: "reclaim", title: "Reclaim", hint: "Free space safely" },
-  { id: "settings", title: "Settings", hint: "Preferences" },
-  { id: "about", title: "About", hint: "Versions and diagnostics" },
+/**
+ * The sidebar, in groups.
+ *
+ * Thirteen flat items is a list people read once and then hunt through. Grouped, the sidebar answers
+ * "where would that live?" before you have to remember where it is.
+ *
+ * **Storage first**, because that is what this tool is for: a user with a full disk should not have to
+ * pass anything else on the way to the four views that address it. Overview sits above the groups
+ * rather than inside Storage — it covers storage *and* system, so filing it under one would be wrong
+ * in half the cases — and Settings and About sit below, where housekeeping belongs.
+ *
+ * `Hosts` is filed under System rather than a group of its own. It is name resolution, which is a
+ * system-configuration file that happens to be about the network; a one-item "Network" group would be
+ * a heading that exists to justify itself.
+ *
+ * A group's heading is **not** clickable and does not name a view. A heading that is also a
+ * destination gives two things the same name and makes the user guess which one they got.
+ */
+type ViewGroup = { title: string | null; views: ViewDef[] };
+
+const GROUPS: ViewGroup[] = [
+  {
+    title: null,
+    views: [{ id: "overview", title: "Overview", hint: "Storage and system at a glance" }],
+  },
+  {
+    title: "Storage",
+    views: [
+      { id: "explorer", title: "Space explorer", hint: "Where your disk went" },
+      { id: "find", title: "Find", hint: "Largest files, duplicates and search" },
+      { id: "trends", title: "Trends", hint: "What grew, and when" },
+      { id: "reclaim", title: "Reclaim", hint: "Free space safely" },
+    ],
+  },
+  {
+    title: "Software",
+    views: [
+      { id: "software", title: "Software", hint: "What is installed, and what it really costs" },
+      { id: "repositories", title: "Sources", hint: "Where software comes from" },
+    ],
+  },
+  {
+    title: "System",
+    views: [
+      { id: "processes", title: "Processes", hint: "What is running, and what it costs" },
+      { id: "services", title: "Services", hint: "systemd units, timers and their logs" },
+      { id: "startup", title: "Startup", hint: "What runs when you log in" },
+      { id: "hosts", title: "Hosts", hint: "Names this machine resolves itself" },
+    ],
+  },
+  {
+    title: null,
+    views: [
+      { id: "settings", title: "Settings", hint: "Preferences" },
+      { id: "about", title: "About", hint: "Versions and diagnostics" },
+    ],
+  },
 ];
+
+/** Every view, flattened — for the header, which needs to look one up by id. */
+const VIEWS: ViewDef[] = GROUPS.flatMap((group) => group.views);
 
 function ViewBody({ id }: { id: ViewId }) {
   switch (id) {
@@ -151,21 +197,32 @@ export function Shell({ initialView }: { initialView: ViewId }) {
           {/* Not translated: it is the application's name, not a word. */}
           <span className="brand-name">nix</span>
         </div>
-        <ul>
-          {VIEWS.map((v) => (
-            <li key={v.id}>
-              <button
-                type="button"
-                className={v.id === view ? "nav-item is-active" : "nav-item"}
-                aria-current={v.id === view ? "page" : undefined}
-                onClick={() => setView(v.id)}
-              >
-                <span className="nav-title">{t(v.title)}</span>
-                <span className="nav-hint">{t(v.hint)}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
+        {GROUPS.map((group, index) => (
+          // A list per group, labelled by its heading where it has one, so a screen reader announces
+          // "Storage, list, four items" rather than one undifferentiated run of thirteen.
+          <div className="nav-group" key={group.title ?? `group-${index}`}>
+            {group.title !== null && (
+              <h2 className="nav-group-title" id={`nav-group-${index}`}>
+                {t(group.title)}
+              </h2>
+            )}
+            <ul aria-labelledby={group.title === null ? undefined : `nav-group-${index}`}>
+              {group.views.map((v) => (
+                <li key={v.id}>
+                  <button
+                    type="button"
+                    className={v.id === view ? "nav-item is-active" : "nav-item"}
+                    aria-current={v.id === view ? "page" : undefined}
+                    onClick={() => setView(v.id)}
+                  >
+                    <span className="nav-title">{t(v.title)}</span>
+                    <span className="nav-hint">{t(v.hint)}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
       </nav>
 
       <div className="main">

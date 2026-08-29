@@ -2289,3 +2289,33 @@ button.danger:hover:not(:disabled) {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Sidebar groups.
+   The heading is a label, not a control: it is not clickable, does not name a view, and is skipped by
+   Tab. A heading that is also a destination gives two things the same name. */
+.nav-group + .nav-group {
+  margin-top: 0.9rem;
+}
+
+.nav-group-title {
+  margin: 0 0 0.25rem;
+  padding: 0 0.55rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+/* A hairline above each labelled group, so the grouping reads even at a glance where the small
+   heading might not. Not on the first group, which needs no separator from the brand above it. */
+.nav-group:not(:first-child) .nav-group-title {
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--rule);
+}
+
+/* The trailing unlabelled group — Settings and About — still wants separating from System above it. */
+.nav-group:last-child:not(:first-child) > ul {
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--rule);
+}
