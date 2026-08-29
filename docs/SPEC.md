@@ -1071,11 +1071,11 @@ and always available.
 
 | ID | Feature | Pri |
 | --- | --- | --- |
-| PLT-1 | Internationalisation | P1 |
+| PLT-1 | Internationalisation | P1 — **partly done** |
 | PLT-2 | Accessibility & keyboard | P0 — done |
 | PLT-3 | Tray & background behaviour | P1 |
 | PLT-4 | First-run experience | P2 |
-| PLT-5 | Packaging & distribution | P0 |
+| PLT-5 | Packaging & distribution | P0 — done |
 | PLT-6 | Performance budget verification | P0 — done |
 | PLT-7 | Documentation & in-app help | P1 |
 
@@ -1083,6 +1083,28 @@ and always available.
 rather than restarting translation. Live language switching (Stacer required a restart), RTL
 layout for Arabic. *Accepts:* no user-facing string is hardcoded; switching language needs no
 restart.
+
+*Partly delivered, and the premise did not survive measurement.*
+
+**Done:** the translation layer, keyed on English source text; all 26 of Stacer's locale files
+harvested into JSON (**3,902 translated strings**, with the entries Stacer left `unfinished` skipped
+rather than carried across as English pretending to be translated); live switching with no restart;
+`dir`/`lang` set on the document for RTL; a language menu naming each language in itself; the choice
+persisted and restored on start.
+
+**The premise.** "Harvest rather than restarting translation" implies the harvest carries the
+interface. Measured: of 307 candidate user-facing strings in nix's views, **15 appear in Stacer's
+catalogue — 4.9%**. `Cancel`, `Search`, `Settings`, `Size`, `Name`, `Path`. Everything else in nix is
+new wording, so the 3,902 strings amount to interface vocabulary and nothing more. Keeping the harvest
+is still right — it is 15 strings nobody must retranslate in 26 languages, and it gives a contributor a
+populated file rather than a blank one — but it does not mean the interface is translated, and the
+language menu says so where a user chooses.
+
+**Not done:** the retrofit. 361 user-facing strings remain hardcoded, so "no user-facing string is
+hardcoded" is **unmet**. `scripts/check-i18n.mjs` is a **ratchet** rather than a gate: it fails the
+build if the count rises, so the debt cannot grow and every new view lands translatable, but it does not
+pretend the debt is paid. `PLAN.md` §8 predicted exactly this retrofit cost for skipping the continuous
+workstream, and the prediction was correct.
 
 **PLT-2 Accessibility & keyboard.** Full keyboard operation, visible focus, screen-reader
 labels on every control, `prefers-reduced-motion` honoured, WCAG AA contrast in both themes.
@@ -1136,6 +1158,26 @@ up protected paths. Establishing trust before the first destructive action is th
 **PLT-5 Packaging & distribution.** `.deb`, `.rpm`, AppImage, Flatpak, AUR. Desktop entry,
 icon theme sizes, polkit policy file installed correctly per format. *Accepts:* each artefact
 installs and runs on its Tier-1 target in CI.
+
+*Delivered.* Phase 0 built the four bundle formats; what `PLT-5` adds is the acceptance criterion,
+because **CI had been building packages and uploading them without ever opening one**. A build that
+produces a package missing its polkit policy is still a build that succeeded.
+
+`scripts/check-bundle.sh` opens the built `.deb` and asserts its contents, the helper's mode (0755, and
+**not** setuid — pkexec performs the authorisation, so a setuid helper would be authorising itself),
+the desktop entry's validity, the polkit dependency, and the one that would otherwise surface only on a
+user's machine: **the path the policy annotates is a path the package installs**. Those two facts live
+in different files and nothing else compares them; if they drift, every privileged action fails
+authorisation at run time with no build error anywhere. Verified against a deliberately broken package.
+
+Run against a real 4.5 MB `.deb` built here, all nine checks pass. CI now also installs it and runs it,
+which needed `nix --version` to exist — before, the binary opened a window, and there is no display on
+the runner to open one on. That is the sort of gap an acceptance criterion nobody executes leaves
+behind.
+
+An AUR `PKGBUILD` completes the five formats. Arch builds from source, so it is the one format besides
+deb and rpm where the helper and policy land on the host by the distribution's own rules — the reason
+AppImage and Flatpak remain read-only is unchanged and documented in `packaging/README.md`.
 
 **PLT-6 Performance budget verification.** The budgets in §7.3 asserted in CI on a fixed
 fixture, failing the build on regression.

@@ -2,13 +2,13 @@
 SHELL := /bin/bash
 CARGO_DIR := src-tauri
 
-.PHONY: help check fmt fmt-check clippy test typecheck a11y bindings perf helper dev build hooks \
+.PHONY: help check fmt fmt-check clippy test typecheck a11y i18n bindings perf helper dev build hooks \
 	install-helper uninstall-helper helper-smoke timer-status timer-run
 
 help:
 	@grep -E '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | expand -t22
 
-check: fmt-check clippy test typecheck a11y ## Everything CI checks
+check: fmt-check clippy test typecheck a11y i18n ## Everything CI checks
 
 fmt: ## Format Rust sources
 	cd $(CARGO_DIR) && cargo fmt --all
@@ -97,6 +97,9 @@ perf: ## Measure the performance budgets (release mode)
 a11y: ## Accessibility checks: WCAG AA contrast, and every control named (PLT-2)
 	node scripts/check-contrast.mjs
 	node scripts/check-labels.mjs
+
+i18n: ## Translatable-string ratchet: the count must not go up (PLT-1)
+	node scripts/check-i18n.mjs
 
 typecheck: ## Type-check the frontend
 	pnpm tsc --noEmit

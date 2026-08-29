@@ -134,6 +134,11 @@ jobs:
 
       - name: Every control has an accessible name
         run: node scripts/check-labels.mjs
+
+      # A ratchet, not a gate: the i18n retrofit is unfinished, so this stops the debt growing rather
+      # than pretending it is paid. New user-facing text must go through t(). `PLT-1`.
+      - name: Translatable strings (ratchet)
+        run: node scripts/check-i18n.mjs
       - run: pnpm build
 
   bundle:
@@ -173,3 +178,20 @@ jobs:
             src-tauri/target/release/bundle/rpm/*.rpm
             src-tauri/target/release/bundle/appimage/*.AppImage
           if-no-files-found: error
+
+      # `PLT-5`'s acceptance criterion. Until now CI built the bundles and uploaded them without ever
+      # opening one — a build that produces a package missing its polkit policy is still a build that
+      # succeeded.
+      - name: Inspect the deb
+        run: ./scripts/check-bundle.sh src-tauri/target/release/bundle/deb/*.deb
+
+      # And that it installs and runs, which is what the criterion actually says. `--version` exists
+      # for this: before it did, the binary opened a window, and there is no display here to open one
+      # on.
+      - name: Install it and run it
+        run: |
+          sudo apt-get install -y ./src-tauri/target/release/bundle/deb/*.deb
+          nix --version
+          test -x /usr/libexec/nix/nix-helper
+          test -f /usr/share/polkit-1/actions/com.tlc.nix.policy
+          desktop-file-validate /usr/share/applications/com.tlc.nix.desktop

@@ -9,6 +9,24 @@ Task 0.10 (`FND-9`). Four formats, with an honest note about what each can actua
 | AppImage | `tauri build --bundles appimage` | bundled, not installed | **no** — see below |
 | Flatpak | `flatpak-builder` with `flatpak/com.tlc.nix.yml` | not installed | **no** — see below |
 
+## Building a deb locally
+
+```sh
+cd src-tauri && cargo build -p nix-helper --release && cd ..
+pnpm tauri build --bundles deb
+./scripts/check-bundle.sh src-tauri/target/release/bundle/deb/*.deb
+```
+
+**The helper must be built first.** `tauri.conf.json` copies it out of `target/release`, so without
+that step the bundle fails — after a full release compile — with `"target/release/nix-helper" does not
+exist`. CI has a separate step for it; locally it is easy to forget, which is how this note came to be
+written.
+
+`check-bundle.sh` is the check that matters. It opens the built package and asserts, among other
+things, that **the path the polkit policy annotates is a path the package installs**. Those two facts
+live in different files, nothing else compares them, and if they drift the symptom is every privileged
+action failing authorisation at run time on a user's machine, with no build error anywhere.
+
 ## Why AppImage and Flatpak are read-only for now
 
 Both are relocatable, and polkit authorises by **absolute executable path**: the policy file in

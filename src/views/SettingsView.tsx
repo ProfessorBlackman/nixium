@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 
 import { formatBytes } from "../lib/format";
+import { available, setLocale, t, useLocale } from "../lib/i18n";
 import { api, toAppError, type Rule, type Settings, type Theme } from "../lib/ipc";
 import { notify } from "../lib/notices";
 import { applyTheme } from "../lib/theme";
@@ -88,9 +89,70 @@ const SUGGESTED: Array<{ label: string; rule: Rule }> = [
   },
 ];
 
+/**
+ * Endonyms — each language named in itself.
+ *
+ * A list of English names would be the wrong way round: someone looking for their language reads the
+ * list in that language, not in the one they cannot read. Codes come from Stacer's own file names.
+ */
+const LANGUAGE_NAMES: Record<string, string> = {
+  en: "English",
+  ar: "العربية",
+  "ca-es": "Català",
+  cs: "Čeština",
+  de: "Deutsch",
+  es: "Español",
+  fr: "Français",
+  gl: "Galego",
+  hi: "हिन्दी",
+  hu: "Magyar",
+  it: "Italiano",
+  kn: "ಕನ್ನಡ",
+  ko: "한국어",
+  ml: "മലയാളം",
+  nl: "Nederlands",
+  oc: "Occitan",
+  pl: "Polski",
+  pt: "Português",
+  ro: "Română",
+  ru: "Русский",
+  sv: "Svenska",
+  tr: "Türkçe",
+  ua: "Українська",
+  vn: "Tiếng Việt",
+  "zh-cn": "简体中文",
+  "zh-tw": "繁體中文",
+};
+
 export default function SettingsView() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [saving, setSaving] = useState(false);
+  const [switching, setSwitching] = useState(false);
+  const chosen = useLocale();
+
+  /**
+   * Switch language.
+   *
+   * Not persisted through the settings store: the store is a Rust type with a fixed shape, and adding
+   * a field there is a protocol change for a preference the frontend owns entirely. It lives in
+   * `localStorage`, read once on start.
+   */
+  async function changeLanguage(code: string) {
+    setSwitching(true);
+    try {
+      await setLocale(code);
+      try {
+        localStorage.setItem("nix.locale", code);
+      } catch {
+        // A browser with storage disabled loses the preference on restart, which is a smaller problem
+        // than failing the switch the user just asked for.
+      }
+    } catch (thrown) {
+      notify.error(toAppError(thrown));
+    } finally {
+      setSwitching(false);
+    }
+  }
 
   useEffect(() => {
     api
@@ -123,25 +185,45 @@ export default function SettingsView() {
   return (
     <section className="stack">
       <div className="card">
-        <h2>Appearance</h2>
+        <h2>{t("Appearance")}</h2>
         <label className="field">
-          <span>Theme</span>
+          <span>{t("Theme")}</span>
           <select
             value={settings.theme}
             disabled={saving}
             onChange={(e) => void update({ theme: e.currentTarget.value as Theme })}
           >
-            {THEMES.map((t) => (
-              <option key={t.value} value={t.value}>
-                {t.label}
+            {THEMES.map((option) => (
+              <option key={option.value} value={option.value}>
+                {t(option.label)}
               </option>
             ))}
           </select>
         </label>
+
+        <label className="field">
+          <span>{t("Language")}</span>
+          <select
+            value={chosen}
+            disabled={switching}
+            onChange={(e) => void changeLanguage(e.currentTarget.value)}
+          >
+            {available().map((code) => (
+              <option key={code} value={code}>
+                {LANGUAGE_NAMES[code] ?? code}
+              </option>
+            ))}
+          </select>
+          <small>
+            {t(
+              "Takes effect immediately — no restart. Translations are inherited from Stacer, which covers common interface words; most of nix's own wording is new and still English.",
+            )}
+          </small>
+        </label>
       </div>
 
       <div className="card">
-        <h2>Storage</h2>
+        <h2>{t("Storage")}</h2>
         <label className="field field-inline">
           <input
             type="checkbox"

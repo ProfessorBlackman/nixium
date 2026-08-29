@@ -11,6 +11,7 @@
 import { Suspense, lazy, useEffect, useState } from "react";
 
 import { api, toAppError } from "../lib/ipc";
+import { t, tf, useLocale } from "../lib/i18n";
 import { markAllRead, notify, useNotices, useUnreadCount } from "../lib/notices";
 import { NoticePanel } from "./NoticePanel";
 
@@ -45,6 +46,15 @@ export type ViewId =
   | "about";
 
 type ViewDef = { id: ViewId; title: string; hint: string };
+
+/*
+ * The titles and hints below are the English source text, and stay English here.
+ *
+ * `t()` is applied where they are **rendered**, not where they are declared: this array is evaluated
+ * once when the module loads, so translating it here would freeze whichever language was active at
+ * that moment and never update on a switch. That is the shape of bug that makes people believe live
+ * language switching "mostly works".
+ */
 
 const VIEWS: ViewDef[] = [
   { id: "overview", title: "Overview", hint: "Storage and system at a glance" },
@@ -112,6 +122,9 @@ function Announcer() {
 }
 
 export function Shell({ initialView }: { initialView: ViewId }) {
+  // Subscribing to the locale is what makes switching live: without it the shell keeps whatever text
+  // it rendered first, and only views that happened to re-render would change language.
+  useLocale();
   const [view, setView] = useState<ViewId>(initialView);
   const [panelOpen, setPanelOpen] = useState(false);
   const unread = useUnreadCount();
@@ -130,7 +143,7 @@ export function Shell({ initialView }: { initialView: ViewId }) {
 
   return (
     <div className="shell">
-      <nav className="sidebar" aria-label="Views">
+      <nav className="sidebar" aria-label={t("Views")}>
         <div className="brand">
           <span className="brand-mark" aria-hidden="true">
             ◪
@@ -146,8 +159,8 @@ export function Shell({ initialView }: { initialView: ViewId }) {
                 aria-current={v.id === view ? "page" : undefined}
                 onClick={() => setView(v.id)}
               >
-                <span className="nav-title">{v.title}</span>
-                <span className="nav-hint">{v.hint}</span>
+                <span className="nav-title">{t(v.title)}</span>
+                <span className="nav-hint">{t(v.hint)}</span>
               </button>
             </li>
           ))}
@@ -157,8 +170,8 @@ export function Shell({ initialView }: { initialView: ViewId }) {
       <div className="main">
         <header className="header">
           <div>
-            <h1>{active.title}</h1>
-            <p className="header-hint">{active.hint}</p>
+            <h1>{t(active.title)}</h1>
+            <p className="header-hint">{t(active.hint)}</p>
           </div>
           <button
             type="button"
@@ -169,7 +182,9 @@ export function Shell({ initialView }: { initialView: ViewId }) {
               // Defer, so the badge does not vanish before the panel paints.
               if (opening) setTimeout(markAllRead, 400);
             }}
-            aria-label={unread > 0 ? `Notifications, ${unread} unread` : "Notifications"}
+            aria-label={
+              unread > 0 ? tf("Notifications, {n} unread", { n: unread }) : t("Notifications")
+            }
           >
             <span aria-hidden="true">◎</span>
             {unread > 0 && <span className="badge">{unread}</span>}
@@ -185,7 +200,7 @@ export function Shell({ initialView }: { initialView: ViewId }) {
 
         <div className="content">
           <main className="view">
-            <Suspense fallback={<p className="empty">Loading…</p>}>
+            <Suspense fallback={<p className="empty">{t("Loading…")}</p>}>
               <ViewBody id={view} />
             </Suspense>
           </main>

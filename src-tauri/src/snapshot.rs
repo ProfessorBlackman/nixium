@@ -21,8 +21,42 @@ pub(crate) fn run_if_requested() -> Option<i32> {
     match args.next().as_deref() {
         Some("snapshot") => Some(take_sample(std::env::args().any(|a| a == "--quiet"))),
         Some("helper-probe") => Some(probe_helper()),
+        // Without these, `nix --version` opened a window. That is not merely unhelpful: it is the
+        // reason `PLT-5`'s "installs and runs" could not be checked in CI, where there is no display
+        // to open one on. A packaged binary you cannot ask a question of is a packaged binary nobody
+        // verifies.
+        Some("--version" | "-V") => {
+            println!("nix {}", env!("CARGO_PKG_VERSION"));
+            Some(0)
+        }
+        Some("--help" | "-h") => {
+            print_help();
+            Some(0)
+        }
         _ => None,
     }
+}
+
+/// What this binary does when asked.
+///
+/// Deliberately short. It is a graphical application with two maintenance subcommands, not a CLI, and
+/// a help text that pretends otherwise sends people looking for flags that do not exist.
+fn print_help() {
+    println!(
+        "\
+nix {version} — find out where your disk went, and reclaim it safely
+
+Usage:
+  nix                    open the application
+  nix snapshot [--quiet] record one storage sample, for the growth history
+  nix helper-probe       check the privileged helper end to end (asks for a password)
+  nix --version          print the version
+  nix --help             print this
+
+Everything else happens in the application. Logs are written to
+$XDG_STATE_HOME/nix/logs.",
+        version = env!("CARGO_PKG_VERSION")
+    );
 }
 
 /// Start the helper under `pkexec`, complete a handshake, read one allow-listed file, and exit.

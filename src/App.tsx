@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import { Shell, type ViewId } from "./components/Shell";
 import { api, toAppError } from "./lib/ipc";
 import { notify } from "./lib/notices";
+import { setLocale } from "./lib/i18n";
 import { applyTheme, watchSystemTheme } from "./lib/theme";
 import type { Theme } from "./lib/ipc";
 
@@ -16,6 +17,18 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const [startView, setStartView] = useState<ViewId>("overview");
   const [preference, setPreference] = useState<Theme>("system");
+
+  // The saved language, restored before anything renders text. Independent of the settings store,
+  // which is a Rust type the frontend does not get to add fields to for a preference it owns.
+  useEffect(() => {
+    let code: string | null = null;
+    try {
+      code = localStorage.getItem("nix.locale");
+    } catch {
+      // Storage disabled. English, then.
+    }
+    if (code !== null && code !== "en") void setLocale(code);
+  }, []);
 
   useEffect(() => {
     api

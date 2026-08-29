@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Maintainer: Methuselah Nwodobeh <methuselah.nwodobeh@amalitech.com>
+#
+# `PLT-5`. Arch builds from source rather than repackaging a binary, so this is the one format where
+# the helper and its polkit policy land on the host by the distribution's own rules — which is exactly
+# what AppImage and Flatpak cannot do (see ../README.md).
+
+pkgname=nix-storage
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Find out where your disk went and reclaim it safely"
+arch=('x86_64' 'aarch64')
+url="https://github.com/tlc/nix"
+license=('GPL-3.0-or-later')
+
+# `polkit` is a hard dependency rather than optional: without it the helper cannot be authorised and
+# every privileged feature reports itself unavailable. webkit2gtk is Tauri's renderer.
+depends=('webkit2gtk-4.1' 'gtk3' 'polkit' 'libayatana-appindicator')
+makedepends=('rust' 'cargo' 'pnpm' 'nodejs')
+options=('!lto')
+
+source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "$srcdir/nix-$pkgver"
+  pnpm install --frozen-lockfile
+  pnpm tauri build --bundles deb
+
+  # The helper is a separate binary and is not part of the app bundle.
+  cd src-tauri
+  cargo build -p nix-helper --release --locked
+}
+
+check() {
+  cd "$srcdir/nix-$pkgver/src-tauri"
+  # The helper's own configuration — no D-Bus, no regex — because that is what this package installs
+  # as a root-owned binary. See SPEC.md D10.
+  cargo test -p nix-core --locked
+}
+
+package() {
+  cd "$srcdir/nix-$pkgver"
+
+  install -Dm755 src-tauri/target/release/nix "$pkgdir/usr/bin/nix"
+
+  # 0755 root:root, and *not* setuid: the helper is launched through pkexec, which is what performs
+  # the authorisation. A setuid helper would be authorising itself.
+  install -Dm755 src-tauri/target/release/nix-helper "$pkgdir/usr/libexec/nix/nix-helper"
+
+  # The policy annotates the absolute path above. If one moves, the other must — see
+  # `scripts/check-bundle.sh`, which asserts they agree in the built artefact.
+  install -Dm644 packaging/polkit/com.tlc.nix.policy \
+    "$pkgdir/usr/share/polkit-1/actions/com.tlc.nix.policy"
+
+  install -Dm644 packaging/nix.desktop "$pkgdir/usr/share/applications/com.tlc.nix.desktop"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+
+  for size in 32 128; do
+    install -Dm644 "src-tauri/icons/${size}x${size}.png" \
+      "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/nix.png"
+  done
+}
