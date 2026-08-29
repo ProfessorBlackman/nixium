@@ -47,6 +47,7 @@ check /usr/bin/nix "the application"
 check /usr/libexec/nix/nix-helper "the privileged helper"
 check /usr/share/polkit-1/actions/com.tlc.nix.policy "the polkit policy"
 check /usr/share/applications/com.tlc.nix.desktop "the desktop entry"
+check /usr/share/doc/nix/THIRD-PARTY-NOTICES.md "third-party attribution (Apache-2.0 §4(d))"
 
 # Modes. The helper is launched through pkexec, so it must not be setuid — that would be a binary
 # authorising itself rather than being authorised.

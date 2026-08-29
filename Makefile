@@ -2,7 +2,7 @@
 SHELL := /bin/bash
 CARGO_DIR := src-tauri
 
-.PHONY: help check fmt fmt-check clippy test typecheck a11y i18n bindings perf helper dev build hooks \
+.PHONY: help check fmt fmt-check clippy test typecheck a11y i18n notices bindings perf helper dev build hooks \
 	install-helper uninstall-helper helper-smoke timer-status timer-run
 
 help:
@@ -100,6 +100,10 @@ a11y: ## Accessibility checks: WCAG AA contrast, and every control named (PLT-2)
 
 i18n: ## Translatable-string ratchet: the count must not go up (PLT-1)
 	node scripts/check-i18n.mjs
+
+notices: ## Regenerate third-party attribution from the lockfile (PLT-5)
+	python3 scripts/collect-notices.py > THIRD-PARTY-NOTICES.md
+	@echo "THIRD-PARTY-NOTICES.md regenerated — commit it if it changed."
 
 typecheck: ## Type-check the frontend
 	pnpm tsc --noEmit

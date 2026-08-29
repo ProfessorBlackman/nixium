@@ -58,11 +58,22 @@ that installs the helper — at the path each packaging convention expects.
 
 ## Outstanding for a public release
 
-**Dependency attribution.** nix is GPL-3.0-or-later, and its dependencies are permissive, which is
-compatible in that direction — but Apache-2.0 §4(d) requires that any `NOTICE` file a dependency
-ships be reproduced in distributions. Most Rust crates carry none, so this is likely a short list,
-but it needs generating and shipping (`cargo-about` or `cargo-bundle-licenses`) rather than assumed
-empty. Tracked for M9 (`PLT-5`).
+**Dependency attribution — done.** nix is GPL-3.0-or-later and its dependencies are permissive, which
+is compatible in that direction, but Apache-2.0 §4(d) requires that any `NOTICE` file a dependency
+ships be reproduced in distributions.
+
+`scripts/collect-notices.py` reads `Cargo.lock`, finds each crate in the local registry and collects
+its `NOTICE` and licence files into `THIRD-PARTY-NOTICES.md`, which the deb and rpm install to
+`/usr/share/doc/nix/`. **504 third-party crates, and none ships a `NOTICE`** — so §4(d) imposes no
+reproduction requirement here.
+
+That was checked rather than assumed, which is the point of the script existing instead of a sentence
+saying "probably empty". And the check was itself verified: planting a `NOTICE` in a crate's source
+makes the collector reproduce it in full, and removing it makes the file report none again. Confirmed
+independently with `find`: 821 licence files across the registry, zero notices.
+
+Regenerate before a release — the script says so in the file when a crate is missing from the local
+registry, since an unfetched crate is one whose notice was not checked.
 
 The helper is under `libexec` rather than `bin` because it is not meant to be run by hand; its
 `--serve` mode is the only useful entry point and it says so when invoked without it.

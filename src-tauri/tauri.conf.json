@@ -49,7 +49,8 @@
           "/usr/libexec/nix/nix-helper": "target/release/nix-helper",
           "/usr/share/polkit-1/actions/com.tlc.nix.policy": "../packaging/polkit/com.tlc.nix.policy",
           "/usr/share/applications/com.tlc.nix.desktop": "../packaging/nix.desktop",
-          "/usr/share/doc/nix/copyright": "../LICENSE"
+          "/usr/share/doc/nix/copyright": "../LICENSE",
+          "/usr/share/doc/nix/THIRD-PARTY-NOTICES.md": "../THIRD-PARTY-NOTICES.md"
         }
       },
       "rpm": {
@@ -60,7 +61,8 @@
           "/usr/libexec/nix/nix-helper": "target/release/nix-helper",
           "/usr/share/polkit-1/actions/com.tlc.nix.policy": "../packaging/polkit/com.tlc.nix.policy",
           "/usr/share/applications/com.tlc.nix.desktop": "../packaging/nix.desktop",
-          "/usr/share/licenses/nix/LICENSE": "../LICENSE"
+          "/usr/share/licenses/nix/LICENSE": "../LICENSE",
+          "/usr/share/doc/nix/THIRD-PARTY-NOTICES.md": "../THIRD-PARTY-NOTICES.md"
         }
       }
     }
