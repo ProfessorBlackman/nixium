@@ -99,6 +99,17 @@ pub struct Settings {
     /// Stored as the columns *hidden* rather than those shown, so a column added by a later version
     /// appears by default instead of being invisible until someone finds the setting.
     pub hidden_process_columns: Vec<String>,
+    /// Show a tray icon, and keep running when the window closes. `PLT-3`.
+    ///
+    /// Off by default. A tray icon is a claim on the user's panel and a process that outlives the
+    /// window they closed, and neither is something to assume they wanted — Stacer had no tray at all,
+    /// so nobody is losing behaviour they had.
+    pub tray_enabled: bool,
+    /// With a tray icon, whether closing the window quits or hides. `PLT-3`.
+    ///
+    /// Ignored entirely when [`Settings::tray_enabled`] is false: hiding to a tray that is not there
+    /// leaves a process with no way back to it, which is the worst of both.
+    pub close_to_tray: bool,
 }
 
 impl Default for Settings {
@@ -113,6 +124,8 @@ impl Default for Settings {
             growth_history_enabled: false,
             alert_rules: Vec::new(),
             hidden_process_columns: Vec::new(),
+            tray_enabled: false,
+            close_to_tray: false,
         }
     }
 }

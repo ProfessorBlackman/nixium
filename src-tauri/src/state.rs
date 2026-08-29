@@ -105,6 +105,16 @@ impl AppState {
     }
 
     /// Current settings.
+    /// Replace the alert rules, for tests.
+    ///
+    /// `cfg(test)` so no production path can reach it — the rules are the user's, and a setter that
+    /// bypassed the settings store would be a second way to change them.
+    #[cfg(test)]
+    pub(crate) fn set_alert_rules_for_test(&mut self, rules: Vec<nix_core::metrics::Rule>) {
+        let mut held = self.settings.lock().unwrap_or_else(|e| e.into_inner());
+        held.alert_rules = rules;
+    }
+
     pub(crate) fn settings(&self) -> Settings {
         self.settings.lock().map(|s| s.clone()).unwrap_or_default()
     }

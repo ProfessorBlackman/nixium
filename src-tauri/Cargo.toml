@@ -86,7 +86,10 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 nix-core = { workspace = true, features = ["dbus", "regex"] }
 tracing = { workspace = true }
-tauri = { version = "2", features = [] }
+# `tray-icon` for PLT-3, and `image-png` because the tray needs to decode the icon it is given —
+# without it the tray builds and shows nothing, which is a harder failure to diagnose than a build
+# error.
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-opener = "2"
 serde = { workspace = true }
 serde_json = { workspace = true }

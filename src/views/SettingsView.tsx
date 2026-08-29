@@ -223,6 +223,33 @@ export default function SettingsView() {
       </div>
 
       <div className="card">
+        <h2>{t("Background")}</h2>
+        <label className="field field-inline">
+          <input
+            type="checkbox"
+            checked={settings.tray_enabled}
+            disabled={saving}
+            onChange={(e) => void update({ tray_enabled: e.currentTarget.checked })}
+          />
+          <span>{t("Show a tray icon")}</span>
+        </label>
+        <label className="field field-inline">
+          <input
+            type="checkbox"
+            checked={settings.close_to_tray}
+            disabled={saving || !settings.tray_enabled}
+            onChange={(e) => void update({ close_to_tray: e.currentTarget.checked })}
+          />
+          <span>{t("Closing the window hides it instead of quitting")}</span>
+        </label>
+        <p className="muted">
+          {t(
+            "While hidden, nix stops sampling entirely — unless you have threshold alerts, which keep watching because an alert that stops when the window is hidden is not an alert. Both settings take effect at the next start.",
+          )}
+        </p>
+      </div>
+
+      <div className="card">
         <h2>{t("Storage")}</h2>
         <label className="field field-inline">
           <input

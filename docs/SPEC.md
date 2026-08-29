@@ -1073,7 +1073,7 @@ and always available.
 | --- | --- | --- |
 | PLT-1 | Internationalisation | P1 — **partly done** |
 | PLT-2 | Accessibility & keyboard | P0 — done |
-| PLT-3 | Tray & background behaviour | P1 |
+| PLT-3 | Tray & background behaviour | P1 — done |
 | PLT-4 | First-run experience | P2 |
 | PLT-5 | Packaging & distribution | P0 — done |
 | PLT-6 | Performance budget verification | P0 — done |
@@ -1151,6 +1151,31 @@ thing to be silent about.
 **PLT-3 Tray & background behaviour.** Optional tray icon, quit-vs-minimise preference, and
 `--hide` start — worth carrying over. Sampling stays paused while hidden unless an alert is
 armed (§P9). *Accepts:* hidden in tray with no alerts armed, CPU is ~0.
+
+*Delivered, and the criterion is about what **stops**, not what shows.*
+
+Hiding a window stops nothing on its own. The webview keeps running, the monitoring view keeps its
+subscription, and the sampler keeps working for a window nobody can see — which is the Stacer behaviour
+§P9 exists to prevent, reached by a different route. So hiding **drops the metrics subscription**, and
+showing does not restore it: the view asks again when it is next visible, which is the same path a
+fresh mount takes and therefore the one already exercised. Two ways to start one subscription is how one
+gets leaked.
+
+The single exception is an armed alert rule, and it is the user's own choice — they wrote the rule. An
+alert that stops watching while the window is hidden is not an alert.
+
+Both settings are **off by default**. A tray icon is a claim on the user's panel and a process that
+outlives the window they closed; Stacer had no tray, so nobody loses behaviour they had.
+
+Two things that would each have produced a worse failure than a build error. Whether a tray *exists* is
+managed state rather than a re-read of the setting, because the two can disagree — a desktop with no
+StatusNotifier host cannot show one however the setting reads, and hiding to a tray that is not there
+leaves a running process with no way back to it. And `--hide` is honoured only when a tray was actually
+built, for the same reason.
+
+*Accepts:* tested on the rule rather than through a window, since a Tauri window cannot be created
+without a display. `hiding_with_no_alerts_stops_sampling` and `hiding_with_an_alert_armed_keeps_sampling`
+assert both directions against a real `Pipeline`.
 
 **PLT-4 First-run experience.** Explain what nix will and won't touch, offer a first scan, set
 up protected paths. Establishing trust before the first destructive action is the point.
