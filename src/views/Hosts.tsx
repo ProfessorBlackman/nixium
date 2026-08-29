@@ -18,6 +18,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { t } from "../lib/i18n";
 import { api, toAppError, type HostLine, type HostsFile } from "../lib/ipc";
 import { notify } from "../lib/notices";
 
@@ -75,7 +76,7 @@ export default function Hosts() {
       try {
         setFile(await api.hostsSave(next));
         setDraft(null);
-        notify.success("Hosts file saved.");
+        notify.success(t("Hosts file saved."));
       } catch (thrown) {
         const error = toAppError(thrown);
         notify.error(error);
@@ -106,7 +107,7 @@ export default function Hosts() {
     if (draft === null) return;
     const parts = names(draft);
     if (draft.ip.trim() === "" || parts.length === 0) {
-      notify.warning("An entry needs an address and at least one hostname.");
+      notify.warning(t("An entry needs an address and at least one hostname."));
       return;
     }
 
@@ -175,7 +176,7 @@ export default function Hosts() {
     return (
       <section className="stack">
         <div className="card">
-          <h2>The hosts file</h2>
+          <h2>{t("The hosts file")}</h2>
           <p className="muted">{unavailable}</p>
         </div>
       </section>
@@ -185,7 +186,7 @@ export default function Hosts() {
   return (
     <section className="stack stack-wide">
       <div className="card">
-        <h2>The hosts file</h2>
+        <h2>{t("The hosts file")}</h2>
         <p className="muted">
           Names on this list are resolved here rather than by DNS. {entries.length} entr
           {entries.length === 1 ? "y" : "ies"}, and {file?.lines.length ?? 0} lines in total —
@@ -193,10 +194,10 @@ export default function Hosts() {
         </p>
         <div className="row wrap">
           <button type="button" onClick={() => setDraft({ ...EMPTY_DRAFT })} disabled={busy}>
-            Add an entry
+            {t("Add an entry")}
           </button>
           <button type="button" onClick={() => void load()} disabled={busy}>
-            Reload from disk
+            {t("Reload from disk")}
           </button>
           <label className="field field-inline">
             <input
@@ -204,12 +205,13 @@ export default function Hosts() {
               checked={showAll}
               onChange={(e) => setShowAll(e.target.checked)}
             />
-            <span>Show comments and blank lines</span>
+            <span>{t("Show comments and blank lines")}</span>
           </label>
         </div>
         <p className="muted">
-          Saving asks for administrator rights, and is refused if the file changed since it was
-          loaded — so an edit made in a terminal is reported rather than overwritten.
+          {t(
+            "Saving asks for administrator rights, and is refused if the file changed since it was loaded — so an edit made in a terminal is reported rather than overwritten.",
+          )}
         </p>
       </div>
 
@@ -218,27 +220,27 @@ export default function Hosts() {
           <h2>{draft.id === null ? "New entry" : "Edit entry"}</h2>
           <div className="hosts-form">
             <label className="field">
-              <span>Address</span>
+              <span>{t("Address")}</span>
               <input
                 value={draft.ip}
-                placeholder="127.0.0.1 or ::1"
+                placeholder={t("127.0.0.1 or ::1")}
                 onChange={(e) => setDraft({ ...draft, ip: e.target.value })}
               />
             </label>
             <label className="field">
-              <span>Hostnames</span>
+              <span>{t("Hostnames")}</span>
               <input
                 value={draft.names}
-                placeholder="db.internal db"
+                placeholder={t("db.internal db")}
                 onChange={(e) => setDraft({ ...draft, names: e.target.value })}
               />
-              <small>Space-separated. The first is the canonical name, the rest are aliases.</small>
+              <small>{t("Space-separated. The first is the canonical name, the rest are aliases.")}</small>
             </label>
             <label className="field">
-              <span>Comment</span>
+              <span>{t("Comment")}</span>
               <input
                 value={draft.comment}
-                placeholder="why this entry exists"
+                placeholder={t("why this entry exists")}
                 onChange={(e) => setDraft({ ...draft, comment: e.target.value })}
               />
             </label>
@@ -248,7 +250,7 @@ export default function Hosts() {
               {busy ? "Saving…" : "Save to /etc/hosts"}
             </button>
             <button type="button" onClick={() => setDraft(null)} disabled={busy}>
-              Cancel
+              {t("Cancel")}
             </button>
           </div>
         </div>
@@ -261,8 +263,8 @@ export default function Hosts() {
               <th scope="col" className="hosts-on">
                 On
               </th>
-              <th scope="col">Address</th>
-              <th scope="col">Hostnames</th>
+              <th scope="col">{t("Address")}</th>
+              <th scope="col">{t("Hostnames")}</th>
               <th scope="col" />
             </tr>
           </thead>
@@ -288,10 +290,10 @@ export default function Hosts() {
                   </td>
                   <td className="hosts-actions">
                     <button type="button" disabled={busy} onClick={() => setDraft(draftOf(line))}>
-                      Edit
+                      {t("Edit")}
                     </button>
                     <button type="button" disabled={busy} onClick={() => remove(line)}>
-                      Remove
+                      {t("Remove")}
                     </button>
                   </td>
                 </tr>
@@ -303,7 +305,7 @@ export default function Hosts() {
                   <td colSpan={3}>
                     <code>{line.raw === "" ? " " : line.raw}</code>
                     {line.kind === "unparsed" && (
-                      <span className="hosts-tag">nix does not recognise this line</span>
+                      <span className="hosts-tag">{t("nix does not recognise this line")}</span>
                     )}
                   </td>
                 </tr>
@@ -311,7 +313,7 @@ export default function Hosts() {
             )}
           </tbody>
         </table>
-        {entries.length === 0 && !showAll && <p className="muted">No entries.</p>}
+        {entries.length === 0 && !showAll && <p className="muted">{t("No entries.")}</p>}
       </div>
     </section>
   );

@@ -14,6 +14,7 @@
  */
 import { useMemo, useRef, useState } from "react";
 
+import { t } from "../lib/i18n";
 import type { SpaceEntry, SpaceTree } from "../lib/ipc";
 import { formatBytes, formatPercent } from "../lib/format";
 
@@ -63,16 +64,16 @@ export function SpaceTable({
           className={sort === "name" ? "th is-sorted" : "th"}
           onClick={() => setSort("name")}
         >
-          Name
+          {t("Name")}
         </button>
         <button
           type="button"
           className={sort === "size" ? "th is-sorted" : "th"}
           onClick={() => setSort("size")}
         >
-          On disk
+          {t("On disk")}
         </button>
-        <span className="th th-static">Share</span>
+        <span className="th th-static">{t("Share")}</span>
       </div>
 
       <div
@@ -85,7 +86,7 @@ export function SpaceTable({
         role="rowgroup"
       >
         {rows.length === 0 ? (
-          <p className="empty">Nothing in this directory.</p>
+          <p className="empty">{t("Nothing in this directory.")}</p>
         ) : (
           // A spacer of the full height gives the scrollbar its true size while only the window
           // exists in the DOM.

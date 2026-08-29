@@ -1100,11 +1100,24 @@ is still right — it is 15 strings nobody must retranslate in 26 languages, and
 populated file rather than a blank one — but it does not mean the interface is translated, and the
 language menu says so where a user chooses.
 
-**Not done:** the retrofit. 361 user-facing strings remain hardcoded, so "no user-facing string is
-hardcoded" is **unmet**. `scripts/check-i18n.mjs` is a **ratchet** rather than a gate: it fails the
-build if the count rises, so the debt cannot grow and every new view lands translatable, but it does not
-pretend the debt is paid. `PLAN.md` §8 predicted exactly this retrofit cost for skipping the continuous
-workstream, and the prediction was correct.
+**The retrofit: 361 → 89.** Most of it mechanical — JSX text nodes, user-facing attributes, multi-line
+prose blocks, notification text, and label tables translated at their *use* sites rather than where they
+are declared (a module-level `t()` runs once at load and freezes whichever language was active then).
+
+What is left is the part a script should not touch, and one attempt proved why. A pass that wrapped
+ternary literals produced `setStage(t("confirming"))` — the reclaim view's state machine, translated,
+which would have broken the flow outright — along with `t("var(--safe)")`, `t("is-disabled")` and
+`t("#2a303c")`. A regular expression cannot tell a rendered label from a state value or a CSS class. That
+pass was reverted whole rather than patched, and the remaining 89 are prose interleaved with `<code>`
+elements and ternaries needing human judgement.
+
+So the criterion is still **unmet**, and `scripts/check-i18n.mjs` remains a **ratchet** rather than a
+gate: it fails the build if the count rises, so the debt cannot grow and every new view lands
+translatable. `PLAN.md` §8 predicted this retrofit cost for skipping the continuous workstream, and the
+prediction was correct.
+
+The checker also learned to ignore label tables that are translated at their use sites — before that,
+wrapping a hundred strings moved the count by zero, which is a metric not worth having.
 
 **PLT-2 Accessibility & keyboard.** Full keyboard operation, visible focus, screen-reader
 labels on every control, `prefers-reduced-motion` honoured, WCAG AA contrast in both themes.

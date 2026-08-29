@@ -28,6 +28,7 @@ import {
   type Unit,
   type UnitFile,
 } from "../lib/ipc";
+import { t } from "../lib/i18n";
 import { notify } from "../lib/notices";
 
 /** Relative time from a signed second count, which is what a timer's countdown is. */
@@ -169,14 +170,14 @@ export default function Services() {
       <div className="card">
         <div className="row">
           <label className="field field-inline">
-            <span>Manager</span>
+            <span>{t("Manager")}</span>
             <select value={scope} onChange={(e) => setScope(e.currentTarget.value as Scope)}>
-              <option value="system">System</option>
-              <option value="user">User</option>
+              <option value="system">{t("System")}</option>
+              <option value="user">{t("User")}</option>
             </select>
           </label>
           <label className="field field-inline">
-            <span>Kind</span>
+            <span>{t("Kind")}</span>
             <select value={kind} onChange={(e) => setKind(e.currentTarget.value)}>
               {kinds.map((k) => (
                 <option key={k} value={k}>
@@ -187,10 +188,10 @@ export default function Services() {
           </label>
           <input
             type="search"
-            placeholder="Filter by name or description"
+            placeholder={t("Filter by name or description")}
             value={filter}
             onChange={(e) => setFilter(e.currentTarget.value)}
-            aria-label="Filter units"
+            aria-label={t("Filter units")}
           />
         </div>
 
@@ -247,29 +248,31 @@ export default function Services() {
 
           {chosen.load_state === "masked" && (
             <p className="caveat">
-              Masked. It will refuse to start no matter what asks for it, including a dependency —
-              which is different from being disabled, and is why this state is worth seeing.
+              {t(
+                "Masked. It will refuse to start no matter what asks for it, including a dependency — which is different from being disabled, and is why this state is worth seeing.",
+              )}
             </p>
           )}
 
           <div className="row">
             <button type="button" disabled={busy} onClick={() => void act(chosen.name, "start")}>
-              Start
+              {t("Start")}
             </button>
             <button type="button" disabled={busy} onClick={() => void act(chosen.name, "stop")}>
-              Stop
+              {t("Stop")}
             </button>
             <button type="button" disabled={busy} onClick={() => void act(chosen.name, "restart")}>
-              Restart
+              {t("Restart")}
             </button>
             <button type="button" disabled={busy} onClick={() => void act(chosen.name, "reload")}>
-              Reload
+              {t("Reload")}
             </button>
           </div>
 
           <p className="muted">
-            Above changes what is running now. Below changes what happens at boot — a different
-            intention, and doing one when you meant the other is a surprise on the next restart.
+            {t(
+              "Above changes what is running now. Below changes what happens at boot — a different intention, and doing one when you meant the other is a surprise on the next restart.",
+            )}
           </p>
 
           <div className="row">
@@ -283,7 +286,7 @@ export default function Services() {
                     .catch((thrown) => notify.error(toAppError(thrown)))
                 }
               >
-                Load boot settings
+                {t("Load boot settings")}
               </button>
             ) : (
               <>
@@ -315,15 +318,15 @@ export default function Services() {
           )}
           {files !== null && chosenFile === null && (
             <p className="muted">
-              No unit file on disk — it is transient, created at runtime, so there is nothing to enable.
+              {t("No unit file on disk — it is transient, created at runtime, so there is nothing to enable.")}
             </p>
           )}
 
-          <h3>Recent log</h3>
+          <h3>{t("Recent log")}</h3>
           {logs === null ? (
-            <p className="muted">Reading…</p>
+            <p className="muted">{t("Reading…")}</p>
           ) : logs.entries.length === 0 ? (
-            <p className="muted">Nothing in the journal for this unit.</p>
+            <p className="muted">{t("Nothing in the journal for this unit.")}</p>
           ) : (
             <ul className="log-list">
               {logs.entries.slice(-60).map((entry) => (
@@ -337,15 +340,16 @@ export default function Services() {
             </ul>
           )}
           <p className="muted">
-            Followed by asking what has appeared since the last entry, so a quiet unit costs nothing
-            to watch.
+            {t(
+              "Followed by asking what has appeared since the last entry, so a quiet unit costs nothing to watch.",
+            )}
           </p>
         </div>
       )}
 
       {/* SVC-4. Absent from Stacer entirely. */}
       <div className="card">
-        <h2>Timers</h2>
+        <h2>{t("Timers")}</h2>
         {timers === null ? (
           <button
             type="button"
@@ -356,10 +360,10 @@ export default function Services() {
                 .catch((thrown) => notify.error(toAppError(thrown)))
             }
           >
-            Show timers
+            {t("Show timers")}
           </button>
         ) : timers.length === 0 ? (
-          <p className="muted">No timers in this manager.</p>
+          <p className="muted">{t("No timers in this manager.")}</p>
         ) : (
           <>
             <ul className="unit-list">

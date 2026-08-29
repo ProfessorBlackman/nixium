@@ -17,6 +17,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { SpaceTable } from "../components/SpaceTable";
 import { Treemap } from "../components/Treemap";
+import { t } from "../lib/i18n";
 import { formatAge, formatBytes, formatCount, formatPercent } from "../lib/format";
 import {
   api,
@@ -77,7 +78,7 @@ export default function Explorer() {
       setScannedAt(null);
       setPath(r.tree.roots.length > 0 ? [r.tree.roots[0]] : []);
       if (r.cancelled) {
-        notify.info("Scan stopped.", r.coverage_note ?? null);
+        notify.info(t("Scan stopped."), r.coverage_note ?? null);
       } else if (r.errors.length > 0) {
         notify.warning(
           `Scanned with gaps: ${r.errors.length} location${r.errors.length === 1 ? "" : "s"} could not be read.`,
@@ -127,14 +128,14 @@ export default function Explorer() {
     <section className="stack stack-wide">
       {/* ---- pick something to scan ---- */}
       <div className="card">
-        <h2>Scan</h2>
+        <h2>{t("Scan")}</h2>
         <div className="row wrap">
           <button type="button" onClick={() => void scanHome()} disabled={op.running}>
-            Scan my home directory
+            {t("Scan my home directory")}
           </button>
           {op.running && (
             <button type="button" onClick={() => void op.cancel()}>
-              Stop
+              {t("Stop")}
             </button>
           )}
         </div>
@@ -142,7 +143,7 @@ export default function Explorer() {
         {filesystems && filesystems.length > 0 && (
           <>
             <p className="muted" style={{ marginTop: "0.9rem" }}>
-              Or a whole filesystem. Pseudo-filesystems are hidden — they are not storage.
+              {t("Or a whole filesystem. Pseudo-filesystems are hidden — they are not storage.")}
             </p>
             <ul className="fs-list">
               {filesystems.map((fs) => (
@@ -198,7 +199,7 @@ export default function Explorer() {
           </div>
           <p className="muted">{op.progress?.message ?? "Starting…"}</p>
           <p className="muted">
-            Results appear as soon as the walk finishes. Stopping keeps whatever was found.
+            {t("Results appear as soon as the walk finishes. Stopping keeps whatever was found.")}
           </p>
         </div>
       )}
@@ -210,19 +211,19 @@ export default function Explorer() {
             <div className="summary">
               <div>
                 <span className="summary-figure">{formatBytes(result.allocated)}</span>
-                <span className="muted">on disk</span>
+                <span className="muted">{t("on disk")}</span>
               </div>
               <div>
                 <span className="summary-figure">{formatBytes(result.apparent_size)}</span>
-                <span className="muted">apparent size</span>
+                <span className="muted">{t("apparent size")}</span>
               </div>
               <div>
                 <span className="summary-figure">{formatCount(result.files)}</span>
-                <span className="muted">files</span>
+                <span className="muted">{t("files")}</span>
               </div>
               <div>
                 <span className="summary-figure">{formatCount(result.dirs)}</span>
-                <span className="muted">directories</span>
+                <span className="muted">{t("directories")}</span>
               </div>
             </div>
             {scannedAt && scanRoot && (
@@ -232,7 +233,7 @@ export default function Explorer() {
                   not a fresh measurement.
                 </span>
                 <button type="button" onClick={() => void startScan(scanRoot)} disabled={op.running}>
-                  Rescan
+                  {t("Rescan")}
                 </button>
               </p>
             )}
@@ -246,13 +247,14 @@ export default function Explorer() {
             )}
             {result.allocated !== result.apparent_size && (
               <p className="muted">
-                On-disk and apparent size differ because of block rounding, sparse files, and
-                filesystem compression. Reclaimable space is always the on-disk figure.
+                {t(
+                  "On-disk and apparent size differ because of block rounding, sparse files, and filesystem compression. Reclaimable space is always the on-disk figure.",
+                )}
               </p>
             )}
           </div>
 
-          <nav className="crumbs" aria-label="Location">
+          <nav className="crumbs" aria-label={t("Location")}>
             {crumbs.map((entry, i) => (
               <button
                 key={entry.id}
@@ -286,10 +288,11 @@ export default function Explorer() {
 
       {!result && !op.running && (
         <div className="card">
-          <h2>Nothing scanned yet</h2>
+          <h2>{t("Nothing scanned yet")}</h2>
           <p className="muted">
-            Pick somewhere above. Scanning is read-only — nothing here deletes anything, and
-            reclaiming arrives in a later milestone behind a preview and a confirmation.
+            {t(
+              "Pick somewhere above. Scanning is read-only — nothing here deletes anything, and reclaiming arrives in a later milestone behind a preview and a confirmation.",
+            )}
           </p>
         </div>
       )}

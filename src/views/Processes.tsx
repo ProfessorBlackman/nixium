@@ -23,6 +23,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { t } from "../lib/i18n";
 import { formatBytes } from "../lib/format";
 import {
   api,
@@ -244,10 +245,10 @@ export default function Processes() {
         <div className="row">
           <input
             type="search"
-            placeholder="Filter by name, user, state or pid"
+            placeholder={t("Filter by name, user, state or pid")}
             value={filter}
             onChange={(e) => setFilter(e.currentTarget.value)}
-            aria-label="Filter processes"
+            aria-label={t("Filter processes")}
           />
           <span className="muted">
             {shown.length} of {processes.length}
@@ -287,7 +288,7 @@ export default function Processes() {
                         )
                       }
                     >
-                      {column.label}
+                      {t(column.label)}
                       {sort.column === column.id && (sort.descending ? " ↓" : " ↑")}
                     </button>
                   </th>
@@ -343,15 +344,15 @@ export default function Processes() {
 
           {chosen.state === "zombie" ? (
             <p className="caveat">
-              This process has already exited and is waiting for its parent to collect it. A signal to
-              it would succeed and do nothing, so nix will not pretend otherwise — it disappears when
-              its parent reaps it, or when its parent exits.
+              {t(
+                "This process has already exited and is waiting for its parent to collect it. A signal to it would succeed and do nothing, so nix will not pretend otherwise — it disappears when its parent reaps it, or when its parent exits.",
+              )}
             </p>
           ) : (
             <>
               <div className="row">
                 <button type="button" disabled={busy} onClick={() => signal(chosen, "term")}>
-                  Ask it to stop (TERM)
+                  {t("Ask it to stop (TERM)")}
                 </button>
                 <button
                   type="button"
@@ -359,20 +360,20 @@ export default function Processes() {
                   disabled={busy}
                   onClick={() => signal(chosen, "kill")}
                 >
-                  Force it to stop (KILL)
+                  {t("Force it to stop (KILL)")}
                 </button>
                 <button type="button" disabled={busy} onClick={() => signal(chosen, "hup")}>
-                  Reload (HUP)
+                  {t("Reload (HUP)")}
                 </button>
               </div>
               <p className="muted">
-                TERM lets it save its work. KILL cannot be caught, so anything unsaved is lost. If it
-                belongs to another user, nix will ask for administrator rights — and if it is yours, it
-                will not.
+                {t(
+                  "TERM lets it save its work. KILL cannot be caught, so anything unsaved is lost. If it belongs to another user, nix will ask for administrator rights — and if it is yours, it will not.",
+                )}
               </p>
 
               <label className="field field-inline">
-                <span>Niceness</span>
+                <span>{t("Niceness")}</span>
                 <input
                   type="number"
                   min={-20}
@@ -391,41 +392,42 @@ export default function Processes() {
                 />
               </label>
               <p className="muted">
-                Higher is politer. Lowering it needs administrator rights even for your own
-                processes — the kernel lets anyone give up priority and nobody take it.
+                {t(
+                  "Higher is politer. Lowering it needs administrator rights even for your own processes — the kernel lets anyone give up priority and nobody take it.",
+                )}
               </p>
             </>
           )}
           {/* PRC-3. */}
           {detail && detail.pid === chosen.pid && (
             <>
-              <h3>Detail</h3>
+              <h3>{t("Detail")}</h3>
               <ul className="detail-list">
                 {detail.executable && (
                   <li>
-                    <span>Executable</span>
+                    <span>{t("Executable")}</span>
                     <code>{detail.executable}</code>
                   </li>
                 )}
                 {detail.working_directory && (
                   <li>
-                    <span>Working directory</span>
+                    <span>{t("Working directory")}</span>
                     <code>{detail.working_directory}</code>
                   </li>
                 )}
                 {detail.cgroup && (
                   <li>
-                    <span>Control group</span>
+                    <span>{t("Control group")}</span>
                     <code>{detail.cgroup}</code>
                   </li>
                 )}
                 <li>
-                  <span>Threads</span>
+                  <span>{t("Threads")}</span>
                   <span>{detail.thread_count}</span>
                 </li>
                 {detail.io && (
                   <li>
-                    <span>Read / written</span>
+                    <span>{t("Read / written")}</span>
                     <span>
                       {formatBytes(detail.io.read_chars)} / {formatBytes(detail.io.written_chars)}
                       <span className="muted">
@@ -438,10 +440,10 @@ export default function Processes() {
                 )}
                 {detail.disk_footprint !== null && (
                   <li>
-                    <span>Disk footprint</span>
+                    <span>{t("Disk footprint")}</span>
                     <span>
                       {formatBytes(detail.disk_footprint)}
-                      <span className="muted"> — its executable and the files it has open</span>
+                      <span className="muted"> {t("— its executable and the files it has open")}</span>
                     </span>
                   </li>
                 )}
@@ -482,7 +484,7 @@ export default function Processes() {
 
               {detail.restricted.length > 0 && (
                 <div className="detail-restricted">
-                  <p className="muted">Not shown, and why:</p>
+                  <p className="muted">{t("Not shown, and why:")}</p>
                   <ul>
                     {detail.restricted.map((reason) => (
                       <li key={reason} className="muted">
@@ -500,10 +502,11 @@ export default function Processes() {
 
       {/* PRC-4. Loaded on demand: the aggregation is cheap, the payload is every process. */}
       <div className="card">
-        <h2>Tree</h2>
+        <h2>{t("Tree")}</h2>
         <p className="muted">
-          A build system&rsquo;s cost is spread across dozens of short-lived children, and each one
-          alone looks like nothing. The subtree figure is what explains a slow machine.
+          {t(
+            "A build system&rsquo;s cost is spread across dozens of short-lived children, and each one alone looks like nothing. The subtree figure is what explains a slow machine.",
+          )}
         </p>
         <div className="row">
           <button
@@ -519,7 +522,7 @@ export default function Processes() {
           </button>
           {tree && (
             <button type="button" onClick={() => setTree(null)}>
-              Hide
+              {t("Hide")}
             </button>
           )}
         </div>
@@ -536,8 +539,8 @@ export default function Processes() {
       </div>
 
       <div className="card">
-        <h2>Columns</h2>
-        <p className="muted">Kept in your settings, so the table looks the same next time.</p>
+        <h2>{t("Columns")}</h2>
+        <p className="muted">{t("Kept in your settings, so the table looks the same next time.")}</p>
         <div className="row">
           {COLUMNS.map((column) => (
             <label key={column.id} className="field field-inline">
@@ -547,7 +550,7 @@ export default function Processes() {
                 disabled={!settings}
                 onChange={() => toggleColumn(column.id)}
               />
-              <span>{column.label}</span>
+              <span>{t(column.label)}</span>
             </label>
           ))}
         </div>

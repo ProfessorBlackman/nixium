@@ -20,7 +20,7 @@ followed — is in [issues/](issues/README.md).
 | **M6** Monitoring (Phase 3) — **Phase 3 done** | **complete** |
 | **M7** Processes & services (Phase 4) — **Phase 4 done** | **complete** |
 | **M8** Software & system tools (Phase 5) — **Phase 5 done** | **complete** |
-| **M9** 1.0 (Phase 6) | **in progress** — PLT-2 to PLT-7 done; **PLT-1 partly** (361 strings still hardcoded) |
+| **M9** 1.0 (Phase 6) | **in progress** — PLT-2 to PLT-7 done; **PLT-1 partly** (89 strings still hardcoded, down from 361) |
 
 Phase 0 shipped all eleven tasks: the three-crate workspace and quality gates, the error taxonomy,
 the IPC contract with its progress/cancellation primitive, the app shell with lazily-mounted views,

@@ -73,7 +73,7 @@ export default function About() {
     setHelper(null);
     try {
       setHelper(await api.helperProbe());
-      notify.success("The helper answered.");
+      notify.success(t("The helper answered."));
     } catch (thrown) {
       notify.error(toAppError(thrown));
     } finally {
@@ -87,31 +87,31 @@ export default function About() {
   return (
     <section className="stack">
       <div className="card">
-        <h2>Versions</h2>
+        <h2>{t("Versions")}</h2>
         {versions ? (
           <dl className="kv">
-            <dt>nix-app</dt>
+            <dt>{t("nix-app")}</dt>
             <dd>
               <code>{versions.app}</code>
             </dd>
-            <dt>nix-core</dt>
+            <dt>{t("nix-core")}</dt>
             <dd>
               <code>{versions.core}</code>
             </dd>
-            <dt>Kernel</dt>
+            <dt>{t("Kernel")}</dt>
             <dd>
               <code>{diag?.kernel ?? "unknown"}</code>
             </dd>
           </dl>
         ) : (
-          <p className="empty">Loading…</p>
+          <p className="empty">{t("Loading…")}</p>
         )}
       </div>
 
       <div className="card">
-        <h2>What this system can do</h2>
+        <h2>{t("What this system can do")}</h2>
         <p className="muted">
-          Detected by probing for the tool, never by reading a distribution name.
+          {t("Detected by probing for the tool, never by reading a distribution name.")}
         </p>
         {caps ? (
           caps.present.length > 0 ? (
@@ -123,10 +123,10 @@ export default function About() {
               ))}
             </ul>
           ) : (
-            <p className="empty">Nothing detected.</p>
+            <p className="empty">{t("Nothing detected.")}</p>
           )
         ) : (
-          <p className="empty">Probing…</p>
+          <p className="empty">{t("Probing…")}</p>
         )}
         <button
           type="button"
@@ -135,33 +135,34 @@ export default function About() {
               .capabilitiesRefresh()
               .then((next) => {
                 setCaps(next);
-                notify.info("Capabilities re-probed.");
+                notify.info(t("Capabilities re-probed."));
               })
               .catch((thrown) => notify.error(toAppError(thrown)))
           }
         >
-          Re-probe
+          {t("Re-probe")}
         </button>
       </div>
 
       <div className="card">
-        <h2>Privileged helper</h2>
+        <h2>{t("Privileged helper")}</h2>
         <p className="muted">
-          One authentication opens a privileged session, rather than a prompt per action. A refused
-          authorisation is reported as refused — never as success.
+          {t(
+            "One authentication opens a privileged session, rather than a prompt per action. A refused authorisation is reported as refused — never as success.",
+          )}
         </p>
         <button type="button" onClick={() => void probeHelper()} disabled={probing}>
           {probing ? "Asking…" : "Ask the helper to identify itself"}
         </button>
         {helper && (
           <dl className="kv">
-            <dt>Effective uid</dt>
+            <dt>{t("Effective uid")}</dt>
             <dd>
               <code>{helper.uid}</code>
             </dd>
-            <dt>Elevated</dt>
+            <dt>{t("Elevated")}</dt>
             <dd>{helper.elevated ? "yes" : "no"}</dd>
-            <dt>Kernel, read through the helper</dt>
+            <dt>{t("Kernel, read through the helper")}</dt>
             <dd>
               <code>{helper.kernel}</code>
             </dd>
@@ -182,10 +183,11 @@ export default function About() {
       </div>
 
       <div className="card">
-        <h2>Long operations</h2>
+        <h2>{t("Long operations")}</h2>
         <p className="muted">
-          The primitive every scan, search and package query will reuse: progress events, a terminal
-          outcome, and cancellation that actually stops the work.
+          {t(
+            "The primitive every scan, search and package query will reuse: progress events, a terminal outcome, and cancellation that actually stops the work.",
+          )}
         </p>
         <div className="row">
           <button
@@ -193,17 +195,17 @@ export default function About() {
             disabled={op.running}
             onClick={() => void op.start(() => api.demoOperation(12))}
           >
-            Run for 12 steps
+            {t("Run for 12 steps")}
           </button>
           <button
             type="button"
             disabled={op.running}
             onClick={() => void op.start(() => api.demoOperation(12, 5))}
           >
-            Fail at step 5
+            {t("Fail at step 5")}
           </button>
           <button type="button" disabled={!op.running} onClick={() => void op.cancel()}>
-            Stop
+            {t("Stop")}
           </button>
         </div>
         {op.running && (
@@ -223,10 +225,11 @@ export default function About() {
       </div>
 
       <div className="card">
-        <h2>Error surface</h2>
+        <h2>{t("Error surface")}</h2>
         <p className="muted">
-          Every failure carries a stable code, a plain-language message, a remedy where one exists,
-          and the underlying cause. Try each — they land in the notifications panel.
+          {t(
+            "Every failure carries a stable code, a plain-language message, a remedy where one exists, and the underlying cause. Try each — they land in the notifications panel.",
+          )}
         </p>
         <div className="row wrap">
           {DEMO_ERRORS.map((code) => (
@@ -244,21 +247,21 @@ export default function About() {
       </div>
 
       <div className="card">
-        <h2>Diagnostics</h2>
+        <h2>{t("Diagnostics")}</h2>
         {diag ? (
           <>
             <dl className="kv">
-              <dt>Logging installed</dt>
+              <dt>{t("Logging installed")}</dt>
               <dd>{diag.logging_initialised ? "yes" : "no"}</dd>
-              <dt>Logs</dt>
+              <dt>{t("Logs")}</dt>
               <dd>
                 <code>{diag.log_dir ?? "unavailable"}</code>
               </dd>
-              <dt>Config</dt>
+              <dt>{t("Config")}</dt>
               <dd>
                 <code>{diag.config_dir ?? "unavailable"}</code>
               </dd>
-              <dt>State</dt>
+              <dt>{t("State")}</dt>
               <dd>
                 <code>{diag.state_dir ?? "unavailable"}</code>
               </dd>
@@ -268,15 +271,15 @@ export default function About() {
               onClick={() => {
                 void navigator.clipboard
                   .writeText(JSON.stringify(diag, null, 2))
-                  .then(() => notify.success("Diagnostics copied."))
-                  .catch(() => notify.warning("Could not reach the clipboard."));
+                  .then(() => notify.success(t("Diagnostics copied.")))
+                  .catch(() => notify.warning(t("Could not reach the clipboard.")));
               }}
             >
-              Copy diagnostics
+              {t("Copy diagnostics")}
             </button>
           </>
         ) : (
-          <p className="empty">Collecting…</p>
+          <p className="empty">{t("Collecting…")}</p>
         )}
       </div>
     </section>

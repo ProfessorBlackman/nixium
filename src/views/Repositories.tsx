@@ -19,6 +19,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { t } from "../lib/i18n";
 import { api, toAppError, type Repository, type SourceLocation } from "../lib/ipc";
 import { notify } from "../lib/notices";
 
@@ -100,7 +101,7 @@ export default function Repositories() {
   return (
     <section className="stack stack-wide">
       <div className="card">
-        <h2>Software sources</h2>
+        <h2>{t("Software sources")}</h2>
         <p className="muted">
           {enabled} of {repos.length} entries active, across {files} files
           {deb822 > 0 && ` · ${deb822} in the deb822 format`}. Only files apt actually reads are
@@ -108,11 +109,11 @@ export default function Repositories() {
         </p>
         <div className="row wrap">
           <label className="field field-inline">
-            <span>Filter</span>
+            <span>{t("Filter")}</span>
             <input
               type="search"
               value={filter}
-              placeholder="URI, suite or file"
+              placeholder={t("URI, suite or file")}
               onChange={(e) => setFilter(e.target.value)}
             />
           </label>
@@ -122,15 +123,16 @@ export default function Repositories() {
               checked={onlyEnabled}
               onChange={(e) => setOnlyEnabled(e.target.checked)}
             />
-            <span>Active only</span>
+            <span>{t("Active only")}</span>
           </label>
           <button type="button" onClick={() => void load()} disabled={busy}>
-            Reload
+            {t("Reload")}
           </button>
         </div>
         <p className="muted">
-          Changing an entry asks for administrator rights, and is refused if the file changed since it
-          was read.
+          {t(
+            "Changing an entry asks for administrator rights, and is refused if the file changed since it was read.",
+          )}
         </p>
       </div>
 
@@ -163,7 +165,7 @@ export default function Repositories() {
                         {t}
                       </span>
                     ))}
-                    {repo.at.format === "deb822" && <span className="repo-tag">deb822</span>}
+                    {repo.at.format === "deb822" && <span className="repo-tag">{t("deb822")}</span>}
                   </div>
                   <div className="muted">
                     {repo.suites.join(" ")}
@@ -176,7 +178,7 @@ export default function Repositories() {
                   {repo.signed_by !== null ? (
                     <code className="repo-key">signed by {repo.signed_by}</code>
                   ) : (
-                    <span className="repo-nokey">no keyring named in this entry</span>
+                    <span className="repo-nokey">{t("no keyring named in this entry")}</span>
                   )}
                   {repo.other_options.length > 0 && (
                     <code className="repo-key">{repo.other_options.join(" ")}</code>
@@ -188,7 +190,7 @@ export default function Repositories() {
                     {repo.at.format === "deb822" ? "stanza" : "line"} {repo.at.index + 1}
                   </span>
                   <button type="button" disabled={busy} onClick={() => void act("remove", repo)}>
-                    Remove
+                    {t("Remove")}
                   </button>
                 </div>
               </li>
@@ -199,7 +201,7 @@ export default function Repositories() {
 
       {shown.length === 0 && (
         <div className="card">
-          <p className="muted">Nothing matches.</p>
+          <p className="muted">{t("Nothing matches.")}</p>
         </div>
       )}
     </section>

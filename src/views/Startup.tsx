@@ -22,6 +22,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { t } from "../lib/i18n";
 import { api, toAppError, type AutostartEntry } from "../lib/ipc";
 import { notify } from "../lib/notices";
 
@@ -77,7 +78,7 @@ export default function Startup() {
       );
       setDraft({ name: "", exec: "", comment: "" });
       setAdding(false);
-      notify.success("Added to your startup entries.");
+      notify.success(t("Added to your startup entries."));
     } catch (thrown) {
       notify.error(toAppError(thrown));
     } finally {
@@ -98,7 +99,7 @@ export default function Startup() {
     return (
       <section className="stack">
         <div className="card">
-          <h2>Startup applications</h2>
+          <h2>{t("Startup applications")}</h2>
           <p className="muted">{unavailable}</p>
         </div>
       </section>
@@ -108,7 +109,7 @@ export default function Startup() {
   return (
     <section className="stack stack-wide">
       <div className="card">
-        <h2>Startup applications</h2>
+        <h2>{t("Startup applications")}</h2>
         <p className="muted">
           {running} of {entries.length} will start in this session. An entry runs unless something
           turns it off — nix reads that the way the specification defines it.
@@ -118,7 +119,7 @@ export default function Startup() {
             {adding ? "Cancel" : "Add an entry"}
           </button>
           <button type="button" onClick={() => void load()} disabled={busy !== null}>
-            Reload
+            {t("Reload")}
           </button>
           <label className="field field-inline">
             <input
@@ -130,36 +131,37 @@ export default function Startup() {
           </label>
         </div>
         <p className="muted">
-          Turning off an entry the system installed writes an override in your own configuration. The
-          system file is never modified, and no password is needed.
+          {t(
+            "Turning off an entry the system installed writes an override in your own configuration. The system file is never modified, and no password is needed.",
+          )}
         </p>
       </div>
 
       {adding && (
         <div className="card card-confirm">
-          <h2>New startup entry</h2>
+          <h2>{t("New startup entry")}</h2>
           <div className="hosts-form">
             <label className="field">
-              <span>Name</span>
+              <span>{t("Name")}</span>
               <input
                 value={draft.name}
-                placeholder="My backup script"
+                placeholder={t("My backup script")}
                 onChange={(e) => setDraft({ ...draft, name: e.target.value })}
               />
             </label>
             <label className="field">
-              <span>Command</span>
+              <span>{t("Command")}</span>
               <input
                 value={draft.exec}
-                placeholder="/home/you/bin/backup.sh"
+                placeholder={t("/home/you/bin/backup.sh")}
                 onChange={(e) => setDraft({ ...draft, exec: e.target.value })}
               />
             </label>
             <label className="field">
-              <span>Comment</span>
+              <span>{t("Comment")}</span>
               <input
                 value={draft.comment}
-                placeholder="what this does"
+                placeholder={t("what this does")}
                 onChange={(e) => setDraft({ ...draft, comment: e.target.value })}
               />
             </label>
@@ -196,15 +198,15 @@ export default function Startup() {
               <div className="startup-body">
                 <div className="startup-head">
                   <strong>{entry.name}</strong>
-                  {entry.origin === "system" && <span className="startup-tag">system</span>}
+                  {entry.origin === "system" && <span className="startup-tag">{t("system")}</span>}
                   {entry.shadowed && (
-                    <span className="startup-tag" title="You have overridden the system default">
-                      overridden
+                    <span className="startup-tag" title={t("You have overridden the system default")}>
+                      {t("overridden")}
                     </span>
                   )}
                   {entry.no_display && (
-                    <span className="startup-tag" title="This entry asks not to be shown in a UI">
-                      background
+                    <span className="startup-tag" title={t("This entry asks not to be shown in a UI")}>
+                      {t("background")}
                     </span>
                   )}
                 </div>
@@ -230,18 +232,18 @@ export default function Startup() {
               <div className="startup-actions">
                 {entry.origin === "user" ? (
                   <button type="button" disabled={busy !== null} onClick={() => void remove(entry)}>
-                    Remove
+                    {t("Remove")}
                   </button>
                 ) : (
-                  <span className="muted" title="A system entry belongs to a package; turn it off instead">
-                    installed by a package
+                  <span className="muted" title={t("A system entry belongs to a package; turn it off instead")}>
+                    {t("installed by a package")}
                   </span>
                 )}
               </div>
             </li>
           ))}
         </ul>
-        {shown.length === 0 && <p className="muted">Nothing to show.</p>}
+        {shown.length === 0 && <p className="muted">{t("Nothing to show.")}</p>}
       </div>
     </section>
   );

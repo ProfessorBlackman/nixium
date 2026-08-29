@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import Chart, { formatRate, palette, type Series } from "../components/Chart";
+import { t } from "../lib/i18n";
 import { formatBytes, formatPercent } from "../lib/format";
 import {
   api,
@@ -191,7 +192,7 @@ export default function Overview() {
     <section className="view">
       {/* Storage first: this is a storage tool. */}
       <div className="card">
-        <h2>Storage</h2>
+        <h2>{t("Storage")}</h2>
         {reclaimable ? (
           <p>
             <strong className="summary-figure">{formatBytes(reclaimable[1])}</strong> could be
@@ -199,8 +200,9 @@ export default function Overview() {
           </p>
         ) : (
           <p className="muted">
-            Not measured yet. nix does not scan when you open this page — the Reclaim view looks when
-            you ask it to.
+            {t(
+              "Not measured yet. nix does not scan when you open this page — the Reclaim view looks when you ask it to.",
+            )}
           </p>
         )}
         <ul className="fs-list">
@@ -242,12 +244,12 @@ export default function Overview() {
             </p>
           </>
         ) : (
-          <p className="muted">Waiting for a second reading — one sample of a counter is not a rate.</p>
+          <p className="muted">{t("Waiting for a second reading — one sample of a counter is not a rate.")}</p>
         )}
       </div>
 
       <div className="card">
-        <h2>Memory</h2>
+        <h2>{t("Memory")}</h2>
         {latest ? (
           <>
             <Chart
@@ -266,12 +268,12 @@ export default function Overview() {
             </p>
           </>
         ) : (
-          <p className="muted">Waiting…</p>
+          <p className="muted">{t("Waiting…")}</p>
         )}
       </div>
 
       <div className="card">
-        <h2>Disk and network</h2>
+        <h2>{t("Disk and network")}</h2>
         {latest ? (
           <>
             <Chart
@@ -292,20 +294,21 @@ export default function Overview() {
             />
             {!featured && (
               <p className="muted">
-                No hardware interface has a link. Totals count physical interfaces only, so each byte
-                is counted once rather than once per bridge it crosses.
+                {t(
+                  "No hardware interface has a link. Totals count physical interfaces only, so each byte is counted once rather than once per bridge it crosses.",
+                )}
               </p>
             )}
           </>
         ) : (
-          <p className="muted">Waiting…</p>
+          <p className="muted">{t("Waiting…")}</p>
         )}
       </div>
 
       {/* MON-5. Hidden entirely on a desktop rather than shown empty. */}
       {latest && latest.power.batteries.length > 0 && (
         <div className="card">
-          <h2>Battery</h2>
+          <h2>{t("Battery")}</h2>
           {latest.power.batteries.map((battery) => (
             <div key={battery.name}>
               <p>
@@ -337,7 +340,7 @@ export default function Overview() {
       {/* MON-4. */}
       {latest && latest.sensors.temperatures.length > 0 && (
         <div className="card">
-          <h2>Temperatures</h2>
+          <h2>{t("Temperatures")}</h2>
           <ul className="sensor-list">
             {latest.sensors.temperatures.slice(0, 8).map((t) => (
               <li key={`${t.chip}-${t.label}`}>
@@ -365,7 +368,7 @@ export default function Overview() {
               {latest.sensors.fans.map((f) => `${f.label} ${f.rpm} RPM`).join(" · ")}
             </p>
           ) : (
-            <p className="muted">This machine reports no fan speeds, which is common and not a fault.</p>
+            <p className="muted">{t("This machine reports no fan speeds, which is common and not a fault.")}</p>
           )}
         </div>
       )}
@@ -373,10 +376,11 @@ export default function Overview() {
       {/* MON-7. */}
       {latest && latest.network.interfaces.length > 0 && (
         <div className="card">
-          <h2>Interfaces</h2>
+          <h2>{t("Interfaces")}</h2>
           <p className="muted">
-            Which one is featured is decided from this reading, not remembered — unplug the Ethernet
-            and join Wi-Fi and the answer changes on the next tick.
+            {t(
+              "Which one is featured is decided from this reading, not remembered — unplug the Ethernet and join Wi-Fi and the answer changes on the next tick.",
+            )}
           </p>
           <ul className="iface-list">
             {latest.network.interfaces
@@ -386,7 +390,7 @@ export default function Overview() {
                 <li key={i.name} className={i.name === featured?.name ? "is-featured" : undefined}>
                   <span className="iface-name">
                     {i.name}
-                    {!i.physical && <span className="muted"> virtual</span>}
+                    {!i.physical && <span className="muted"> {t("virtual")}</span>}
                   </span>
                   <span className="iface-state">
                     {i.carrier ? i.operstate : "no link"}

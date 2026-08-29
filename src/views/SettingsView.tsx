@@ -170,7 +170,7 @@ export default function SettingsView() {
       const saved = await api.settingsSave(next);
       setSettings(saved);
       if (patch.theme) applyTheme(saved.theme);
-      notify.success("Settings saved.");
+      notify.success(t("Settings saved."));
     } catch (thrown) {
       notify.error(toAppError(thrown));
       // Re-read, so the UI shows what is actually on disk rather than what we hoped.
@@ -180,7 +180,7 @@ export default function SettingsView() {
     }
   }
 
-  if (!settings) return <p className="empty">Loading settings…</p>;
+  if (!settings) return <p className="empty">{t("Loading settings…")}</p>;
 
   return (
     <section className="stack">
@@ -284,11 +284,11 @@ export default function SettingsView() {
       {/* MON-6. Empty by default: a tool that notifies about thresholds nobody chose is one whose
           notifications get switched off wholesale. */}
       <div className="card">
-        <h2>Alerts</h2>
+        <h2>{t("Alerts")}</h2>
         <p className="muted">
-          Off unless you add one. Each fires once when it crosses, stays quiet while the condition
-          lasts, and will not fire again until it has come back past the threshold by a margin and
-          the cooldown has passed — so a long build is one notification rather than a hundred.
+          {t(
+            "Off unless you add one. Each fires once when it crosses, stays quiet while the condition lasts, and will not fire again until it has come back past the threshold by a margin and the cooldown has passed — so a long build is one notification rather than a hundred.",
+          )}
         </p>
 
         <ul className="alert-list">
@@ -323,7 +323,7 @@ export default function SettingsView() {
                   void update({ alert_rules: next });
                 }}
               >
-                Remove
+                {t("Remove")}
               </button>
             </li>
           ))}
@@ -344,14 +344,14 @@ export default function SettingsView() {
                 void update({ alert_rules: [...(settings.alert_rules ?? []), suggestion.rule] })
               }
             >
-              {suggestion.label}
+              {t(suggestion.label)}
             </button>
           ))}
         </div>
       </div>
 
       <div className="card">
-        <h2>Where this is kept</h2>
+        <h2>{t("Where this is kept")}</h2>
         <p className="muted">
           Settings are written atomically to <code>$XDG_CONFIG_HOME/nix/settings.json</code>, keyed
           by stable identifiers rather than display names — so changing language cannot orphan a

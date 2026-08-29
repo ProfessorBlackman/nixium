@@ -148,6 +148,7 @@ export function Shell({ initialView }: { initialView: ViewId }) {
           <span className="brand-mark" aria-hidden="true">
             ◪
           </span>
+          {/* Not translated: it is the application's name, not a word. */}
           <span className="brand-name">nix</span>
         </div>
         <ul>

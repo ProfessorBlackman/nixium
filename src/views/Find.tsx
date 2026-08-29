@@ -29,6 +29,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 
+import { t } from "../lib/i18n";
 import { formatBytes, formatCount } from "../lib/format";
 import {
   api,
@@ -77,9 +78,9 @@ export default function Find() {
       setReport(r);
       setSearching(false);
       if (r.cancelled) {
-        notify.info("Duplicate search stopped.", "Partial results are shown.");
+        notify.info(t("Duplicate search stopped."), "Partial results are shown.");
       } else if (r.groups.length === 0) {
-        notify.success("No duplicates found.");
+        notify.success(t("No duplicates found."));
       } else {
         notify.success(
           `${r.groups.length} duplicate set${r.groups.length === 1 ? "" : "s"} found.`,
@@ -102,13 +103,14 @@ export default function Find() {
   return (
     <section className="view">
       <div className="card">
-        <h2>Largest files</h2>
+        <h2>{t("Largest files")}</h2>
         {largest === null ? (
-          <p className="muted">Reading the last scan…</p>
+          <p className="muted">{t("Reading the last scan…")}</p>
         ) : largest.length === 0 ? (
           <p className="muted">
-            Nothing to show yet — the space explorer has not scanned anything. This list is a view of
-            that scan rather than a search of its own, so it costs nothing once a scan exists.
+            {t(
+              "Nothing to show yet — the space explorer has not scanned anything. This list is a view of that scan rather than a search of its own, so it costs nothing once a scan exists.",
+            )}
           </p>
         ) : (
           <>
@@ -129,12 +131,11 @@ export default function Find() {
       </div>
 
       <div className="card">
-        <h2>Duplicates</h2>
+        <h2>{t("Duplicates")}</h2>
         <p className="muted">
-          Compared by size, then by the first few kilobytes, then by full content, and finally byte
-          for byte — so a reported set really is identical rather than merely very likely to be.
-          Files under 1 MiB are skipped, and hard links are not counted: two names for one file share
-          the same blocks, so deleting a name frees nothing.
+          {t(
+            "Compared by size, then by the first few kilobytes, then by full content, and finally byte for byte — so a reported set really is identical rather than merely very likely to be. Files under 1 MiB are skipped, and hard links are not counted: two names for one file share the same blocks, so deleting a name frees nothing.",
+          )}
         </p>
 
         <div className="row">
@@ -143,7 +144,7 @@ export default function Find() {
           </button>
           {searching && operation.running && (
             <button type="button" onClick={() => void operation.cancel()}>
-              Stop
+              {t("Stop")}
             </button>
           )}
         </div>
@@ -157,11 +158,11 @@ export default function Find() {
             <div className="summary">
               <div>
                 <span className="summary-figure">{formatBytes(report.recoverable)}</span>
-                <span className="muted">recoverable</span>
+                <span className="muted">{t("recoverable")}</span>
               </div>
               <div>
                 <span className="summary-figure">{report.groups.length}</span>
-                <span className="muted">duplicate sets</span>
+                <span className="muted">{t("duplicate sets")}</span>
               </div>
             </div>
             <p className="muted">
@@ -171,7 +172,7 @@ export default function Find() {
             </p>
             {report.cancelled && (
               <p className="caveat">
-                Stopped early, so this is not a complete answer — there may be more.
+                {t("Stopped early, so this is not a complete answer — there may be more.")}
               </p>
             )}
             <ul className="dup-list">
@@ -193,8 +194,9 @@ export default function Find() {
               <p className="muted">…and {report.groups.length - 30} more sets.</p>
             )}
             <p className="muted">
-              nix does not choose which copy to delete. Which one matters is a judgement about your
-              work, not about storage.
+              {t(
+                "nix does not choose which copy to delete. Which one matters is a judgement about your work, not about storage.",
+              )}
             </p>
           </>
         )}
@@ -273,7 +275,7 @@ function SearchPanel() {
 
   const start = useCallback(async () => {
     if (root.trim() === "") {
-      notify.warning("Choose a folder to search in.");
+      notify.warning(t("Choose a folder to search in."));
       return;
     }
     setHits([]);
@@ -308,53 +310,54 @@ function SearchPanel() {
 
   return (
     <div className="card">
-      <h2>Search</h2>
+      <h2>{t("Search")}</h2>
       <p className="muted">
-        Every filter here does what it says. Results arrive as they are found, and there is no cap on
-        how many.
+        {t(
+          "Every filter here does what it says. Results arrive as they are found, and there is no cap on how many.",
+        )}
       </p>
 
       <div className="search-form">
         <label className="field">
-          <span>In folder</span>
+          <span>{t("In folder")}</span>
           <input
             value={root}
-            placeholder="/home/you"
+            placeholder={t("/home/you")}
             onChange={(e) => setRoot(e.target.value)}
           />
         </label>
         <label className="field">
-          <span>Name</span>
+          <span>{t("Name")}</span>
           <input
             value={name}
-            placeholder="report, *.log, or a pattern"
+            placeholder={t("report, *.log, or a pattern")}
             onChange={(e) => setName(e.target.value)}
           />
-          <small>Leave empty to match everything and filter by the rest.</small>
+          <small>{t("Leave empty to match everything and filter by the rest.")}</small>
         </label>
         <label className="field">
-          <span>Match as</span>
+          <span>{t("Match as")}</span>
           <select value={matchKind} onChange={(e) => setMatchKind(e.target.value as NameMatch)}>
-            <option value="contains">contains</option>
-            <option value="glob">glob (* ? [abc])</option>
-            <option value="regex">regular expression</option>
+            <option value="contains">{t("contains")}</option>
+            <option value="glob">{t("glob (* ? [abc])")}</option>
+            <option value="regex">{t("regular expression")}</option>
           </select>
         </label>
         <label className="field">
-          <span>Type</span>
+          <span>{t("Type")}</span>
           <select value={kind} onChange={(e) => setKind(e.target.value as FileKind | "")}>
-            <option value="">anything</option>
-            <option value="file">files</option>
-            <option value="directory">folders</option>
-            <option value="symlink">symlinks</option>
+            <option value="">{t("anything")}</option>
+            <option value="file">{t("files")}</option>
+            <option value="directory">{t("folders")}</option>
+            <option value="symlink">{t("symlinks")}</option>
           </select>
         </label>
         <label className="field">
-          <span>At least (KiB)</span>
+          <span>{t("At least (KiB)")}</span>
           <input value={minKib} inputMode="decimal" onChange={(e) => setMinKib(e.target.value)} />
         </label>
         <label className="field">
-          <span>At most (KiB)</span>
+          <span>{t("At most (KiB)")}</span>
           <input value={maxKib} inputMode="decimal" onChange={(e) => setMaxKib(e.target.value)} />
         </label>
       </div>
@@ -362,7 +365,7 @@ function SearchPanel() {
       <div className="row wrap">
         <label className="field field-inline">
           <input type="checkbox" checked={invert} onChange={(e) => setInvert(e.target.checked)} />
-          <span>Invert — everything that does not match</span>
+          <span>{t("Invert — everything that does not match")}</span>
         </label>
         <label className="field field-inline">
           <input
@@ -370,7 +373,7 @@ function SearchPanel() {
             checked={emptyOnly}
             onChange={(e) => setEmptyOnly(e.target.checked)}
           />
-          <span>Empty only</span>
+          <span>{t("Empty only")}</span>
         </label>
         <label className="field field-inline">
           <input
@@ -378,7 +381,7 @@ function SearchPanel() {
             checked={caseSensitive}
             onChange={(e) => setCaseSensitive(e.target.checked)}
           />
-          <span>Case sensitive</span>
+          <span>{t("Case sensitive")}</span>
         </label>
       </div>
 
@@ -388,7 +391,7 @@ function SearchPanel() {
         </button>
         {running !== null && (
           <button type="button" onClick={() => void stop()}>
-            Stop
+            {t("Stop")}
           </button>
         )}
       </div>
@@ -416,11 +419,11 @@ function SearchPanel() {
           <table className="pkg-table">
             <thead>
               <tr>
-                <th scope="col">Path</th>
+                <th scope="col">{t("Path")}</th>
                 <th scope="col" className="pkg-num">
-                  Size
+                  {t("Size")}
                 </th>
-                <th scope="col">Modified</th>
+                <th scope="col">{t("Modified")}</th>
               </tr>
             </thead>
             <tbody>

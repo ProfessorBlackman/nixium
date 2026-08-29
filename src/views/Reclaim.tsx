@@ -34,6 +34,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { t } from "../lib/i18n";
 import { formatBytes } from "../lib/format";
 import {
   api,
@@ -84,7 +85,7 @@ export default function Reclaim() {
       // Pre-check only what is safe. Never pre-check something with a cost.
       setSelected(new Set(next.items.filter((i) => i.safety === "safe").map((i) => i.id)));
       setStage(next.items.length > 0 ? "confirming" : "idle");
-      if (next.items.length === 0) notify.info("Nothing to reclaim right now.");
+      if (next.items.length === 0) notify.info(t("Nothing to reclaim right now."));
     } catch (thrown) {
       notify.error(toAppError(thrown));
       setStage("idle");
@@ -153,10 +154,11 @@ export default function Reclaim() {
       {/* ---------- 1. preview ---------- */}
       {(stage === "idle" || stage === "previewing") && (
         <div className="card">
-          <h2>Find reclaimable space</h2>
+          <h2>{t("Find reclaimable space")}</h2>
           <p className="muted">
-            This looks, and shows you what it found. Nothing is removed until you review the list
-            and confirm.
+            {t(
+              "This looks, and shows you what it found. Nothing is removed until you review the list and confirm.",
+            )}
           </p>
           <button type="button" onClick={() => void runPreview()} disabled={stage === "previewing"}>
             {stage === "previewing" ? "Looking…" : "Look for reclaimable space"}
@@ -183,7 +185,7 @@ export default function Reclaim() {
               </div>
               <div>
                 <span className="summary-figure">{formatBytes(selectedBytes)}</span>
-                <span className="muted">selected</span>
+                <span className="muted">{t("selected")}</span>
               </div>
               <div>
                 <span className="summary-figure">{selectedItems.length}</span>
@@ -202,13 +204,13 @@ export default function Reclaim() {
             )}
             <div className="row wrap">
               <button type="button" onClick={selectAllSelectable}>
-                Select all except risky
+                {t("Select all except risky")}
               </button>
               <button type="button" onClick={() => setSelected(new Set())}>
-                Select none
+                {t("Select none")}
               </button>
               <button type="button" onClick={() => void runPreview()}>
-                Look again
+                {t("Look again")}
               </button>
             </div>
           </div>
@@ -228,8 +230,8 @@ export default function Reclaim() {
                     <span className="reclaim-body">
                       <span className="reclaim-head">
                         <strong>{item.label}</strong>
-                        <span className={`safety-tag safety-${item.safety}`} title={SAFETY_EXPLAINS[item.safety]}>
-                          {SAFETY_LABEL[item.safety]}
+                        <span className={`safety-tag safety-${item.safety}`} title={t(SAFETY_EXPLAINS[item.safety])}>
+                          {t(SAFETY_LABEL[item.safety])}
                         </span>
                         {/* A qualified size is shown as an upper bound, never as a bare figure:
                             on a copy-on-write filesystem the space may not come back at all. */}
@@ -272,7 +274,7 @@ export default function Reclaim() {
                 {/* The card lost its visible heading when the button took the top slot. Kept for
                     document structure, since a panel with no accessible name is worse than a
                     redundant one. */}
-                <h2 className="visually-hidden">Confirm</h2>
+                <h2 className="visually-hidden">{t("Confirm")}</h2>
                 <button
                   type="button"
                   className="danger"
@@ -283,7 +285,7 @@ export default function Reclaim() {
                 </button>
 
                 {selectedItems.length === 0 ? (
-                  <p className="muted">Nothing selected. Tick something in the list.</p>
+                  <p className="muted">{t("Nothing selected. Tick something in the list.")}</p>
                 ) : (
                   <p className="muted">
                     from {selectedItems.length} item{selectedItems.length === 1 ? "" : "s"}
@@ -292,8 +294,9 @@ export default function Reclaim() {
 
                 {hasRisky && (
                   <p className="caveat">
-                    Your selection includes items marked risky. These may break something that is
-                    running, or lose data.
+                    {t(
+                      "Your selection includes items marked risky. These may break something that is running, or lose data.",
+                    )}
                   </p>
                 )}
                 {/* Said before committing, not only afterwards: trashing is a rename within the same
@@ -322,10 +325,11 @@ export default function Reclaim() {
 
           {preview.advisories.length > 0 && (
             <div className="card">
-              <h2>Worth knowing about</h2>
+              <h2>{t("Worth knowing about")}</h2>
               <p className="muted">
-                Space nix can measure but will not reclaim for you. Each one says why, and the
-                command you can run yourself if you want to.
+                {t(
+                  "Space nix can measure but will not reclaim for you. Each one says why, and the command you can run yourself if you want to.",
+                )}
               </p>
               <ul className="advisory-list">
                 {preview.advisories.map((a) => (
@@ -343,18 +347,20 @@ export default function Reclaim() {
                 ))}
               </ul>
               <p className="muted">
-                These are not counted in the totals above, because those totals are what this
-                preview would actually reclaim.
+                {t(
+                  "These are not counted in the totals above, because those totals are what this preview would actually reclaim.",
+                )}
               </p>
             </div>
           )}
 
           {preview.refused.length > 0 && (
             <div className="card">
-              <h2>Not touched</h2>
+              <h2>{t("Not touched")}</h2>
               <p className="muted">
-                nix refused these on your behalf. They are listed rather than hidden, so you can see
-                what was left alone and why.
+                {t(
+                  "nix refused these on your behalf. They are listed rather than hidden, so you can see what was left alone and why.",
+                )}
               </p>
               <ul className="refusal-list">
                 {preview.refused.slice(0, 20).map((r, i) => (
@@ -376,11 +382,11 @@ export default function Reclaim() {
       {/* ---------- 3. executing ---------- */}
       {stage === "executing" && (
         <div className="card">
-          <h2>Reclaiming</h2>
+          <h2>{t("Reclaiming")}</h2>
           <div className="progress">
             <div className="progress-bar progress-indeterminate" />
           </div>
-          <p className="muted">Each item is re-checked immediately before it is touched.</p>
+          <p className="muted">{t("Each item is re-checked immediately before it is touched.")}</p>
         </div>
       )}
 
@@ -388,32 +394,32 @@ export default function Reclaim() {
       {stage === "reported" && report && (
         <>
           <div className="card">
-            <h2>Done</h2>
+            <h2>{t("Done")}</h2>
             <div className="summary">
               <div>
                 <span className="summary-figure">{formatBytes(report.freed)}</span>
-                <span className="muted">freed</span>
+                <span className="muted">{t("freed")}</span>
               </div>
               {report.trashed > 0 && (
                 <div>
                   <span className="summary-figure">{formatBytes(report.trashed)}</span>
-                  <span className="muted">in the trash</span>
+                  <span className="muted">{t("in the trash")}</span>
                 </div>
               )}
               <div>
                 <span className="summary-figure">{report.reclaimed_count}</span>
-                <span className="muted">acted on</span>
+                <span className="muted">{t("acted on")}</span>
               </div>
               {report.skipped_count > 0 && (
                 <div>
                   <span className="summary-figure">{report.skipped_count}</span>
-                  <span className="muted">skipped</span>
+                  <span className="muted">{t("skipped")}</span>
                 </div>
               )}
               {report.failed_count > 0 && (
                 <div>
                   <span className="summary-figure">{report.failed_count}</span>
-                  <span className="muted">failed</span>
+                  <span className="muted">{t("failed")}</span>
                 </div>
               )}
             </div>
@@ -433,15 +439,15 @@ export default function Reclaim() {
                 it, and nix offers that as its own item.
               </p>
             )}
-            {report.cancelled && <p className="caveat">Stopped early, so not everything was done.</p>}
+            {report.cancelled && <p className="caveat">{t("Stopped early, so not everything was done.")}</p>}
 
             <button type="button" onClick={() => void runPreview()}>
-              Look again
+              {t("Look again")}
             </button>
           </div>
 
           <div className="card">
-            <h2>What happened to each item</h2>
+            <h2>{t("What happened to each item")}</h2>
             <ul className="outcome-list">
               {report.outcomes.map((o) => (
                 <li key={outcomeKey(o)} className={`outcome outcome-${o.outcome}`}>

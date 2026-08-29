@@ -20,6 +20,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { t } from "../lib/i18n";
 import { formatBytes, formatCount } from "../lib/format";
 import {
   api,
@@ -235,20 +236,20 @@ export default function Software() {
       <div className="card">
         <div className="row">
           <label className="field field-inline">
-            <span>Filter</span>
+            <span>{t("Filter")}</span>
             <input
               type="search"
               value={filter}
-              placeholder="name or description"
+              placeholder={t("name or description")}
               onChange={(e) => setFilter(e.target.value)}
             />
           </label>
           <label className="field field-inline">
-            <span>Sort by</span>
+            <span>{t("Sort by")}</span>
             <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
-              <option value="size">Size</option>
-              <option value="name">Name</option>
-              <option value="changed">Last updated</option>
+              <option value="size">{t("Size")}</option>
+              <option value="name">{t("Name")}</option>
+              <option value="changed">{t("Last updated")}</option>
             </select>
           </label>
           <label className="field field-inline">
@@ -257,10 +258,10 @@ export default function Software() {
               checked={explicitOnly}
               onChange={(e) => setExplicitOnly(e.target.checked)}
             />
-            <span>Asked for, not pulled in</span>
+            <span>{t("Asked for, not pulled in")}</span>
           </label>
           <button type="button" onClick={() => void refresh()}>
-            Refresh
+            {t("Refresh")}
           </button>
         </div>
 
@@ -276,9 +277,9 @@ export default function Software() {
           <p className="muted">{unavailable}</p>
         )}
         <p className="muted">
-          Recorded sizes come from the package manager, which computes them when the package is built.
-          Measure a package to see what it occupies on this disk — the two are different figures, and
-          the difference is worth seeing.
+          {t(
+            "Recorded sizes come from the package manager, which computes them when the package is built. Measure a package to see what it occupies on this disk — the two are different figures, and the difference is worth seeing.",
+          )}
         </p>
       </div>
 
@@ -288,17 +289,17 @@ export default function Software() {
             <thead>
               <tr>
                 <th scope="col" className="pkg-pick">
-                  <span className="visually-hidden">Select</span>
+                  <span className="visually-hidden">{t("Select")}</span>
                 </th>
-                <th scope="col">Package</th>
-                <th scope="col">Version</th>
+                <th scope="col">{t("Package")}</th>
+                <th scope="col">{t("Version")}</th>
                 <th scope="col" className="pkg-num">
-                  Recorded
+                  {t("Recorded")}
                 </th>
                 <th scope="col" className="pkg-num">
-                  On disk
+                  {t("On disk")}
                 </th>
-                <th scope="col">Updated</th>
+                <th scope="col">{t("Updated")}</th>
                 <th scope="col" />
               </tr>
             </thead>
@@ -325,7 +326,7 @@ export default function Software() {
                     >
                       {pkg.id}
                     </button>
-                    {!pkg.explicit && <span className="pkg-dep">dependency</span>}
+                    {!pkg.explicit && <span className="pkg-dep">{t("dependency")}</span>}
                     <div className="pkg-summary muted">{pkg.summary}</div>
                   </td>
                   <td className="pkg-version">{pkg.version}</td>
@@ -374,7 +375,7 @@ export default function Software() {
 
           <div className="row">
             <button type="button" onClick={() => void askWhatWouldHappen()}>
-              What would this do?
+              {t("What would this do?")}
             </button>
             <button
               type="button"
@@ -383,7 +384,7 @@ export default function Software() {
                 setPreview(null);
               }}
             >
-              Clear
+              {t("Clear")}
             </button>
           </div>
 
@@ -391,20 +392,20 @@ export default function Software() {
             <div className={`pkg-verdict pkg-verdict-${preview.risk}`}>
               {preview.risk === "refused" ? (
                 <>
-                  <h3>nix will not do this</h3>
+                  <h3>{t("nix will not do this")}</h3>
                   <ul>
                     {notableConcerns(preview)
                       .filter((f) => f.concern !== "important")
                       .map((f) => (
                         <li key={`${f.package}-${f.concern}`}>
-                          <span className="pkg-id">{f.package}</span> {CONCERN_TEXT[f.concern]}
+                          <span className="pkg-id">{f.package}</span> {t(CONCERN_TEXT[f.concern])}
                         </li>
                       ))}
                   </ul>
                   <p className="muted">
-                    This is a refusal, not a warning — nothing in this window can approve it. The
-                    helper that would carry it out decides for itself and refuses as well. If you are
-                    certain, run it yourself:
+                    {t(
+                      "This is a refusal, not a warning — nothing in this window can approve it. The helper that would carry it out decides for itself and refuses as well. If you are certain, run it yourself:",
+                    )}
                   </p>
                   <p className="pkg-id pkg-command">
                     sudo apt-get remove {preview.requested.join(" ")}
@@ -423,7 +424,7 @@ export default function Software() {
                     <ul className="pkg-concerns">
                       {notableConcerns(preview).map((f) => (
                         <li key={`${f.package}-${f.concern}`}>
-                          <span className="pkg-id">{f.package}</span> {CONCERN_TEXT[f.concern]}
+                          <span className="pkg-id">{f.package}</span> {t(CONCERN_TEXT[f.concern])}
                         </li>
                       ))}
                     </ul>
@@ -446,7 +447,7 @@ export default function Software() {
                   )}
 
                   <p className="muted">
-                    The figure above is what the package manager expects to free, not a measurement.
+                    {t("The figure above is what the package manager expects to free, not a measurement.")}
                   </p>
 
                   <button
@@ -470,7 +471,7 @@ export default function Software() {
 
       {outcome !== null && (
         <div className="card">
-          <h2>What actually happened</h2>
+          <h2>{t("What actually happened")}</h2>
           {matchedPreview(outcome) ? (
             <p>
               {outcome.removed.length === 1
@@ -482,17 +483,18 @@ export default function Software() {
           ) : (
             <>
               <p>
-                This did not match the preview. Checked against the package database afterwards rather
-                than taken from the manager's exit status.
+                {t(
+                  "This did not match the preview. Checked against the package database afterwards rather than taken from the manager's exit status.",
+                )}
               </p>
               {outcome.remaining.length > 0 && (
                 <p>
-                  <strong>Still installed:</strong> {outcome.remaining.join(", ")}
+                  <strong>{t("Still installed:")}</strong> {outcome.remaining.join(", ")}
                 </p>
               )}
               {outcome.unexpected.length > 0 && (
                 <p>
-                  <strong>Removed without being previewed:</strong> {outcome.unexpected.join(", ")}
+                  <strong>{t("Removed without being previewed:")}</strong> {outcome.unexpected.join(", ")}
                 </p>
               )}
             </>
@@ -508,24 +510,24 @@ export default function Software() {
           <h2 className="pkg-id">{detail.id}</h2>
           <p className="muted">{detail.summary}</p>
           <dl className="pkg-pairs">
-            <dt>Version</dt>
+            <dt>{t("Version")}</dt>
             <dd className="pkg-version">{detail.version}</dd>
-            <dt>Manager</dt>
+            <dt>{t("Manager")}</dt>
             <dd>{detail.manager}</dd>
-            <dt>Installed</dt>
+            <dt>{t("Installed")}</dt>
             <dd>{detail.explicit ? "you asked for it" : "pulled in as a dependency"}</dd>
-            <dt>Last updated</dt>
+            <dt>{t("Last updated")}</dt>
             <dd>{changedOn(detail.changed_at)}</dd>
-            <dt>Recorded size</dt>
+            <dt>{t("Recorded size")}</dt>
             <dd>{formatBytes(detail.recorded_bytes)}</dd>
             {detail.measured ? (
               <>
-                <dt>Files contain</dt>
+                <dt>{t("Files contain")}</dt>
                 <dd>
                   {formatBytes(detail.measured.apparent_bytes)} in{" "}
                   {formatCount(detail.measured.files)} files
                 </dd>
-                <dt>Occupies on disk</dt>
+                <dt>{t("Occupies on disk")}</dt>
                 <dd>
                   {formatBytes(detail.measured.disk_bytes)}
                   {detail.measured.disk_bytes > detail.measured.apparent_bytes && (
@@ -536,11 +538,11 @@ export default function Software() {
                     </span>
                   )}
                 </dd>
-                <dt>Against the manager</dt>
+                <dt>{t("Against the manager")}</dt>
                 <dd>{discrepancy(detail)}</dd>
                 {detail.measured.unreadable > 0 && (
                   <>
-                    <dt>Incomplete</dt>
+                    <dt>{t("Incomplete")}</dt>
                     <dd>
                       {formatCount(detail.measured.unreadable)} listed paths could not be read, so the
                       measurement is a floor rather than a total.
@@ -550,8 +552,8 @@ export default function Software() {
               </>
             ) : (
               <>
-                <dt>On disk</dt>
-                <dd className="muted">not measured yet</dd>
+                <dt>{t("On disk")}</dt>
+                <dd className="muted">{t("not measured yet")}</dd>
               </>
             )}
           </dl>
@@ -559,24 +561,25 @@ export default function Software() {
       )}
 
       <div className="card">
-        <h2>Left-behind configuration</h2>
+        <h2>{t("Left-behind configuration")}</h2>
         <p className="muted">
-          Packages removed without purging keep their configuration files. Small individually, and
-          genuinely dead weight.
+          {t(
+            "Packages removed without purging keep their configuration files. Small individually, and genuinely dead weight.",
+          )}
         </p>
         {residual === null ? (
           <button type="button" onClick={() => void loadResidual()}>
-            Look for it
+            {t("Look for it")}
           </button>
         ) : residual.length === 0 ? (
-          <p className="muted">Nothing left behind.</p>
+          <p className="muted">{t("Nothing left behind.")}</p>
         ) : (
           <table className="pkg-table">
             <thead>
               <tr>
-                <th scope="col">Package</th>
+                <th scope="col">{t("Package")}</th>
                 <th scope="col" className="pkg-num">
-                  Configuration left
+                  {t("Configuration left")}
                 </th>
               </tr>
             </thead>

@@ -13,6 +13,11 @@
  * cannot be paid in one commit, but it can be stopped from growing, and every new view lands
  * translatable because adding an untranslated string now breaks CI.
  *
+ * From 361 to 89 in one pass, most of it mechanical. What is left is the part a script should not
+ * touch: prose interleaved with `<code>` elements, and ternaries where only a human can tell a
+ * rendered label from a state value. An earlier attempt at those wrote `setStage(t("confirming"))`,
+ * which would have broken the reclaim flow outright — a regex cannot distinguish the two.
+ *
  * # This is a heuristic
  *
  * It looks for capitalised prose in JSX text nodes and string literals, which is what user-facing copy
@@ -39,7 +44,7 @@ const roots = [join(here, "..", "src", "views"), join(here, "..", "src", "compon
  * A ratchet does not need an accurate inventory. It needs a number that cannot go up, and one that
  * falls when a view is genuinely converted. Both hold with the over-count in it.
  */
-const CEILING = 361;
+const CEILING = 89;
 
 /** Things that look like prose but are not shown to anyone. */
 const IGNORE = [
@@ -58,7 +63,24 @@ for (const root of roots) {
     const text = readFileSync(join(root, name), "utf8");
 
     // Strip the module doc comment: it is prose, and it is not rendered.
-    const body = text.replace(/^\/\*\*[\s\S]*?\*\//m, "");
+    let body = text.replace(/^\/\*\*[\s\S]*?\*\//m, "");
+
+    /*
+     * Strip top-level `const` tables when the file translates computed values.
+     *
+     * A label table holds its English *source* and is translated where it is rendered — `t(v.title)`,
+     * `t(SAFETY_LABEL[item.safety])` — because a module-level `t()` runs once at load and freezes
+     * whichever language was active then. That is correct, and indistinguishable from an untranslated
+     * literal by looking at the declaration.
+     *
+     * The signal is a `t(` call whose argument is not a string literal: it means this file translates
+     * something computed, so its tables are the source for those calls. Crude, and it can hide a
+     * genuinely untranslated table in a file that also does this — which is the trade for the number
+     * meaning something. Before this, wrapping a hundred strings moved the count by zero.
+     */
+    if (/\bt\(\s*[^"'`)\s]/.test(body)) {
+      body = body.replace(/^const [A-Z][A-Z_0-9]*[^=]*=\s*[[{][\s\S]*?^(?:\]|\})[;,]?$/gm, "");
+    }
 
     const found = new Set();
     const jsxText = body.matchAll(/>\s*([A-Z][^<>{}\n]{2,80}?)\s*</g);
