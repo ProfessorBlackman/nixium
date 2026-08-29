@@ -24,6 +24,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { t } from "../lib/i18n";
+import { BusyInline } from "../components/Busy";
 import { formatBytes } from "../lib/format";
 import {
   api,
@@ -351,6 +352,7 @@ export default function Processes() {
           ) : (
             <>
               <div className="row">
+                {busy && <BusyInline label={t("Sending…")} />}
                 <button type="button" disabled={busy} onClick={() => signal(chosen, "term")}>
                   {t("Ask it to stop (TERM)")}
                 </button>

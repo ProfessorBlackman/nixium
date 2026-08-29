@@ -21,6 +21,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { t } from "../lib/i18n";
+import { Spinner } from "../components/Busy";
 import { formatBytes, formatCount } from "../lib/format";
 import {
   api,
@@ -347,7 +348,12 @@ export default function Software() {
                       disabled={measuring !== null}
                       onClick={() => void measure(pkg)}
                     >
-                      {measuring === pkg.id ? "Measuring…" : pkg.measured ? "Re-measure" : "Measure"}
+                      {measuring === pkg.id && <Spinner />}
+                      {measuring === pkg.id
+                        ? t("Measuring…")
+                        : pkg.measured
+                          ? t("Re-measure")
+                          : t("Measure")}
                     </button>
                   </td>
                 </tr>

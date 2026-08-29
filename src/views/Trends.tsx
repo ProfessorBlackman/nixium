@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { t } from "../lib/i18n";
+import { Spinner } from "../components/Busy";
 import { formatBytes } from "../lib/format";
 import {
   api,
@@ -186,6 +187,7 @@ export default function Trends() {
                 </button>
               )}
               <button type="button" onClick={() => void sampleNow()} disabled={busy}>
+                {busy && <Spinner />}
                 {t("Record one now")}
               </button>
             </div>

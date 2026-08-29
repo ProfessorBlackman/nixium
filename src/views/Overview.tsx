@@ -18,6 +18,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { Busy } from "../components/Busy";
 import Chart, { formatRate, palette, type Series } from "../components/Chart";
 import { t } from "../lib/i18n";
 import { formatBytes, formatPercent } from "../lib/format";
@@ -66,6 +67,9 @@ function describeAlert(metric: Metric): string {
 }
 
 export default function Overview() {
+  // `null` until the first load resolves, so the view can distinguish "still fetching" from "there is
+  // nothing" — which are different answers and were previously drawn the same.
+  const [loading, setLoading] = useState(true);
   const [readings, setReadings] = useState<Reading[]>([]);
   const [filesystems, setFilesystems] = useState<Filesystem[]>([]);
   const [reclaimable, setReclaimable] = useState<[number, number] | null>(null);
@@ -80,6 +84,8 @@ export default function Overview() {
         if (live) setReadings(history);
       } catch (thrown) {
         notify.error(toAppError(thrown));
+      } finally {
+        if (live) setLoading(false);
       }
     })();
 
@@ -190,6 +196,10 @@ export default function Overview() {
 
   return (
     <section className="view">
+      {/* The dashboard has nothing to draw until the first reading arrives, and a sampler ticks once a
+          second — so on a cold open there is a visible gap where empty charts look like broken ones. */}
+      {loading && <Busy label={t("Reading this machine…")} />}
+
       {/* Storage first: this is a storage tool. */}
       <div className="card">
         <h2>{t("Storage")}</h2>

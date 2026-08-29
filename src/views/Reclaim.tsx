@@ -35,6 +35,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { t } from "../lib/i18n";
+import { Busy, Spinner } from "../components/Busy";
 import { formatBytes } from "../lib/format";
 import {
   api,
@@ -161,8 +162,14 @@ export default function Reclaim() {
             )}
           </p>
           <button type="button" onClick={() => void runPreview()} disabled={stage === "previewing"}>
-            {stage === "previewing" ? "Looking…" : "Look for reclaimable space"}
+            {stage === "previewing" && <Spinner />}
+            {stage === "previewing" ? t("Looking…") : t("Look for reclaimable space")}
           </button>
+          {/* Every category is asked in turn and some of them walk directories, so this takes long
+              enough that a button which merely goes grey reads as a button that did nothing. */}
+          {stage === "previewing" && (
+            <Busy label={t("Asking every category what it can free…")} />
+          )}
         </div>
       )}
 
@@ -383,10 +390,7 @@ export default function Reclaim() {
       {stage === "executing" && (
         <div className="card">
           <h2>{t("Reclaiming")}</h2>
-          <div className="progress">
-            <div className="progress-bar progress-indeterminate" />
-          </div>
-          <p className="muted">{t("Each item is re-checked immediately before it is touched.")}</p>
+          <Busy label={t("Each item is re-checked immediately before it is touched.")} />
         </div>
       )}
 

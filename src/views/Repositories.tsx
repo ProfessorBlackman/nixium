@@ -20,6 +20,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { t } from "../lib/i18n";
+import { Spinner } from "../components/Busy";
 import { api, toAppError, type Repository, type SourceLocation } from "../lib/ipc";
 import { notify } from "../lib/notices";
 
@@ -126,7 +127,8 @@ export default function Repositories() {
             <span>{t("Active only")}</span>
           </label>
           <button type="button" onClick={() => void load()} disabled={busy}>
-            {t("Reload")}
+            {busy && <Spinner />}
+            {busy ? t("Working…") : t("Reload")}
           </button>
         </div>
         <p className="muted">

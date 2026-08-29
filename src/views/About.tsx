@@ -18,6 +18,7 @@ import {
   type Versions,
 } from "../lib/ipc";
 import { t } from "../lib/i18n";
+import { Spinner } from "../components/Busy";
 import { notify } from "../lib/notices";
 import { useOperation } from "../lib/useOperation";
 
@@ -152,6 +153,7 @@ export default function About() {
           )}
         </p>
         <button type="button" onClick={() => void probeHelper()} disabled={probing}>
+          {probing && <Spinner />}
           {probing ? "Asking…" : "Ask the helper to identify itself"}
         </button>
         {helper && (

@@ -29,7 +29,8 @@
  */
 import { useCallback, useEffect, useState } from "react";
 
-import { t } from "../lib/i18n";
+import { t, tf } from "../lib/i18n";
+import { Busy, Spinner } from "../components/Busy";
 import { formatBytes, formatCount } from "../lib/format";
 import {
   api,
@@ -102,6 +103,94 @@ export default function Find() {
 
   return (
     <section className="view">
+      {/* The two things people come here to *do*, side by side and first: a search they type into,
+          and a duplicate hunt they start. `Largest files` is a view of the last scan rather than an
+          action, so it reads below them rather than standing between them and the controls. */}
+      <div className="find-columns">
+        <SearchPanel />
+        <div className="card">
+          <h2>{t("Duplicates")}</h2>
+          <p className="muted">
+            {t(
+              "Compared by size, then by the first few kilobytes, then by full content, and finally byte for byte — so a reported set really is identical rather than merely very likely to be. Files under 1 MiB are skipped, and hard links are not counted: two names for one file share the same blocks, so deleting a name frees nothing.",
+            )}
+          </p>
+
+          <div className="row">
+            <button type="button" onClick={() => void search()} disabled={searching || !home}>
+              {searching && <Spinner />}
+              {searching ? t("Searching…") : t("Look for duplicates")}
+            </button>
+            {searching && operation.running && (
+              <button type="button" onClick={() => void operation.cancel()}>
+                {t("Stop")}
+              </button>
+            )}
+          </div>
+
+          {/* Duplicate detection knows how many candidates it has, so the bar shows a real fraction
+              rather than an indeterminate slide — and the message says which stage it is in. */}
+          {searching && (
+            <Busy
+              label={operation.progress?.message ?? t("Starting…")}
+              fraction={
+                operation.progress?.total
+                  ? operation.progress.done / operation.progress.total
+                  : null
+              }
+            />
+          )}
+
+          {report && (
+            <>
+              <div className="summary">
+                <div>
+                  <span className="summary-figure">{formatBytes(report.recoverable)}</span>
+                  <span className="muted">{t("recoverable")}</span>
+                </div>
+                <div>
+                  <span className="summary-figure">{report.groups.length}</span>
+                  <span className="muted">{t("duplicate sets")}</span>
+                </div>
+              </div>
+              <p className="muted">
+                {report.stats.considered} files considered, {report.stats.size_matched} shared a size,{" "}
+                {report.stats.fully_hashed} were read in full, and {report.stats.pairs_verified} pairs
+                were compared byte for byte.
+              </p>
+              {report.cancelled && (
+                <p className="caveat">
+                  {t("Stopped early, so this is not a complete answer — there may be more.")}
+                </p>
+              )}
+              <ul className="dup-list">
+                {report.groups.slice(0, 30).map((group) => (
+                  <li key={group.paths.join("|")}>
+                    <div className="dup-head">
+                      <span>
+                        {group.paths.length} copies of {formatBytes(group.bytes)}
+                      </span>
+                      <span className="find-bytes">{formatBytes(group.recoverable)} recoverable</span>
+                    </div>
+                    {group.paths.map((path) => (
+                      <code key={path}>{path}</code>
+                    ))}
+                  </li>
+                ))}
+              </ul>
+              {report.groups.length > 30 && (
+                <p className="muted">…and {report.groups.length - 30} more sets.</p>
+              )}
+              <p className="muted">
+                {t(
+                  "nix does not choose which copy to delete. Which one matters is a judgement about your work, not about storage.",
+                )}
+              </p>
+            </>
+          )}
+        </div>
+      </div>
+
       <div className="card">
         <h2>{t("Largest files")}</h2>
         {largest === null ? (
@@ -130,78 +219,6 @@ export default function Find() {
         )}
       </div>
 
-      <div className="card">
-        <h2>{t("Duplicates")}</h2>
-        <p className="muted">
-          {t(
-            "Compared by size, then by the first few kilobytes, then by full content, and finally byte for byte — so a reported set really is identical rather than merely very likely to be. Files under 1 MiB are skipped, and hard links are not counted: two names for one file share the same blocks, so deleting a name frees nothing.",
-          )}
-        </p>
-
-        <div className="row">
-          <button type="button" onClick={() => void search()} disabled={searching || !home}>
-            {searching ? "Searching…" : "Look for duplicates"}
-          </button>
-          {searching && operation.running && (
-            <button type="button" onClick={() => void operation.cancel()}>
-              {t("Stop")}
-            </button>
-          )}
-        </div>
-
-        {searching && operation.progress && (
-          <p className="muted">{operation.progress.message ?? "Working…"}</p>
-        )}
-
-        {report && (
-          <>
-            <div className="summary">
-              <div>
-                <span className="summary-figure">{formatBytes(report.recoverable)}</span>
-                <span className="muted">{t("recoverable")}</span>
-              </div>
-              <div>
-                <span className="summary-figure">{report.groups.length}</span>
-                <span className="muted">{t("duplicate sets")}</span>
-              </div>
-            </div>
-            <p className="muted">
-              {report.stats.considered} files considered, {report.stats.size_matched} shared a size,{" "}
-              {report.stats.fully_hashed} were read in full, and {report.stats.pairs_verified} pairs
-              were compared byte for byte.
-            </p>
-            {report.cancelled && (
-              <p className="caveat">
-                {t("Stopped early, so this is not a complete answer — there may be more.")}
-              </p>
-            )}
-            <ul className="dup-list">
-              {report.groups.slice(0, 30).map((group) => (
-                <li key={group.paths.join("|")}>
-                  <div className="dup-head">
-                    <span>
-                      {group.paths.length} copies of {formatBytes(group.bytes)}
-                    </span>
-                    <span className="find-bytes">{formatBytes(group.recoverable)} recoverable</span>
-                  </div>
-                  {group.paths.map((path) => (
-                    <code key={path}>{path}</code>
-                  ))}
-                </li>
-              ))}
-            </ul>
-            {report.groups.length > 30 && (
-              <p className="muted">…and {report.groups.length - 30} more sets.</p>
-            )}
-            <p className="muted">
-              {t(
-                "nix does not choose which copy to delete. Which one matters is a judgement about your work, not about storage.",
-              )}
-            </p>
-          </>
-        )}
-      </div>
-      <SearchPanel />
     </section>
   );
 }
@@ -387,7 +404,8 @@ function SearchPanel() {
 
       <div className="row">
         <button type="button" onClick={() => void start()} disabled={running !== null}>
-          {running !== null ? "Searching…" : "Search"}
+          {running !== null && <Spinner />}
+          {running !== null ? t("Searching…") : t("Search")}
         </button>
         {running !== null && (
           <button type="button" onClick={() => void stop()}>
@@ -395,6 +413,13 @@ function SearchPanel() {
           </button>
         )}
       </div>
+
+      {/* A filesystem walk has no total to report — it does not know how many files it will see until
+          it has seen them — so this is deliberately indeterminate rather than a percentage that would
+          be invented. */}
+      {running !== null && (
+        <Busy label={tf("Walking the filesystem — {n} found so far", { n: hits.length })} />
+      )}
 
       {(hits.length > 0 || summary !== null) && (
         <p className="muted">

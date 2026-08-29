@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { t } from "../lib/i18n";
+import { BusyInline } from "../components/Busy";
 import { api, toAppError, type HostLine, type HostsFile } from "../lib/ipc";
 import { notify } from "../lib/notices";
 
@@ -199,6 +200,7 @@ export default function Hosts() {
           <button type="button" onClick={() => void load()} disabled={busy}>
             {t("Reload from disk")}
           </button>
+          {busy && <BusyInline label={t("Saving to /etc/hosts…")} />}
           <label className="field field-inline">
             <input
               type="checkbox"

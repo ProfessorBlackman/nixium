@@ -23,6 +23,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { t } from "../lib/i18n";
+import { BusyInline } from "../components/Busy";
 import { api, toAppError, type AutostartEntry } from "../lib/ipc";
 import { notify } from "../lib/notices";
 
@@ -121,6 +122,7 @@ export default function Startup() {
           <button type="button" onClick={() => void load()} disabled={busy !== null}>
             {t("Reload")}
           </button>
+          {busy !== null && <BusyInline label={t("Applying…")} />}
           <label className="field field-inline">
             <input
               type="checkbox"

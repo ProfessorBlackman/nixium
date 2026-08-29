@@ -15,6 +15,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 
+import { Busy, Spinner } from "../components/Busy";
 import { SpaceTable } from "../components/SpaceTable";
 import { Treemap } from "../components/Treemap";
 import { t } from "../lib/i18n";
@@ -131,7 +132,8 @@ export default function Explorer() {
         <h2>{t("Scan")}</h2>
         <div className="row wrap">
           <button type="button" onClick={() => void scanHome()} disabled={op.running}>
-            {t("Scan my home directory")}
+            {op.running && <Spinner />}
+            {op.running ? t("Scanning…") : t("Scan my home directory")}
           </button>
           {op.running && (
             <button type="button" onClick={() => void op.cancel()}>
@@ -191,13 +193,7 @@ export default function Explorer() {
       {op.running && (
         <div className="card">
           <h2>Scanning {scanRoot}</h2>
-          <div className="progress">
-            <div
-              className="progress-bar progress-indeterminate"
-              style={fraction === null ? undefined : { width: `${Math.round(fraction * 100)}%` }}
-            />
-          </div>
-          <p className="muted">{op.progress?.message ?? "Starting…"}</p>
+          <Busy label={op.progress?.message ?? t("Starting…")} fraction={fraction} />
           <p className="muted">
             {t("Results appear as soon as the walk finishes. Stopping keeps whatever was found.")}
           </p>

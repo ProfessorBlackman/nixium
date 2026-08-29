@@ -2218,3 +2218,74 @@ button.danger:hover:not(:disabled) {
 .firstrun-panel .row {
   margin-top: 1.4rem;
 }
+
+/* Loading indicators.
+   Text carries the meaning and movement is an enhancement, because prefers-reduced-motion turns every
+   animation off — a spinner alone would sit frozen for exactly the users who most need telling that
+   something is happening. */
+.spinner {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  margin-right: 0.4rem;
+  border: 2px solid var(--rule-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  vertical-align: -0.1em;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.busy {
+  margin-top: 0.6rem;
+}
+
+.busy-label {
+  margin: 0.35rem 0 0;
+  color: var(--ink-mute);
+  font-size: 0.8125rem;
+}
+
+.busy-inline {
+  color: var(--ink-mute);
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The bar cannot slide, so it fills instead — a static 40% sliver reads as a stalled download. */
+  .progress-indeterminate {
+    width: 100%;
+    opacity: 0.55;
+  }
+
+  /* And the ring cannot spin, so it becomes a plain dot rather than a frozen partial circle that
+     looks like a rendering fault. */
+  .spinner {
+    border-color: var(--accent);
+    opacity: 0.7;
+  }
+}
+
+/* Find: search on the left, duplicates on the right, both above the largest-files list.
+   Those two are what a user comes here to *do*; the largest-files list is a view of the last scan, so
+   it reads below them rather than standing between them and the controls. */
+.find-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+/* One column when two would each be too narrow for a form. The search card carries six fields, and a
+   cramped form is worse than a tall page. */
+@media (max-width: 68rem) {
+  .find-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

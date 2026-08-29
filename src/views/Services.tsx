@@ -29,6 +29,7 @@ import {
   type UnitFile,
 } from "../lib/ipc";
 import { t } from "../lib/i18n";
+import { BusyInline } from "../components/Busy";
 import { notify } from "../lib/notices";
 
 /** Relative time from a signed second count, which is what a timer's countdown is. */
@@ -255,6 +256,7 @@ export default function Services() {
           )}
 
           <div className="row">
+            {busy && <BusyInline label={t("Asking systemd…")} />}
             <button type="button" disabled={busy} onClick={() => void act(chosen.name, "start")}>
               {t("Start")}
             </button>

@@ -6,6 +6,7 @@
  */
 import { useEffect, useState } from "react";
 
+import { BusyInline } from "../components/Busy";
 import { formatBytes } from "../lib/format";
 import { available, setLocale, t, useLocale } from "../lib/i18n";
 import { api, toAppError, type Rule, type Settings, type Theme } from "../lib/ipc";
@@ -186,6 +187,9 @@ export default function SettingsView() {
     <section className="stack">
       <div className="card">
         <h2>{t("Appearance")}</h2>
+        {(saving || switching) && (
+          <BusyInline label={switching ? t("Loading language…") : t("Saving…")} />
+        )}
         <label className="field">
           <span>{t("Theme")}</span>
           <select
