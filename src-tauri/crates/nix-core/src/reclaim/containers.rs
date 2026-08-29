@@ -240,6 +240,10 @@ impl Category for ContainerCategory {
         "Container storage"
     }
 
+    fn explains(&self) -> &'static str {
+        "Images, stopped containers and build layers Docker is holding. An image still referenced is downloaded again the next time you run it, which needs a network connection and can be several gigabytes. Running containers and their volumes are never touched."
+    }
+
     fn space_category(&self) -> SpaceCategory {
         SpaceCategory::ContainerImage
     }

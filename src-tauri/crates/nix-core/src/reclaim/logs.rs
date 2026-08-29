@@ -121,6 +121,10 @@ impl Category for LogCategory {
         "Rotated logs"
     }
 
+    fn explains(&self) -> &'static str {
+        "Log files already rotated and compressed by logrotate — the numbered ones, not the file being written now. You lose the ability to look back at what happened on those days."
+    }
+
     fn space_category(&self) -> SpaceCategory {
         SpaceCategory::Log
     }
@@ -242,6 +246,10 @@ impl Category for JournalCategory {
 
     fn label(&self) -> &'static str {
         "System journal"
+    }
+
+    fn explains(&self) -> &'static str {
+        "Older systemd journal entries, vacuumed down to a limit you choose. The journal keeps recording; what goes is history. If you are investigating something that happened last week, do this afterwards."
     }
 
     fn space_category(&self) -> SpaceCategory {

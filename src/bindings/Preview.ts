@@ -44,4 +44,11 @@ refused: Array<Refusal>,
  * [`Preview::total_bytes`] or [`Preview::promisable_bytes`]: those are promises about what this
  * preview would reclaim, and an advisory is by definition something it will not.
  */
-advisories: Array<Advisory>, };
+advisories: Array<Advisory>, 
+/**
+ * What each category involved actually does, keyed by its label. `PLT-7`.
+ *
+ * Carried on the preview rather than fetched separately so the explanation cannot be missing for
+ * a category that is present — they are built from the same pass.
+ */
+explanations: { [key in string]?: string }, };

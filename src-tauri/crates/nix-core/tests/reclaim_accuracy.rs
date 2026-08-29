@@ -69,6 +69,10 @@ impl Category for Fixed {
     fn label(&self) -> &'static str {
         "Harness"
     }
+
+    fn explains(&self) -> &'static str {
+        "A category used only by this accuracy harness."
+    }
     fn space_category(&self) -> SpaceCategory {
         SpaceCategory::UserFile
     }

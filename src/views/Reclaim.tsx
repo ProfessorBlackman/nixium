@@ -240,6 +240,16 @@ export default function Reclaim() {
                         </span>
                       </span>
                       {item.path && <code className="reclaim-path">{item.path}</code>}
+                    {/* What reclaiming this actually does, at the point the decision is made rather
+                        than in a manual nobody opens. Shown on the first item of each category, so a
+                        list of nine caches carries the sentence once. */}
+                    {preview.explanations[item.category] !== undefined &&
+                      preview.items.findIndex((other) => other.category === item.category) ===
+                        preview.items.indexOf(item) && (
+                        <span className="reclaim-explains">
+                          {preview.explanations[item.category]}
+                        </span>
+                      )}
                       {/* A cost is shown wherever there is one — a rating that says "this costs
                           something" without saying what gives nothing to decide with. */}
                       {item.cost && <span className="reclaim-cost">{item.cost}</span>}

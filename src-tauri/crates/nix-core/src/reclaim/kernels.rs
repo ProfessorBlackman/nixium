@@ -56,6 +56,10 @@ impl Category for OldKernelCategory {
         "Old kernels"
     }
 
+    fn explains(&self) -> &'static str {
+        "Kernel packages older than both the one you are running and the newest installed. You lose the ability to boot those versions from the recovery menu — which is what people use when a new kernel does not work. The running kernel and the newest are never offered."
+    }
+
     fn space_category(&self) -> SpaceCategory {
         SpaceCategory::PackagePayload
     }
@@ -129,6 +133,10 @@ impl Category for ResidualConfigCategory {
 
     fn label(&self) -> &'static str {
         "Leftover configuration"
+    }
+
+    fn explains(&self) -> &'static str {
+        "Configuration belonging to packages you removed without purging. Nothing on the system reads it. If you reinstall one of those packages it starts from defaults rather than your old settings."
     }
 
     fn space_category(&self) -> SpaceCategory {

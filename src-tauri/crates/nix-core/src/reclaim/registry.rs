@@ -57,6 +57,20 @@ pub trait Category: Send + Sync {
     /// Which space-model category these belong to.
     fn space_category(&self) -> SpaceCategory;
 
+    /// What reclaiming this actually does, in the user's terms. `PLT-7`.
+    ///
+    /// # Required, deliberately
+    ///
+    /// There is no default. A category that cannot say what it deletes has no business offering to
+    /// delete it, and a default of `""` would let one ship silent — which is precisely the state
+    /// `PLT-7` exists to end. Adding a category now means writing this sentence, and the compiler
+    /// insists.
+    ///
+    /// Written as: what goes, what happens next time it is needed, and what the user would notice.
+    /// Not a definition of the term — "removes cached package files" tells a user nothing they could
+    /// not guess from the label. What they cannot guess is whether it comes back.
+    fn explains(&self) -> &'static str;
+
     /// Whether this category can run on this system. A category whose backing tool is absent
     /// reports `false` rather than producing an empty list, so the UI can say why.
     fn available(&self) -> bool {
@@ -127,6 +141,14 @@ impl Registry {
 
     pub fn register(&mut self, category: Box<dyn Category>) {
         self.categories.push(category);
+    }
+
+    /// Every registered category.
+    ///
+    /// Borrowed rather than cloned: a category is a behaviour, not data, and the caller only ever
+    /// wants to ask it questions.
+    pub fn categories(&self) -> impl Iterator<Item = &dyn Category> {
+        self.categories.iter().map(std::convert::AsRef::as_ref)
     }
 
     #[must_use]
@@ -228,6 +250,10 @@ impl Category for TrashCategory {
         "Trash"
     }
 
+    fn explains(&self) -> &'static str {
+        "Empties the desktop trash. The one item here where the files are already meant to be gone, and the only one that cannot be undone by any means."
+    }
+
     fn space_category(&self) -> SpaceCategory {
         SpaceCategory::Trash
     }
@@ -262,5 +288,58 @@ impl Category for TrashCategory {
             category: self.id().to_string(),
             reclaimable: Reclaimable::Exact,
         }])
+    }
+}
+
+#[cfg(test)]
+mod explanation_tests {
+    use super::*;
+
+    /// `PLT-7`: every category the user can actually be offered says what reclaiming it does.
+    ///
+    /// The trait makes it impossible to omit; this makes it hard to fob off. A category that deletes
+    /// files and describes itself in four words has satisfied the compiler and not the requirement.
+    #[test]
+    fn every_real_category_explains_itself_in_terms_a_user_could_act_on() {
+        let registry = Registry::with_defaults();
+        let mut checked = 0;
+
+        for category in registry.categories() {
+            let text = category.explains();
+            let label = category.label();
+
+            assert!(
+                text.len() >= 80,
+                "{label}: {text:?} is too short to tell anyone what they would lose"
+            );
+            assert!(
+                !text.to_lowercase().starts_with(&label.to_lowercase()),
+                "{label}: the explanation restates the label instead of explaining it"
+            );
+            assert!(
+                text.ends_with('.'),
+                "{label}: the explanation is not a sentence"
+            );
+            checked += 1;
+        }
+
+        assert!(
+            checked >= 10,
+            "only {checked} categories were checked, which cannot be the whole registry"
+        );
+    }
+
+    /// And no two categories share an explanation — copy-paste is the obvious way to satisfy the
+    /// compiler without saying anything.
+    #[test]
+    fn no_two_categories_share_an_explanation() {
+        let registry = Registry::with_defaults();
+        let mut seen: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+
+        for category in registry.categories() {
+            if let Some(other) = seen.insert(category.explains(), category.label()) {
+                panic!("{} and {} share an explanation", category.label(), other);
+            }
+        }
     }
 }

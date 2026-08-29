@@ -56,6 +56,10 @@ impl Category for SnapRevisionCategory {
         "Old snap revisions"
     }
 
+    fn explains(&self) -> &'static str {
+        "Superseded versions of installed snaps, which snapd keeps so you can roll back. Removing them means you cannot revert those apps to their previous version. The running revision of each snap is never touched."
+    }
+
     fn space_category(&self) -> SpaceCategory {
         SpaceCategory::PackagePayload
     }
@@ -130,6 +134,10 @@ impl Category for FlatpakUnusedCategory {
 
     fn label(&self) -> &'static str {
         "Unused flatpak runtimes"
+    }
+
+    fn explains(&self) -> &'static str {
+        "Runtimes no installed flatpak still depends on. Downloaded again if you install something that needs one, typically a few hundred megabytes."
     }
 
     fn space_category(&self) -> SpaceCategory {

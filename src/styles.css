@@ -2155,3 +2155,16 @@ button.danger:hover:not(:disabled) {
 .pkg-select[aria-pressed="true"] {
   font-weight: 600;
 }
+
+/* What reclaiming a category actually does (PLT-7).
+   Sits under the first item of its category, in the flow of the list rather than behind a tooltip: a
+   decision aid the user has to hover to find is one they make without. */
+.reclaim-explains {
+  display: block;
+  margin-top: 0.3rem;
+  padding-left: 0.6rem;
+  border-left: 2px solid var(--rule-strong);
+  color: var(--ink-mute);
+  font-size: 0.75rem;
+  max-width: 70ch;
+}

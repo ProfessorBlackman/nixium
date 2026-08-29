@@ -47,6 +47,7 @@ pub use packages::PackageCacheCategory;
 pub use registry::{Candidate, Category, Registry, TrashCategory};
 pub use snaps::{FlatpakUnusedCategory, SnapRevisionCategory};
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -151,6 +152,12 @@ pub struct Preview {
     /// [`Preview::total_bytes`] or [`Preview::promisable_bytes`]: those are promises about what this
     /// preview would reclaim, and an advisory is by definition something it will not.
     pub advisories: Vec<Advisory>,
+    /// What each category involved actually does, keyed by its label. `PLT-7`.
+    ///
+    /// Carried on the preview rather than fetched separately so the explanation cannot be missing for
+    /// a category that is present — they are built from the same pass.
+    #[ts(as = "std::collections::HashMap<String, String>")]
+    pub explanations: BTreeMap<String, String>,
 }
 
 impl Preview {
@@ -442,8 +449,22 @@ impl Session {
         // Largest first: the decision a user is making is about where the space is.
         items.sort_by_key(|i| std::cmp::Reverse(i.bytes));
 
+        // One entry per category actually present in this preview. Built here, from the same pass, so
+        // an item can never appear with no explanation available for it.
+        let explanations: BTreeMap<String, String> = registry
+            .categories()
+            .filter(|category| items.iter().any(|item| item.category == category.label()))
+            .map(|category| {
+                (
+                    category.label().to_string(),
+                    category.explains().to_string(),
+                )
+            })
+            .collect();
+
         let preview = Preview {
             ticket: Ticket::mint(),
+            explanations,
             total_bytes: items.iter().map(|i| i.bytes).sum(),
             // Only what can actually be promised: a qualified entry contributes its proven
             // exclusive portion, or nothing when none is proven.
@@ -1074,6 +1095,10 @@ mod tests {
             fn label(&self) -> &'static str {
                 "Test"
             }
+
+            fn explains(&self) -> &'static str {
+                "A category used only by tests."
+            }
             fn space_category(&self) -> crate::space::Category {
                 crate::space::Category::Unknown
             }
@@ -1118,6 +1143,10 @@ mod tests {
             }
             fn label(&self) -> &'static str {
                 "Never"
+            }
+
+            fn explains(&self) -> &'static str {
+                "A category used only by tests."
             }
             fn space_category(&self) -> crate::space::Category {
                 crate::space::Category::Unknown
@@ -1186,6 +1215,10 @@ mod tests {
             fn label(&self) -> &'static str {
                 "File"
             }
+
+            fn explains(&self) -> &'static str {
+                "A category used only by tests."
+            }
             fn space_category(&self) -> crate::space::Category {
                 crate::space::Category::UserFile
             }
@@ -1242,6 +1275,10 @@ mod tests {
             }
             fn label(&self) -> &'static str {
                 "File"
+            }
+
+            fn explains(&self) -> &'static str {
+                "A category used only by tests."
             }
             fn space_category(&self) -> crate::space::Category {
                 crate::space::Category::UserFile
@@ -1465,6 +1502,10 @@ mod tests {
             fn label(&self) -> &'static str {
                 "Shared"
             }
+
+            fn explains(&self) -> &'static str {
+                "A category used only by tests."
+            }
             fn space_category(&self) -> crate::space::Category {
                 crate::space::Category::UserFile
             }
@@ -1518,6 +1559,10 @@ mod tests {
             }
             fn label(&self) -> &'static str {
                 "Partly"
+            }
+
+            fn explains(&self) -> &'static str {
+                "A category used only by tests."
             }
             fn space_category(&self) -> crate::space::Category {
                 crate::space::Category::UserFile
@@ -1582,6 +1627,10 @@ mod tests {
             fn label(&self) -> &'static str {
                 "Multi"
             }
+
+            fn explains(&self) -> &'static str {
+                "A category used only by tests."
+            }
             fn space_category(&self) -> crate::space::Category {
                 crate::space::Category::AppCache
             }
@@ -1632,6 +1681,10 @@ mod tests {
             fn label(&self) -> &'static str {
                 "Broken"
             }
+
+            fn explains(&self) -> &'static str {
+                "A category used only by tests."
+            }
             fn space_category(&self) -> crate::space::Category {
                 crate::space::Category::Unknown
             }
@@ -1663,6 +1716,10 @@ mod tests {
             }
             fn label(&self) -> &'static str {
                 "Unavailable"
+            }
+
+            fn explains(&self) -> &'static str {
+                "A category used only by tests."
             }
             fn space_category(&self) -> crate::space::Category {
                 crate::space::Category::Unknown
@@ -1927,6 +1984,10 @@ mod tests {
         }
         fn label(&self) -> &'static str {
             "Logical only"
+        }
+
+        fn explains(&self) -> &'static str {
+            "A category used only by tests."
         }
         fn space_category(&self) -> crate::space::Category {
             crate::space::Category::PackagePayload

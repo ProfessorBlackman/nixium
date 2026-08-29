@@ -257,6 +257,10 @@ impl Category for AppCacheCategory {
         "Application caches"
     }
 
+    fn explains(&self) -> &'static str {
+        "Files applications keep so they need not fetch or recompute something. Each rebuilds itself the next time that application needs it, so nothing is lost — but the application will be slower once, while it does."
+    }
+
     fn space_category(&self) -> SpaceCategory {
         SpaceCategory::AppCache
     }

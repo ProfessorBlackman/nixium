@@ -116,6 +116,10 @@ impl Category for PackageCacheCategory {
         "Package caches"
     }
 
+    fn explains(&self) -> &'static str {
+        "The .deb or .rpm files apt or dnf downloaded in order to install something. Already installed and unpacked, so nothing stops working — they are only needed again to reinstall the exact same version without a network connection."
+    }
+
     fn space_category(&self) -> SpaceCategory {
         SpaceCategory::PackageCache
     }
