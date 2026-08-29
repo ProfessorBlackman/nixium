@@ -78,6 +78,23 @@ registry, since an unfetched crate is one whose notice was not checked.
 The helper is under `libexec` rather than `bin` because it is not meant to be run by hand; its
 `--serve` mode is the only useful entry point and it says so when invoked without it.
 
+## Releasing
+
+`.github/workflows/release.yml`, on every push to `master`. A release is only *published* when the
+version has changed: the workflow reads it from the tree and skips if `v<version>` is already tagged.
+
+That direction matters. Releasing on every push would produce a release per commit; requiring a
+hand-pushed tag would let the tag and the version disagree. Deciding from the version in the tree is
+the only arrangement in which the tag cannot lie — and `scripts/check-version.mjs` enforces that the
+three files carrying a version agree before anything is built.
+
+To release: bump the version in `package.json`, `src-tauri/tauri.conf.json` and
+`src-tauri/Cargo.toml`, run `make notices` if the lockfile moved, and push to `master`.
+
+Before publishing, the workflow re-runs the full gate on those exact sources, builds the three
+bundles, opens the `.deb` with `scripts/check-bundle.sh`, installs it on a clean runner and asks the
+installed binary for its version. A build that succeeds and a package that works are different claims.
+
 ## Verifying a build locally
 
 ```sh

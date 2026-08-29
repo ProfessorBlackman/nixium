@@ -139,6 +139,11 @@ jobs:
       # than pretending it is paid. New user-facing text must go through t(). `PLT-1`.
       - name: Translatable strings (ratchet)
         run: node scripts/check-i18n.mjs
+
+      # A disagreement here does not fail a build — it ships a release whose tag says one version and
+      # whose contents say another. Checked on every branch so it cannot first surface at release time.
+      - name: The version agrees across all three files
+        run: node scripts/check-version.mjs
       - run: pnpm build
 
   bundle:
