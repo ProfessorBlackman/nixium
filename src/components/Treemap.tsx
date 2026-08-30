@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 /**
  * Squarified treemap on canvas. Task 1.5 (`STO-2`).
  *
@@ -18,6 +21,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { t } from "../lib/i18n";
 import type { SpaceEntry, SpaceTree } from "../lib/ipc";
 import { formatBytes } from "../lib/format";
 
@@ -297,7 +301,7 @@ export function Treemap({
           <span>{formatBytes(hovered.bytes)}</span>
           {hovered.entry?.path && <code>{hovered.entry.path}</code>}
           {hovered.entry === null && (
-            <span className="muted">Too small to show individually. Use the table below.</span>
+            <span className="muted">{t("Too small to show individually. Use the table below.")}</span>
           )}
         </div>
       )}

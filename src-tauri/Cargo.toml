@@ -15,8 +15,13 @@ members = ["crates/nix-core", "crates/nix-helper"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+# Moved from 1.85 for `zbus` (D10). The toolchain has been 1.98 throughout, so this only narrows the
+# range of compilers the crate *claims* to support — but it is a real narrowing and belongs in a diff
+# rather than happening by accident.
+rust-version = "1.87"
 repository = "https://github.com/tlc/nix"
+license = "GPL-3.0-or-later"
+authors = ["Methuselah Nwodobeh"]
 
 [workspace.dependencies]
 nix-core = { path = "crates/nix-core" }
@@ -29,7 +34,9 @@ tracing-appender = "0.2"
 ts-rs = "11"
 # statvfs and the metadata syscalls. Chosen over `libc` because its API is safe, so nothing here
 # needs to relax the workspace's `unsafe_code = "deny"`.
-rustix = { version = "1", features = ["fs"] }
+# `process` joins `fs` for PRC-2: `kill_process` and `setpriority_process`, both safe wrappers, so
+# signalling and renicing need no `unsafe` and no `libc`.
+rustix = { version = "1", features = ["fs", "process"] }
 # Parallel directory traversal. `rayon::scope` gives correct termination for a recursive fan-out,
 # which is the part that is easy to get wrong by hand.
 rayon = "1"
@@ -56,6 +63,8 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
+license.workspace = true
+authors.workspace = true
 
 # The user-facing command is `nix`, even though the package is `nix-app`.
 # The package is not named `nix` because that name belongs to the well-known
@@ -75,9 +84,12 @@ workspace = true
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-nix-core = { workspace = true }
+nix-core = { workspace = true, features = ["dbus", "regex"] }
 tracing = { workspace = true }
-tauri = { version = "2", features = [] }
+# `tray-icon` for PLT-3, and `image-png` because the tray needs to decode the icon it is given —
+# without it the tray builds and shows nothing, which is a harder failure to diagnose than a build
+# error.
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-opener = "2"
 serde = { workspace = true }
 serde_json = { workspace = true }

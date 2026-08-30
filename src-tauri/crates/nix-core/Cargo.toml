@@ -5,11 +5,24 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
+license.workspace = true
+authors.workspace = true
 
 [lints]
 workspace = true
 
+[features]
+regex = ["dep:regex"]
+default = []
+# systemd over D-Bus (`SVC-*`, decision D10). Gated so the privileged helper, which depends on this
+# crate, does not link a D-Bus stack it never uses — verified: a whole-workspace build puts zero `zbus`
+# symbols in `nix-helper`.
+dbus = ["dep:zbus"]
+
 [dependencies]
+# `blocking` rather than the async API: this crate is std threads throughout, and the blocking wrapper
+# keeps the executor a transitive detail instead of spreading `async` through every caller.
+zbus = { version = "5", optional = true, default-features = false, features = ["blocking-api", "async-io"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -19,6 +32,13 @@ tracing-appender = { workspace = true }
 ts-rs = { workspace = true }
 rustix = { workspace = true }
 rayon = { workspace = true }
+# Behind a feature for the same reason `zbus` is: `nix-helper` links this crate, and a regex engine has
+# no business in the binary that runs as root. Only `nix-app` enables it. See SPEC.md D10.
+regex = { version = "1", optional = true, default-features = false, features = [
+    "std",
+    "perf",
+    "unicode-case",
+] }
 
 [dev-dependencies]
 proptest = { workspace = true }

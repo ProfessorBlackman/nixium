@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! Capability probing. Task 0.7 (`FND-7`).
 //!
 //! The rule this module exists to enforce is principle P7: **detect capabilities, never distro
@@ -38,6 +41,10 @@ pub enum Capability {
     Pkexec,
     /// btrfs userspace tools, needed for honest accounting on btrfs (`STO-17`).
     BtrfsTools,
+    /// The Docker CLI (`STO-13`). Presence only — whether the daemon can actually be reached without
+    /// privilege is a separate question the category asks for itself, because it depends on group
+    /// membership rather than on anything installed.
+    Docker,
 }
 
 impl Capability {
@@ -55,6 +62,7 @@ impl Capability {
             Self::Journalctl,
             Self::Pkexec,
             Self::BtrfsTools,
+            Self::Docker,
         ]
     }
 
@@ -72,6 +80,7 @@ impl Capability {
             Self::Journalctl => "journalctl",
             Self::Pkexec => "pkexec",
             Self::BtrfsTools => "btrfs",
+            Self::Docker => "docker",
         }
     }
 
@@ -89,6 +98,7 @@ impl Capability {
             Self::Journalctl => "the systemd journal",
             Self::Pkexec => "polkit (pkexec)",
             Self::BtrfsTools => "btrfs tools",
+            Self::Docker => "Docker",
         }
     }
 }
@@ -148,13 +158,13 @@ impl Registry {
     }
 
     /// Probe everything and report. Used by the diagnostics bundle and by the frontend on start.
-    pub fn snapshot(&self) -> Snapshot {
+    pub fn snapshot(&self) -> Capabilities {
         let present = Capability::all()
             .iter()
             .copied()
             .filter(|c| self.has(*c))
             .collect();
-        Snapshot { present }
+        Capabilities { present }
     }
 
     /// Drop cached probes. Call after anything that could change `PATH` or install a tool.
@@ -170,14 +180,18 @@ impl Registry {
 }
 
 /// What the host can do, as sent to the frontend.
+///
+/// Named `Capabilities` rather than `Snapshot`: it is a capability set, and `cow::Snapshot` is a
+/// filesystem snapshot. Two Rust types with the same name generate the same TypeScript file, and
+/// one silently overwrites the other.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
-pub struct Snapshot {
+pub struct Capabilities {
     /// Capabilities found present, sorted for a stable wire representation.
     pub present: Vec<Capability>,
 }
 
-impl Snapshot {
+impl Capabilities {
     #[must_use]
     pub fn has(&self, cap: Capability) -> bool {
         self.present.contains(&cap)
@@ -250,7 +264,7 @@ mod tests {
 
     #[test]
     fn snapshot_round_trips_and_answers_membership() {
-        let snap = Snapshot {
+        let snap = Capabilities {
             present: vec![Capability::Apt, Capability::Flatpak],
         };
         assert!(snap.has(Capability::Apt));
@@ -258,7 +272,7 @@ mod tests {
 
         let json = serde_json::to_string(&snap).unwrap();
         assert!(json.contains("\"apt\""), "{json}");
-        let back: Snapshot = serde_json::from_str(&json).unwrap();
+        let back: Capabilities = serde_json::from_str(&json).unwrap();
         assert_eq!(snap, back);
     }
 

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 /**
  * Virtualised table over a scan's entries. Task 1.6 (`STO-2`).
  *
@@ -11,6 +14,7 @@
  */
 import { useMemo, useRef, useState } from "react";
 
+import { t } from "../lib/i18n";
 import type { SpaceEntry, SpaceTree } from "../lib/ipc";
 import { formatBytes, formatPercent } from "../lib/format";
 
@@ -60,16 +64,16 @@ export function SpaceTable({
           className={sort === "name" ? "th is-sorted" : "th"}
           onClick={() => setSort("name")}
         >
-          Name
+          {t("Name")}
         </button>
         <button
           type="button"
           className={sort === "size" ? "th is-sorted" : "th"}
           onClick={() => setSort("size")}
         >
-          On disk
+          {t("On disk")}
         </button>
-        <span className="th th-static">Share</span>
+        <span className="th th-static">{t("Share")}</span>
       </div>
 
       <div
@@ -82,7 +86,7 @@ export function SpaceTable({
         role="rowgroup"
       >
         {rows.length === 0 ? (
-          <p className="empty">Nothing in this directory.</p>
+          <p className="empty">{t("Nothing in this directory.")}</p>
         ) : (
           // A spacer of the full height gives the scrollbar its true size while only the window
           // exists in the DOM.
@@ -93,7 +97,13 @@ export function SpaceTable({
               return (
                 <div
                   key={entry.id}
-                  className={entry.is_dir ? "tr is-dir" : "tr"}
+                  className={
+                    entry.provenance.by === "aggregated"
+                      ? "tr is-aggregate"
+                      : entry.is_dir
+                        ? "tr is-dir"
+                        : "tr"
+                  }
                   style={{ position: "absolute", top: index * ROW_HEIGHT, height: ROW_HEIGHT }}
                   role="row"
                   tabIndex={0}
@@ -107,7 +117,7 @@ export function SpaceTable({
                 >
                   <span className="td td-name" title={entry.path ?? entry.label}>
                     <span aria-hidden="true" className="td-icon">
-                      {entry.is_dir ? "▸" : "·"}
+                      {entry.provenance.by === "aggregated" ? "⋯" : entry.is_dir ? "▸" : "·"}
                     </span>
                     {entry.label}
                   </span>

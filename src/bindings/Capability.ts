@@ -6,4 +6,4 @@
  * One variant per *capability*, not per distro. A machine with both `apt` and `flatpak` reports
  * both, and the features that depend on each are offered independently.
  */
-export type Capability = "apt" | "dnf" | "pacman" | "zypper" | "snap" | "flatpak" | "systemctl" | "journalctl" | "pkexec" | "btrfs_tools";
+export type Capability = "apt" | "dnf" | "pacman" | "zypper" | "snap" | "flatpak" | "systemctl" | "journalctl" | "pkexec" | "btrfs_tools" | "docker";

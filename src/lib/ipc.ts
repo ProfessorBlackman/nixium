@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 /**
  * Typed wrappers over the Tauri command surface. Task 0.3 (FND-2).
  *
@@ -18,16 +21,65 @@ import type { CachedScan } from "../bindings/CachedScan";
 import type { Preview } from "../bindings/Preview";
 import type { PreviewItem } from "../bindings/PreviewItem";
 import type { Refusal } from "../bindings/Refusal";
+import type { Snapshot as CowSnapshot } from "../bindings/Snapshot";
 import type { Report } from "../bindings/Report";
 import type { Ticket } from "../bindings/Ticket";
 import type { Filesystem } from "../bindings/Filesystem";
 import type { ScanResult } from "../bindings/ScanResult";
 import type { Settings } from "../bindings/Settings";
-import type { Snapshot } from "../bindings/Snapshot";
+import type { Capabilities } from "../bindings/Capabilities";
+import type { DuplicateReport } from "../bindings/DuplicateReport";
+import type { GrowthReport } from "../bindings/GrowthReport";
+import type { Metric } from "../bindings/Metric";
+import type { Action } from "../bindings/Action";
+import type { Detail } from "../bindings/Detail";
+import type { Page } from "../bindings/Page";
+import type { Scope } from "../bindings/Scope";
+import type { Timer } from "../bindings/Timer";
+import type { Unit } from "../bindings/Unit";
+import type { Package } from "../bindings/Package";
+import type { Measured } from "../bindings/Measured";
+import type { Manager } from "../bindings/Manager";
+import type { ResidualConfig } from "../bindings/ResidualConfig";
+import type { RemovalPreview } from "../bindings/RemovalPreview";
+import type { RemovalOutcome } from "../bindings/RemovalOutcome";
+import type { Flagged } from "../bindings/Flagged";
+import type { Concern } from "../bindings/Concern";
+import type { RemovalRisk } from "../bindings/RemovalRisk";
+import type { HostsFile } from "../bindings/HostsFile";
+import type { HostLine } from "../bindings/HostLine";
+import type { LineKind } from "../bindings/LineKind";
+// `AutostartEntry.ts`, not `Entry.ts`: `journal::Entry` owns that name, which is why the Rust type
+// carries #[ts(rename = "AutostartEntry")].
+import type { AutostartEntry } from "../bindings/AutostartEntry";
+import type { Origin } from "../bindings/Origin";
+import type { Repository } from "../bindings/Repository";
+// `Location` is a DOM global, so the binding is aliased to keep the two apart.
+import type { Location as SourceLocation } from "../bindings/Location";
+import type { Format } from "../bindings/Format";
+import type { Query as SearchQuery } from "../bindings/Query";
+import type { Hit } from "../bindings/Hit";
+import type { Summary as SearchSummary } from "../bindings/Summary";
+import type { NameMatch } from "../bindings/NameMatch";
+import type { FileKind } from "../bindings/FileKind";
+import type { UnitFile } from "../bindings/UnitFile";
+import type { Process } from "../bindings/Process";
+import type { TreeNode } from "../bindings/TreeNode";
+import type { ProcessState } from "../bindings/ProcessState";
+import type { Signal } from "../bindings/Signal";
+import type { Reading } from "../bindings/Reading";
+import type { Rule } from "../bindings/Rule";
+import type { Sample } from "../bindings/Sample";
+import type { Series } from "../bindings/Series";
+import type { State as TimerState } from "../bindings/State";
 import type { SpaceEntry } from "../bindings/SpaceEntry";
 
-export type { AppError, CachedScan, Completion, Diagnostics, Filesystem, Preview, PreviewItem, Progress, Refusal, Report, ScanResult, Settings, Snapshot, SpaceEntry, Ticket };
+export type { Action, AppError, CachedScan, Completion, Diagnostics, DuplicateReport, Filesystem, GrowthReport, Detail, Metric, Preview, PreviewItem, Process, ProcessState, Progress, Reading, Refusal, Report, Rule, Sample, ScanResult, Series, Settings, Page, Scope, Signal, SpaceEntry, Ticket, Timer, TimerState, TreeNode, Unit, UnitFile, Package, Measured, Manager, ResidualConfig, RemovalPreview, RemovalOutcome, Flagged, Concern, RemovalRisk, HostsFile, HostLine, LineKind, AutostartEntry, Origin, Repository, SourceLocation, Format, SearchQuery, Hit, SearchSummary, NameMatch, FileKind, OperationId };
+export type { Capabilities };
+export type { CowSnapshot };
+export type { CowKind } from "../bindings/CowKind";
 export type { ItemOutcome } from "../bindings/ItemOutcome";
+export type { Reclaimable } from "../bindings/Reclaimable";
 export type { ReclaimMethod } from "../bindings/ReclaimMethod";
 export type { Accounting } from "../bindings/Accounting";
 export type { Category } from "../bindings/Category";
@@ -41,9 +93,17 @@ export type { LogLevel } from "../bindings/LogLevel";
 export type { StartView } from "../bindings/StartView";
 export type { Theme } from "../bindings/Theme";
 
+export const EVENT_SEARCH_HITS = "search://hits";
+export const EVENT_SEARCH_DONE = "search://done";
 export const EVENT_PROGRESS = "op://progress";
 export const EVENT_DONE = "op://done";
 export const EVENT_SCAN_DONE = "scan://done";
+/** A finished duplicate search. `STO-15`. */
+export const EVENT_DUPLICATES_DONE = "duplicates://done";
+/** One metrics reading, once a second while subscribed. `MON-1`. */
+export const EVENT_METRICS_TICK = "metrics://tick";
+/** The name of a unit that changed. `SVC-3`. */
+export const EVENT_UNIT_CHANGED = "units://changed";
 
 /** Whether a rejected value is one of our typed errors rather than an unexpected throw. */
 export function isAppError(value: unknown): value is AppError {
@@ -89,8 +149,8 @@ export type HelperProbe = { uid: number; elevated: boolean; kernel: string };
 export const api = {
   versions: () => call<Versions>("versions"),
   diagnostics: () => call<Diagnostics>("diagnostics"),
-  capabilities: () => call<Snapshot>("capabilities"),
-  capabilitiesRefresh: () => call<Snapshot>("capabilities_refresh"),
+  capabilities: () => call<Capabilities>("capabilities"),
+  capabilitiesRefresh: () => call<Capabilities>("capabilities_refresh"),
   settingsGet: () => call<Settings>("settings_get"),
   settingsSave: (settings: Settings) => call<Settings>("settings_save", { settings }),
   startupWarning: () => call<AppError | null>("startup_warning"),
@@ -99,6 +159,7 @@ export const api = {
   helperProbe: () => call<HelperProbe>("helper_probe"),
   filesystems: () => call<Filesystem[]>("filesystems"),
   homeDirectory: () => call<string>("home_directory"),
+  snapshots: () => call<CowSnapshot[]>("snapshots"),
   reclaimPreview: () => call<Preview>("reclaim_preview"),
   reclaimExecute: (ticket: Ticket, selection: number[]) =>
     call<Report>("reclaim_execute", { ticket, selection }),
@@ -106,6 +167,62 @@ export const api = {
   protectedPaths: () => call<Refusal[]>("protected_paths"),
   scanCached: (path: string, maxDepth?: number) =>
     call<CachedScan | null>("scan_cached", { path, maxDepth: maxDepth ?? null }),
+  largestFiles: (path: string, limit?: number) =>
+    call<SpaceEntry[]>("largest_files", { path, limit: limit ?? null }),
+  duplicatesFind: (path: string, minimumBytes?: number) =>
+    call<OperationId>("duplicates_find", { path, minimumBytes: minimumBytes ?? null }),
+  unitsList: (scope: Scope) => call<Unit[]>("units_list", { scope }),
+  unitFiles: (scope: Scope) => call<UnitFile[]>("unit_files", { scope }),
+  unitsTimers: (scope: Scope) => call<Timer[]>("units_timers", { scope }),
+  unitAct: (scope: Scope, unit: string, action: Action) =>
+    call<void>("unit_act", { scope, unit, action }),
+  unitsWatch: () => call<void>("units_watch"),
+  packagesList: () => call<Package[]>("packages_list"),
+  packageMeasure: (manager: Manager, id: string, version: string) =>
+    call<Measured>("package_measure", { manager, id, version }),
+  packagesResidual: () => call<ResidualConfig[]>("packages_residual"),
+  packagesRemovalPreview: (ids: string[]) =>
+    call<RemovalPreview>("packages_removal_preview", { ids }),
+  packagesRemove: (ids: string[]) => call<RemovalOutcome>("packages_remove", { ids }),
+  searchStart: (query: SearchQuery) => call<OperationId>("search_start", { query }),
+  aptSourcesList: () => call<Repository[]>("apt_sources_list"),
+  aptSourceSetEnabled: (at: SourceLocation, enabled: boolean) =>
+    call<Repository[]>("apt_source_set_enabled", { at, enabled }),
+  aptSourceRemove: (at: SourceLocation) => call<Repository[]>("apt_source_remove", { at }),
+  autostartList: () => call<AutostartEntry[]>("autostart_list"),
+  autostartSetEnabled: (id: string, enabled: boolean) =>
+    call<AutostartEntry[]>("autostart_set_enabled", { id, enabled }),
+  autostartAdd: (name: string, exec: string, comment?: string) =>
+    call<AutostartEntry[]>("autostart_add", { name, exec, comment: comment ?? null }),
+  autostartRemove: (id: string) => call<AutostartEntry[]>("autostart_remove", { id }),
+  hostsLoad: () => call<HostsFile>("hosts_load"),
+  hostsSave: (file: HostsFile) => call<HostsFile>("hosts_save", { file }),
+  unitLogs: (scope: Scope, unit: string, limit?: number, after?: string) =>
+    call<Page>("unit_logs", { scope, unit, limit: limit ?? null, after: after ?? null }),
+  processesList: () => call<Process[]>("processes_list"),
+  processesForget: () => call<void>("processes_forget"),
+  processDetail: (pid: number) => call<Detail>("process_detail", { pid }),
+  processTree: () => call<TreeNode[]>("process_tree"),
+  processSignal: (pid: number, signal: Signal, processState: ProcessState) =>
+    call<void>("process_signal", { pid, signal, processState }),
+  processRenice: (pid: number, niceness: number) =>
+    call<void>("process_renice", { pid, niceness }),
+  alertsEvaluate: () => call<Metric[]>("alerts_evaluate"),
+  reclaimLastTotal: () => call<[number, number] | null>("reclaim_last_total"),
+  metricsSubscribe: () => call<Reading[]>("metrics_subscribe"),
+  metricsUnsubscribe: () => call<void>("metrics_unsubscribe"),
+  metricsHistory: () => call<Reading[]>("metrics_history"),
+  metricsSampling: () => call<boolean>("metrics_sampling"),
+  historySamples: () => call<Sample[]>("history_samples"),
+  historySeries: (intervalSeconds?: number) =>
+    call<Series>("history_series", { intervalSeconds: intervalSeconds ?? null }),
+  historyGrowth: (sinceSeconds: number, limit?: number) =>
+    call<GrowthReport>("history_growth", { sinceSeconds, limit: limit ?? null }),
+  historyClear: () => call<void>("history_clear"),
+  historySnapshotNow: (path: string) => call<Sample>("history_snapshot_now", { path }),
+  timerState: () => call<TimerState>("timer_state"),
+  timerInstall: () => call<TimerState>("timer_install"),
+  timerUninstall: () => call<TimerState>("timer_uninstall"),
   scanCacheClear: () => call<void>("scan_cache_clear"),
   scanCacheSize: () => call<number>("scan_cache_size"),
   scanStart: (path: string, maxDepth?: number, crossFilesystems?: boolean) =>
@@ -121,6 +238,21 @@ export const api = {
   demoFailure: (code: string) => call<void>("demo_failure", { code }),
 };
 
+/** Subscribe to unit changes, including ones made in a terminal. `SVC-3`. */
+export function onUnitChanged(handler: (unit: string) => void): Promise<UnlistenFn> {
+  return listen<string>(EVENT_UNIT_CHANGED, (event) => handler(event.payload));
+}
+
+/** Subscribe to live metrics readings. Only fires while something has subscribed. */
+export function onMetricsTick(handler: (r: Reading) => void): Promise<UnlistenFn> {
+  return listen<Reading>(EVENT_METRICS_TICK, (event) => handler(event.payload));
+}
+
+/** Subscribe to finished duplicate searches. */
+export function onDuplicatesDone(handler: (r: DuplicateReport) => void): Promise<UnlistenFn> {
+  return listen<DuplicateReport>(EVENT_DUPLICATES_DONE, (event) => handler(event.payload));
+}
+
 /** Subscribe to progress for all operations. */
 export function onProgress(handler: (p: Progress) => void): Promise<UnlistenFn> {
   return listen<Progress>(EVENT_PROGRESS, (event) => handler(event.payload));
@@ -129,6 +261,25 @@ export function onProgress(handler: (p: Progress) => void): Promise<UnlistenFn> 
 /** Subscribe to terminal outcomes for all operations. */
 export function onDone(handler: (c: Completion) => void): Promise<UnlistenFn> {
   return listen<Completion>(EVENT_DONE, (event) => handler(event.payload));
+}
+
+/** Subscribe to batches of search results. Tagged with the operation, so an abandoned search's
+ *  results can be discarded rather than mixed into the current one. */
+export function onSearchHits(
+  handler: (batch: { id: OperationId; hits: Hit[] }) => void,
+): Promise<UnlistenFn> {
+  return listen<{ id: OperationId; hits: Hit[] }>(EVENT_SEARCH_HITS, (event) =>
+    handler(event.payload),
+  );
+}
+
+/** Subscribe to finished searches and their counts. */
+export function onSearchDone(
+  handler: (done: { id: OperationId; summary: SearchSummary }) => void,
+): Promise<UnlistenFn> {
+  return listen<{ id: OperationId; summary: SearchSummary }>(EVENT_SEARCH_DONE, (event) =>
+    handler(event.payload),
+  );
 }
 
 /** Subscribe to completed scan results. A cancelled scan still delivers its partial tree. */

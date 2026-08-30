@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! The freedesktop trash specification. Task 1.10 (`STO-7`).
 //!
 //! # Why this is implemented properly rather than approximated
@@ -236,6 +239,18 @@ pub fn trash_into(dir: &TrashDir, path: &Path) -> Result<TrashedItem> {
         .doing(format!("trash {}", path.display()))
         .map_err(|e| e.with_path(path))?;
 
+    // Measured **before** the move, and by walking when the target is a directory.
+    //
+    // `metadata.blocks()` on a directory describes the directory inode — a few kilobytes — not what is
+    // inside it. Using it meant trashing a 9.8 GiB cache directory reported about four kilobytes
+    // reclaimed. Every accuracy test trashed plain files, so the directory case went unnoticed even
+    // though the only production category that trashes anything trashes directories.
+    let size = if metadata.is_dir() {
+        crate::fixture::directory_size(path) + on_disk_size(&metadata)
+    } else {
+        on_disk_size(&metadata)
+    };
+
     // An absolute original path is what makes restoration possible at all.
     let absolute = if path.is_absolute() {
         path.to_path_buf()
@@ -296,7 +311,7 @@ pub fn trash_into(dir: &TrashDir, path: &Path) -> Result<TrashedItem> {
         trashed_path: destination,
         original_path: absolute,
         deleted_at,
-        size: on_disk_size(&metadata),
+        size,
     })
 }
 
@@ -831,5 +846,45 @@ mod tests {
         assert!(home.root().is_absolute());
         assert_eq!(home.files_dir(), home.root().join("files"));
         assert_eq!(home.info_dir(), home.root().join("info"));
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod directory_size_tests {
+    use super::*;
+
+    /// # Regression
+    ///
+    /// A trashed directory reported `metadata.blocks() * 512` for the directory inode — a few
+    /// kilobytes — rather than what it contained. So moving a 9.8 GiB cache to the trash reported
+    /// about four kilobytes, and since `Report` derives its figures from what `trash` returns, the
+    /// whole account of the operation was wrong by three orders of magnitude.
+    ///
+    /// Every test in `reclaim_accuracy.rs` trashed plain files, so this went unnoticed even though
+    /// `AppCacheCategory` — the only production category that trashes anything — trashes directories
+    /// exclusively.
+    #[test]
+    fn trashing_a_directory_reports_what_was_inside_it() {
+        let base = std::env::temp_dir().join(format!("nix-trashdir-{}", std::process::id()));
+        let trash_root = base.join("trash");
+        let source = base.join("payload");
+        std::fs::create_dir_all(source.join("nested")).unwrap();
+        std::fs::create_dir_all(&trash_root).unwrap();
+
+        // Four blocks of real content, spread over two levels.
+        std::fs::write(source.join("a.bin"), vec![b'x'; 8192]).unwrap();
+        std::fs::write(source.join("nested/b.bin"), vec![b'y'; 8192]).unwrap();
+
+        let dir = TrashDir::at(&trash_root, None);
+        let item = trash_into(&dir, &source).unwrap();
+
+        assert!(
+            item.size >= 16384,
+            "a directory holding 16 KiB reported {} — the directory inode is not its contents",
+            crate::format_bytes(item.size)
+        );
+
+        std::fs::remove_dir_all(&base).ok();
     }
 }

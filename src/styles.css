@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* Copyright (C) 2026 Methuselah Nwodobeh */
+
 /*
  * Theme tokens and shell styling.
  *
@@ -19,13 +22,19 @@
   --ink-mute: #5b6472;
   --ink-faint: #8a93a2;
   --rule: #e1e5eb;
-  --rule-strong: #c9d0da;
+  /* A control's own boundary must reach WCAG AA's 3:1 for non-text, or an input is something the user
+     has to guess the edges of. #c9d0da measured 1.55:1 against a white card — this is the lightest
+     grey that passes, checked by `scripts/check-contrast.mjs`. `--rule` stays soft: it separates rows,
+     which is decoration, not a control. */
+  --rule-strong: #8d8d8d;
   --accent: #3b4cc0;
   --accent-ink: #2c3a9b;
   --accent-soft: #eaedfb;
   --on-accent: #ffffff;
-  --safe: #2f7d51;
-  --review: #9a6314;
+  /* Nudged darker to clear 4.5:1 against their own soft backgrounds — these carry meaning, so the
+     label has to be read, not merely noticed as coloured. Both were at 4.37–4.38:1. */
+  --safe: #2b7749;
+  --review: #90590c;
   --risky: #b23a32;
   --safe-soft: #e6f2eb;
   --review-soft: #f7eedc;
@@ -47,7 +56,7 @@
     --ink-mute: #98a2b3;
     --ink-faint: #6e7889;
     --rule: #2a303c;
-    --rule-strong: #3a4252;
+    --rule-strong: #6f7889;
     --accent: #8b97f0;
     --accent-ink: #a8b2f6;
     --accent-soft: #1e2340;
@@ -71,7 +80,7 @@
   --ink-mute: #98a2b3;
   --ink-faint: #6e7889;
   --rule: #2a303c;
-  --rule-strong: #3a4252;
+  --rule-strong: #6f7889;
   --accent: #8b97f0;
   --accent-ink: #a8b2f6;
   --accent-soft: #1e2340;
@@ -843,6 +852,43 @@ select {
 
 /* ---------- reclaim ---------- */
 
+/* Pick on the left, review on the right.
+   Both children scroll independently and neither drives the page's height, so a 40-item preview
+   cannot push the action out of reach and a long selection cannot push the item list off-screen.
+   `minmax(0, …)` on both tracks because grid items default to `min-width: auto`, which lets a long
+   path in a cell refuse to shrink and widen the whole column past its share. */
+.reclaim-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 23rem);
+  gap: 0.9rem;
+  align-items: start;
+}
+
+/* The shared height bound. `min()` against the viewport so the pair fits on a laptop screen, with a
+   rem ceiling so it does not become an unreadably tall wall on a large monitor. */
+.reclaim-columns > * {
+  max-height: min(62vh, 40rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* One column below this width. Two 300px columns are worse than one readable one, and the confirm
+   card carries the caveats — it must never be the narrow thing squeezed to fit. */
+@media (max-width: 62rem) {
+  .reclaim-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* And the height cap comes off with the second column. Two independently scrolling boxes stacked
+     vertically is a worse experience than one page that scrolls — the cap exists to keep the two
+     columns level, and there are no longer two columns. The panel's sticky action still works,
+     because it sticks to the view's own scroll container once the card stops being one. */
+  .reclaim-columns > * {
+    max-height: none;
+    overflow-y: visible;
+  }
+}
+
 .reclaim-list {
   list-style: none;
   margin: 0;
@@ -850,6 +896,8 @@ select {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
+  /* Room for the scrollbar, so it never sits on top of a checkbox. */
+  padding-right: 0.2rem;
 }
 
 .reclaim-item {
@@ -920,6 +968,40 @@ select {
 .card-confirm {
   border-color: var(--rule-strong);
   border-top: 3px solid var(--accent);
+  /* The card is the scroll container, which is what lets the action inside it stick. Padding moves
+     to the children so the sticky header can paint edge to edge and cover the rows passing under. */
+  padding: 0;
+}
+
+/* The action, pinned to the top of the card.
+   It carries the button *and* both caveats: a button that stayed put while the warnings scrolled
+   away would be a worse design than one that scrolled with them. */
+.confirm-action {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 1.1rem 1.25rem 0.8rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--rule);
+}
+
+.confirm-action button {
+  width: 100%;
+}
+
+/* Tight under the button: "from 7 items" is the button's own subtitle, not a separate paragraph. */
+.confirm-action > p {
+  margin: 0.45rem 0 0;
+}
+
+.confirm-action > p + p {
+  margin-top: 0.5rem;
+}
+
+/* Inside the scrolling half of the confirm card, so it gets the padding the card gave up. */
+.card-confirm .confirm-list {
+  margin: 0;
+  padding: 0.7rem 1.25rem 1.1rem;
 }
 
 .confirm-list,
@@ -982,4 +1064,1258 @@ button.danger {
 button.danger:hover:not(:disabled) {
   color: var(--on-accent);
   filter: brightness(1.08);
+}
+
+/* A qualified size explains itself in place — a caveat the user has to go looking for is not
+   a caveat. */
+.reclaim-sharing {
+  font-size: 0.8125rem;
+  color: var(--review);
+}
+
+/* Advisories: space nix can measure but deliberately will not act on. Styled as information
+   rather than as an offer — no checkbox, no accent border, nothing that reads as a button. */
+.advisory-list {
+  list-style: none;
+  margin: 0.5rem 0 0.9rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  font-size: 0.8125rem;
+}
+
+.advisory-list li {
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--surface-alt);
+}
+
+.advisory-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: baseline;
+}
+
+.advisory-label {
+  font-weight: 600;
+}
+
+.advisory-bytes {
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.advisory-path {
+  display: block;
+  margin: 0.2rem 0;
+  word-break: break-all;
+  color: var(--ink-mute);
+}
+
+.advisory-list p {
+  margin: 0.35rem 0 0;
+}
+
+/* The command is shown so it can be read before it is run, never executed by nix. */
+.advisory-remedy {
+  margin: 0.45rem 0 0;
+  padding: 0.4rem 0.55rem;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  overflow-x: auto;
+  font-size: 0.75rem;
+}
+
+.advisory-remedy code {
+  font-family: var(--font-mono);
+  white-space: pre;
+}
+
+/* An aggregate row stands for many entries rather than being one, so it must not read as a file.
+   Muted and italic: present and countable, but plainly not a thing you can open. */
+.is-aggregate .td-name {
+  font-style: italic;
+  color: var(--ink-mute);
+}
+
+/* Trashed is not freed. Coloured as a caution rather than a success, because the space has not
+   actually come back until the trash is emptied. */
+.outcome-trashed .outcome-tag { background: var(--review-soft); color: var(--review); }
+
+/* Find: largest files and duplicate sets. Monospaced paths, right-aligned sizes, because both are
+   read by scanning down a column. */
+.find-list,
+.dup-list {
+  list-style: none;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.8125rem;
+}
+
+.find-list li {
+  display: grid;
+  grid-template-columns: 6.5rem minmax(0, 1fr);
+  gap: 0.6rem;
+  align-items: baseline;
+  padding: 0.15rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.find-list code,
+.dup-list code {
+  display: block;
+  font-family: var(--font-mono);
+  word-break: break-all;
+  color: var(--ink-mute);
+}
+
+.find-bytes {
+  font-family: var(--font-mono);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.dup-list {
+  gap: 0.6rem;
+}
+
+.dup-list li {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--surface-alt);
+}
+
+.dup-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: baseline;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+/* Trends: bars rather than a line, because a line has to decide what happens between points and the
+   honest answer for a missing sample is "nothing is known". A gap is drawn as an absence. */
+.trend-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 8rem;
+  margin: 0.8rem 0;
+  padding: 0.4rem;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--surface-alt);
+  overflow-x: auto;
+}
+
+.trend-bar {
+  flex: 1 0 6px;
+  min-width: 6px;
+  background: var(--accent);
+  border-radius: 1px 1px 0 0;
+}
+
+/* A gap is a dotted outline at the baseline: visibly present as an interval, visibly holding no
+   value. Filling it with any height at all would be a claim. */
+.trend-bar.is-gap {
+  align-self: stretch;
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--rule) 0 2px,
+    transparent 2px 6px
+  );
+  opacity: 0.7;
+}
+
+.delta-grew {
+  color: var(--risky);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.delta-shrank {
+  color: var(--safe);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+/* ---- Monitoring. MON-2 through MON-7. ---------------------------------------------------------- */
+
+.chart {
+  position: relative;
+  margin: 0.5rem 0 0.7rem;
+}
+
+.chart-caption {
+  position: absolute;
+  top: 0;
+  right: 0.2rem;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  color: var(--ink-mute);
+  pointer-events: none;
+}
+
+/* Filesystem usage bars. Usage, not capacity — a bar that fills as a disk fills. */
+.fs-list,
+.sensor-list,
+.iface-list {
+  list-style: none;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.8125rem;
+}
+
+.fs-list li,
+.sensor-list li {
+  display: grid;
+  grid-template-columns: minmax(6rem, 12rem) minmax(0, 1fr) auto;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.fs-mount,
+.sensor-name {
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fs-bar,
+.sensor-bar {
+  display: block;
+  height: 0.55rem;
+  border-radius: 2px;
+  background: var(--surface-alt);
+  border: 1px solid var(--rule);
+  overflow: hidden;
+}
+
+.fs-fill,
+.sensor-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+/* Past ninety percent full, and past eighty-five percent of the hardware's own critical
+   temperature, the bar changes colour. Both thresholds come from the thing being measured rather
+   than from a number invented here. */
+.fs-fill.is-full,
+.sensor-fill.is-hot {
+  background: var(--risky);
+}
+
+.fs-figures,
+.sensor-value {
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  color: var(--ink-mute);
+}
+
+.iface-list li {
+  display: grid;
+  grid-template-columns: minmax(6rem, 10rem) minmax(5rem, auto) minmax(0, 1fr);
+  gap: 0.6rem;
+  align-items: baseline;
+  padding: 0.2rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.iface-list li.is-featured {
+  font-weight: 600;
+}
+
+.iface-name {
+  font-family: var(--font-mono);
+}
+
+.iface-state,
+.iface-rates {
+  color: var(--ink-mute);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.iface-mac {
+  grid-column: 1 / -1;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  color: var(--ink-mute);
+}
+
+/* Alert rules. MON-6. */
+.alert-list {
+  list-style: none;
+  margin: 0.6rem 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.8125rem;
+}
+
+.alert-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  gap: 0.8rem;
+  align-items: center;
+  padding: 0.3rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.alert-threshold {
+  font-family: var(--font-mono);
+  color: var(--ink-mute);
+  white-space: nowrap;
+}
+
+/* ---- Process table. PRC-1. ---------------------------------------------------------------------- */
+
+/* The scroll container is never recreated, because rows are keyed on identity rather than position.
+   That is what keeps the scroll offset across a refresh — the browser does it for free once the DOM
+   node survives. */
+.proc-scroll {
+  max-height: 26rem;
+  overflow: auto;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  margin-top: 0.6rem;
+}
+
+.proc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.proc-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  border-bottom: 1px solid var(--rule);
+  text-align: left;
+  padding: 0;
+  z-index: 1;
+}
+
+.proc-table th button {
+  width: 100%;
+  background: none;
+  border: 0;
+  padding: 0.4rem 0.55rem;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+
+.proc-table th.is-numeric,
+.proc-table td.is-numeric {
+  text-align: right;
+  font-family: var(--font-mono);
+}
+
+.proc-table td {
+  padding: 0.25rem 0.55rem;
+  border-bottom: 1px solid var(--rule);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 22rem;
+}
+
+.proc-table tbody tr {
+  cursor: pointer;
+}
+
+.proc-table tbody tr:hover {
+  background: var(--surface-alt);
+}
+
+.proc-table tbody tr.is-selected {
+  background: var(--accent-soft, var(--surface-alt));
+  outline: 1px solid var(--accent);
+}
+
+/* ---- Process detail and tree. PRC-3, PRC-4. ----------------------------------------------------- */
+
+.detail-list {
+  list-style: none;
+  margin: 0.5rem 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.8125rem;
+}
+
+.detail-list li {
+  display: grid;
+  grid-template-columns: minmax(7rem, 11rem) minmax(0, 1fr);
+  gap: 0.7rem;
+  align-items: baseline;
+}
+
+.detail-list li > span:first-child {
+  color: var(--ink-mute);
+}
+
+.detail-list code {
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
+
+/* What could not be read, and why. Presented as information rather than as an error: for another
+   user's process this is the normal state of affairs, not a fault. */
+.detail-restricted {
+  margin-top: 0.7rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--surface-alt);
+  font-size: 0.8125rem;
+}
+
+.detail-restricted ul {
+  margin: 0.3rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.tree {
+  list-style: none;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  font-size: 0.8125rem;
+}
+
+.tree-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 5rem 6rem auto;
+  gap: 0.7rem;
+  width: 100%;
+  align-items: baseline;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  padding: 0.22rem 0.3rem;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tree-row:hover {
+  background: var(--surface-alt);
+}
+
+.tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-figure {
+  font-family: var(--font-mono);
+  text-align: right;
+}
+
+/* ---- Services. SVC-1 to SVC-5. ------------------------------------------------------------------ */
+
+.unit-scroll {
+  max-height: 24rem;
+  overflow: auto;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  margin-top: 0.6rem;
+}
+
+.unit-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.8125rem;
+}
+
+.unit-list li button {
+  display: grid;
+  grid-template-columns: minmax(0, 18rem) 9rem minmax(0, 1fr);
+  gap: 0.7rem;
+  width: 100%;
+  align-items: baseline;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  padding: 0.3rem 0.55rem;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.unit-list li button:hover {
+  background: var(--surface-alt);
+}
+
+.unit-list li.is-selected button {
+  background: var(--accent-soft, var(--surface-alt));
+  outline: 1px solid var(--accent);
+}
+
+/* Failed and masked are the two states worth spotting from across the list. Masked especially: it is
+   the one Stacer's filter hid, and the one that makes something refuse to start regardless. */
+.unit-list li.is-failed .unit-state {
+  color: var(--risky);
+  font-weight: 600;
+}
+
+.unit-list li.is-masked .unit-state {
+  color: var(--review);
+}
+
+.unit-name,
+.unit-state {
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unit-description {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-list {
+  list-style: none;
+  margin: 0.5rem 0;
+  padding: 0.4rem 0.55rem;
+  max-height: 16rem;
+  overflow: auto;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--surface-alt);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+.log-list li {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr);
+  gap: 0.6rem;
+  padding: 0.1rem 0;
+}
+
+.log-time {
+  color: var(--ink-mute);
+}
+
+.log-message {
+  word-break: break-word;
+}
+
+.log-list li.is-problem .log-message {
+  color: var(--risky);
+}
+
+/* Installed software (PKG-1).
+   Two size columns side by side, because the point of the view is that they differ. Tabular figures
+   so the digits line up down the column — a size table where they do not is unreadable at a glance. */
+.pkg-scroll {
+  max-height: 28rem;
+  overflow: auto;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  margin-top: 0.6rem;
+}
+
+.pkg-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.pkg-table th,
+.pkg-table td {
+  text-align: left;
+  padding: 0.35rem 0.55rem;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: top;
+}
+
+.pkg-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pkg-table tbody tr {
+  cursor: pointer;
+}
+
+.pkg-table tbody tr:hover {
+  background: var(--surface-alt);
+}
+
+.pkg-table tbody tr.is-selected {
+  background: var(--accent-soft);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.pkg-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pkg-id {
+  font-family: var(--font-mono);
+}
+
+.pkg-version {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.pkg-summary {
+  font-size: 0.75rem;
+  margin-top: 0.1rem;
+}
+
+.pkg-date {
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+/* Dependency, not something the user chose. Quiet: it is context, not a warning. */
+.pkg-dep {
+  margin-left: 0.4rem;
+  padding: 0 0.3rem;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  font-size: 0.6875rem;
+  color: var(--ink-mute);
+  vertical-align: 0.05rem;
+}
+
+.pkg-pairs {
+  display: grid;
+  grid-template-columns: minmax(0, 12rem) minmax(0, 1fr);
+  gap: 0.3rem 0.9rem;
+  margin: 0.6rem 0 0;
+  font-size: 0.8125rem;
+}
+
+.pkg-pairs dt {
+  color: var(--ink-mute);
+}
+
+.pkg-pairs dd {
+  margin: 0;
+}
+
+/* Screen-reader-only. A column of checkboxes needs a header, and a header needs a name. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.pkg-pick {
+  width: 2rem;
+  text-align: center;
+}
+
+/* The selection, echoed back before anything is previewed: the list acted on must be visible without
+   scrolling the table to find which rows are ticked. */
+.pkg-chip {
+  display: inline-block;
+  margin: 0 0.3rem 0.3rem 0;
+  padding: 0.05rem 0.35rem;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  background: var(--surface-alt);
+  font-size: 0.75rem;
+}
+
+/* The verdict panel, coloured by risk using the same three tokens the reclaim safety tiers use — a
+   user who has learned what amber means in one view should not have to relearn it here. */
+.pkg-verdict {
+  margin-top: 0.8rem;
+  padding: 0.7rem 0.85rem;
+  border-radius: 3px;
+  border: 1px solid var(--rule);
+}
+
+.pkg-verdict h3 {
+  margin: 0 0 0.4rem;
+  font-size: 0.9375rem;
+}
+
+.pkg-verdict-safe,
+.pkg-verdict-cascading {
+  border-color: var(--safe);
+  background: var(--safe-soft);
+}
+
+.pkg-verdict-dangerous {
+  border-color: var(--review);
+  background: var(--review-soft);
+}
+
+.pkg-verdict-refused {
+  border-color: var(--risky);
+  background: var(--risky-soft);
+}
+
+.pkg-concerns {
+  margin: 0.3rem 0 0.6rem;
+  padding-left: 1.1rem;
+  font-size: 0.8125rem;
+}
+
+/* A command the user is expected to copy. Selectable, monospaced, and visibly a command rather than
+   prose — the alternative is people retyping it from memory and guessing at the flags. */
+.pkg-command {
+  margin: 0.4rem 0 0.6rem;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  background: var(--surface-alt);
+  font-size: 0.8125rem;
+  user-select: all;
+  overflow-x: auto;
+}
+
+/* The hosts file (SYS-1).
+   Monospaced addresses in a tabular column so they line up, and a visibly quieter row for a disabled
+   entry — a commented-out line should read as parked, not as active. */
+.hosts-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.hosts-table th,
+.hosts-table td {
+  text-align: left;
+  padding: 0.35rem 0.55rem;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: top;
+}
+
+.hosts-table thead th {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.hosts-on {
+  width: 2.5rem;
+  text-align: center;
+}
+
+.hosts-ip {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.hosts-names {
+  font-family: var(--font-mono);
+}
+
+.hosts-comment {
+  font-size: 0.75rem;
+  margin-top: 0.1rem;
+}
+
+/* Parked, not active. Kept legible rather than faded to the point of being hard to read — the user
+   may well be looking for exactly this row. */
+.hosts-table tr.is-disabled .hosts-ip,
+.hosts-table tr.is-disabled .hosts-names {
+  color: var(--ink-faint);
+  text-decoration: line-through;
+}
+
+/* A comment, a blank line, or something nix cannot parse. Shown verbatim and not editable. */
+.hosts-verbatim code {
+  color: var(--ink-mute);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.hosts-tag {
+  margin-left: 0.5rem;
+  padding: 0 0.3rem;
+  border: 1px solid var(--review);
+  border-radius: 2px;
+  background: var(--review-soft);
+  color: var(--review);
+  font-size: 0.6875rem;
+}
+
+.hosts-actions {
+  white-space: nowrap;
+  text-align: right;
+}
+
+.hosts-actions button + button {
+  margin-left: 0.35rem;
+}
+
+.hosts-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: 0 0.9rem;
+  margin-bottom: 0.4rem;
+}
+
+.hosts-form .field {
+  max-width: none;
+}
+
+/* Startup applications (PKG-4).
+   A row per entry: toggle, what it is, and why it might not run. The notes matter more than they look
+   — an entry that shows as on and does nothing is the most confusing state this screen can produce. */
+.startup-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.startup-item {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr) max-content;
+  gap: 0.6rem;
+  align-items: start;
+  padding: 0.5rem 0.2rem;
+  border-bottom: 1px solid var(--rule);
+  font-size: 0.8125rem;
+}
+
+.startup-item:last-child {
+  border-bottom: 0;
+}
+
+.startup-toggle {
+  display: flex;
+  justify-content: center;
+  padding-top: 0.15rem;
+}
+
+.startup-body {
+  min-width: 0;
+}
+
+.startup-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.startup-exec {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--ink-mute);
+  word-break: break-all;
+}
+
+/* Off, but still legible: the user may be looking for exactly this row to turn back on. */
+.startup-item.is-off .startup-head strong {
+  color: var(--ink-faint);
+  text-decoration: line-through;
+}
+
+/* Enabled but not for this session. Quieter than a warning, because nothing is wrong. */
+.startup-item.is-other-session .startup-body {
+  opacity: 0.85;
+}
+
+.startup-tag {
+  padding: 0 0.3rem;
+  border: 1px solid var(--rule-strong);
+  border-radius: 2px;
+  color: var(--ink-mute);
+  font-size: 0.6875rem;
+}
+
+/* A reason this will not run. Amber rather than red: it is information, not a fault. */
+.startup-note {
+  margin-top: 0.2rem;
+  color: var(--review);
+  font-size: 0.75rem;
+}
+
+.startup-note code {
+  color: inherit;
+}
+
+.startup-actions {
+  text-align: right;
+  white-space: nowrap;
+  padding-top: 0.1rem;
+}
+
+@media (max-width: 48rem) {
+  .startup-item {
+    grid-template-columns: 2rem minmax(0, 1fr);
+  }
+
+  .startup-actions {
+    grid-column: 2;
+    text-align: left;
+  }
+}
+
+/* Software sources (PKG-5).
+   Grouped by file, because that is how the configuration is laid out and where an edit lands. The
+   position is shown on every row: these entries are addressed by line or stanza number, not by
+   matching their text, and showing the number makes that visible. */
+.repo-file {
+  margin-bottom: 0.1rem;
+}
+
+.repo-path {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.repo-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.repo-item {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr) max-content;
+  gap: 0.6rem;
+  align-items: start;
+  padding: 0.5rem 0.2rem;
+  border-top: 1px solid var(--rule);
+  font-size: 0.8125rem;
+}
+
+.repo-toggle {
+  display: flex;
+  justify-content: center;
+  padding-top: 0.15rem;
+}
+
+.repo-body {
+  min-width: 0;
+}
+
+.repo-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.repo-uri {
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
+
+.repo-item.is-off .repo-uri {
+  color: var(--ink-faint);
+  text-decoration: line-through;
+}
+
+.repo-tag {
+  padding: 0 0.3rem;
+  border: 1px solid var(--rule-strong);
+  border-radius: 2px;
+  color: var(--ink-mute);
+  font-size: 0.6875rem;
+}
+
+.repo-key {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--ink-mute);
+  font-size: 0.75rem;
+  word-break: break-all;
+}
+
+/* An entry with no keyring is not necessarily wrong — the key may be in the legacy trusted set — but
+   it is worth noticing, since it is the field that decides whether apt trusts the repository. */
+.repo-nokey {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--review);
+  font-size: 0.75rem;
+}
+
+.repo-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+  white-space: nowrap;
+}
+
+.repo-where {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.6875rem;
+}
+
+@media (max-width: 48rem) {
+  .repo-item {
+    grid-template-columns: 2rem minmax(0, 1fr);
+  }
+
+  .repo-actions {
+    grid-column: 2;
+    align-items: flex-start;
+    flex-direction: row;
+    gap: 0.5rem;
+  }
+}
+
+/* File search (SYS-2). Results stream in, so the list scrolls on its own rather than growing the page
+   under the form the user is still adjusting. */
+.search-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: 0 0.9rem;
+  margin: 0.6rem 0 0.2rem;
+}
+
+.search-form .field {
+  max-width: none;
+}
+
+.search-scroll {
+  max-height: 26rem;
+  overflow: auto;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  margin-top: 0.6rem;
+}
+
+.search-path {
+  word-break: break-all;
+}
+
+/* A result set that is missing folders it could not read. Amber, because the count is correct and the
+   coverage is not — which is a different thing from an error. */
+.search-partial {
+  color: var(--review);
+}
+
+/* The package name doubles as the row's select control, so it is a button that looks like text — the
+   alternative was a clickable <tr>, which has no keyboard path and no role to announce. */
+.pkg-select {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.pkg-select:hover:not(:disabled) {
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.pkg-select[aria-pressed="true"] {
+  font-weight: 600;
+}
+
+/* What reclaiming a category actually does (PLT-7).
+   Sits under the first item of its category, in the flow of the list rather than behind a tooltip: a
+   decision aid the user has to hover to find is one they make without. */
+.reclaim-explains {
+  display: block;
+  margin-top: 0.3rem;
+  padding-left: 0.6rem;
+  border-left: 2px solid var(--rule-strong);
+  color: var(--ink-mute);
+  font-size: 0.75rem;
+  max-width: 70ch;
+}
+
+/* The first-run introduction (PLT-4).
+   A full page rather than a modal over the shell: it says what nix will and will not do before the
+   user is near a button that deletes something, and a dialog floating over a populated window invites
+   dismissing it to get at what is underneath. */
+.firstrun {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  height: 100%;
+  overflow-y: auto;
+  background: var(--ground);
+  padding: 2rem 1.5rem;
+}
+
+.firstrun-panel {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-top: 3px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 1.6rem 1.8rem;
+  max-width: 46rem;
+}
+
+.firstrun-panel h1 {
+  margin: 0 0 0.4rem;
+  font-size: 1.35rem;
+  letter-spacing: -0.015em;
+}
+
+.firstrun-panel h2 {
+  margin: 1.3rem 0 0.4rem;
+  font-size: 0.9375rem;
+}
+
+.firstrun-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.8125rem;
+  color: var(--ink-mid);
+}
+
+.firstrun-list li {
+  margin-bottom: 0.35rem;
+  max-width: 68ch;
+}
+
+.firstrun-panel .row {
+  margin-top: 1.4rem;
+}
+
+/* Loading indicators.
+   Text carries the meaning and movement is an enhancement, because prefers-reduced-motion turns every
+   animation off — a spinner alone would sit frozen for exactly the users who most need telling that
+   something is happening. */
+.spinner {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  margin-right: 0.4rem;
+  border: 2px solid var(--rule-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  vertical-align: -0.1em;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.busy {
+  margin-top: 0.6rem;
+}
+
+.busy-label {
+  margin: 0.35rem 0 0;
+  color: var(--ink-mute);
+  font-size: 0.8125rem;
+}
+
+.busy-inline {
+  color: var(--ink-mute);
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The bar cannot slide, so it fills instead — a static 40% sliver reads as a stalled download. */
+  .progress-indeterminate {
+    width: 100%;
+    opacity: 0.55;
+  }
+
+  /* And the ring cannot spin, so it becomes a plain dot rather than a frozen partial circle that
+     looks like a rendering fault. */
+  .spinner {
+    border-color: var(--accent);
+    opacity: 0.7;
+  }
+}
+
+/* Find: search on the left, duplicates on the right, both above the largest-files list.
+   Those two are what a user comes here to *do*; the largest-files list is a view of the last scan, so
+   it reads below them rather than standing between them and the controls. */
+.find-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+/* One column when two would each be too narrow for a form. The search card carries six fields, and a
+   cramped form is worse than a tall page. */
+@media (max-width: 68rem) {
+  .find-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Sidebar groups.
+   The heading is a label, not a control: it is not clickable, does not name a view, and is skipped by
+   Tab. A heading that is also a destination gives two things the same name. */
+.nav-group + .nav-group {
+  margin-top: 0.9rem;
+}
+
+.nav-group-title {
+  margin: 0 0 0.25rem;
+  padding: 0 0.55rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+/* A hairline above each labelled group, so the grouping reads even at a glance where the small
+   heading might not. Not on the first group, which needs no separator from the brand above it. */
+.nav-group:not(:first-child) .nav-group-title {
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--rule);
+}
+
+/* The trailing unlabelled group — Settings and About — still wants separating from System above it. */
+.nav-group:last-child:not(:first-child) > ul {
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--rule);
 }

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! The space model. Task 1.1.
 //!
 //! This is the spine of the product. Stacer's defining flaw was that disk concerns were scattered
@@ -182,6 +185,77 @@ impl Category {
     }
 }
 
+/// How much of an entry's size would actually come back if it were reclaimed.
+///
+/// On a copy-on-write filesystem — btrfs, ZFS, or an LVM thin pool — a file's extents may be shared
+/// with a snapshot. Deleting the file removes the name, but the blocks stay allocated until every
+/// reference to them is gone, so the space does **not** come back. A tool that reports the file's
+/// size as reclaimable in that situation is promising something it cannot deliver.
+///
+/// So the estimate is qualified rather than asserted. Specification `STO-17`: *where exclusive size
+/// is unobtainable, suppress the estimate rather than fake it.*
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "confidence", rename_all = "snake_case")]
+#[ts(export)]
+pub enum Reclaimable {
+    /// Freeing this returns the stated size. The ordinary case, and the only one that may be summed
+    /// into a headline figure without qualification.
+    ///
+    /// The default, so an ordinary filesystem is unaffected by any of this.
+    #[default]
+    Exact,
+    /// Freeing this returns **at most** the stated size, and possibly nothing.
+    ///
+    /// `exclusive` is the portion nix could prove is referenced only here, when a tool was able to
+    /// tell us.
+    AtMost {
+        #[ts(type = "number | null")]
+        exclusive: Option<u64>,
+        reason: String,
+    },
+    /// nix cannot say how much would come back.
+    ///
+    /// Reported honestly rather than guessed: on a copy-on-write filesystem without the tools to
+    /// ask, any number would be invention.
+    Unknown { reason: String },
+}
+
+impl Reclaimable {
+    /// Whether the stated size can be trusted as a figure that will actually be returned.
+    #[must_use]
+    pub const fn is_exact(&self) -> bool {
+        matches!(self, Self::Exact)
+    }
+
+    /// The bytes safe to include in a headline total.
+    ///
+    /// An `AtMost` entry contributes only its *proven exclusive* portion, and nothing when that is
+    /// unknown — because a total is a promise, and a promise built from maybes is not one.
+    #[must_use]
+    pub const fn promisable(&self, stated: u64) -> u64 {
+        match self {
+            Self::Exact => stated,
+            Self::AtMost {
+                exclusive: Some(exclusive),
+                ..
+            } => *exclusive,
+            Self::AtMost {
+                exclusive: None, ..
+            }
+            | Self::Unknown { .. } => 0,
+        }
+    }
+
+    /// A phrase for the UI, or `None` when there is nothing to caveat.
+    #[must_use]
+    pub fn caveat(&self) -> Option<&str> {
+        match self {
+            Self::Exact => None,
+            Self::AtMost { reason, .. } | Self::Unknown { reason } => Some(reason),
+        }
+    }
+}
+
 /// How safe it is to reclaim an entry.
 ///
 /// **Computed, never hardcoded per category**: an open file handle, a recent access time, or a
@@ -222,19 +296,173 @@ impl Safety {
     }
 }
 
+/// A category of reclaimable system file.
+///
+/// Each names a fixed set of roots inside the helper. Adding a variant means widening the privileged
+/// surface, and belongs in the same review as the feature that needs it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ReclaimKind {
+    /// A package manager's downloaded-package cache.
+    PackageCache,
+    /// A **rotated** log. Never an active one: the helper checks the filename shape, so a live log
+    /// cannot be deleted through this operation even by a caller that asks for it.
+    RotatedLog,
+    /// A crash dump under `/var/crash`.
+    CrashDump,
+}
+
+impl ReclaimKind {
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::PackageCache => "package_cache",
+            Self::RotatedLog => "rotated_log",
+            Self::CrashDump => "crash_dump",
+        }
+    }
+}
+
+/// A class of removable package.
+///
+/// Like [`ReclaimKind`], this names a derivation the privileged helper performs **itself**. Adding a
+/// variant widens the privileged surface and belongs in the same review as the feature that needs it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum RemovableKind {
+    /// Kernels older than both the running one and the newest installed one.
+    OldKernel,
+    /// Configuration left behind by packages already removed.
+    ResidualConfig,
+}
+
+impl RemovableKind {
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::OldKernel => "old_kernel",
+            Self::ResidualConfig => "residual_config",
+        }
+    }
+}
+
+/// Package managers whose cache the helper can clean.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum Manager {
+    Apt,
+    Dnf,
+    Pacman,
+    Zypper,
+}
+
+impl Manager {
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Apt => "apt",
+            Self::Dnf => "dnf",
+            Self::Pacman => "pacman",
+            Self::Zypper => "zypper",
+        }
+    }
+}
+
+/// What a container prune covers. `STO-13`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum PruneScope {
+    /// Layers belonging to no tagged image. The conservative default.
+    DanglingImages,
+    /// Every image no container uses — much larger, and means re-pulling.
+    UnusedImages,
+    /// Containers that have exited.
+    StoppedContainers,
+    /// The builder's layer cache.
+    BuildCache,
+}
+
+impl PruneScope {
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::DanglingImages => "dangling_images",
+            Self::UnusedImages => "unused_images",
+            Self::StoppedContainers => "stopped_containers",
+            Self::BuildCache => "build_cache",
+        }
+    }
+}
+
+/// How much journal to keep. Typed rather than a string so nothing caller-supplied is interpolated
+/// into a command line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "by", rename_all = "snake_case")]
+#[ts(export)]
+pub enum VacuumLimit {
+    /// Keep at most this many mebibytes.
+    Size {
+        #[ts(type = "number")]
+        mebibytes: u64,
+    },
+    /// Keep at most this many days.
+    Age {
+        #[ts(type = "number")]
+        days: u64,
+    },
+}
+
 /// How space is actually reclaimed. Always prefers the owning tool over `unlink`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(tag = "method", rename_all = "snake_case")]
 #[ts(export)]
 pub enum ReclaimMethod {
     /// Delegate to the package manager: `apt-get clean`, `dnf clean packages`, and so on.
-    PackageManager { command: String },
-    /// `journalctl --vacuum-size=` or `--vacuum-time=`.
-    JournalVacuum { limit: String },
+    ///
+    /// Carries the manager as an **enum, not a command string**. The argument vector is fixed inside
+    /// the privileged helper, so there is no text here that could become part of a root command line.
+    PackageManager { manager: Manager },
+    /// Vacuum the journal, by size or by age. Typed for the same reason.
+    JournalVacuum { limit: VacuumLimit },
+    /// Remove packages through the privileged helper.
+    ///
+    /// The helper re-derives which packages qualify and refuses any name outside that set, so this
+    /// cannot be used to remove an arbitrary package — including the running kernel.
+    Packages {
+        kind: RemovableKind,
+        names: Vec<String>,
+    },
+    /// Delete one system file through the privileged helper.
+    ///
+    /// The `kind` travels with the path, and the helper independently re-derives which roots that
+    /// category owns and refuses anything outside them — so this cannot be used to delete an
+    /// arbitrary file even by a caller that constructs it deliberately.
+    SystemFile { kind: ReclaimKind, path: PathBuf },
     /// Drop a superseded snap revision.
+    ///
+    /// The helper re-derives which revisions snapd has marked disabled and refuses anything outside
+    /// that set, so the active revision cannot be removed even if named deliberately.
     SnapRevision { package: String, revision: String },
-    /// Prune container images or build caches.
-    ContainerPrune { scope: String },
+    /// Ask flatpak to uninstall the runtimes it considers unused.
+    ///
+    /// Carries nothing at all: the command is fixed and the decision of what qualifies is flatpak's.
+    /// One entry covers the whole operation, because that is the granularity flatpak offers.
+    FlatpakUnused,
+    /// Prune container images, stopped containers or build caches. `STO-13`.
+    ///
+    /// The scope is an **enum, not a string**, for the same reason [`Manager`] is: the argument vector
+    /// is fixed against the scope, so no caller-supplied text becomes part of a command line.
+    ContainerPrune { scope: PruneScope },
+    /// Remove one named container volume. `STO-13`.
+    ///
+    /// Volumes hold data nothing else does — a database's contents live in one — so they are `Risky`,
+    /// never bulk-selectable, and removed one at a time. The name is checked against the set of
+    /// unused volumes the container runtime itself reports before anything is run.
+    ContainerVolume { name: String },
     /// Empty a volume's trash.
     TrashEmpty { volume: PathBuf },
     /// Move to trash — **the default for user files**, because it is reversible.
@@ -249,6 +477,74 @@ impl ReclaimMethod {
     pub const fn is_irreversible(&self) -> bool {
         !matches!(self, Self::MoveToTrash { .. })
     }
+
+    /// Whether the entry's path **is** the thing being removed.
+    ///
+    /// # Why this distinction has to exist
+    ///
+    /// Reclaiming re-checks a path immediately before acting on it, so that something which changed
+    /// since the preview is left alone. That check only means anything when the path is the target.
+    ///
+    /// Several methods act on a *logical* object instead — a kernel, a snap revision, a package
+    /// manager's cache — and carry a descriptive path like `kernel 6.8.0-136-generic` that was never
+    /// meant to exist on disk. Re-checking those would find nothing and conclude the item was
+    /// "already gone", silently skipping every one of them.
+    ///
+    /// For those, the guard is stronger than a fingerprint rather than weaker: the privileged helper
+    /// re-derives the eligible set at the moment it acts, so a kernel that stopped qualifying between
+    /// preview and execution is refused by the process carrying out the removal.
+    #[must_use]
+    pub const fn acts_on_path(&self) -> bool {
+        match self {
+            Self::MoveToTrash { .. }
+            | Self::Unlink { .. }
+            | Self::SystemFile { .. }
+            | Self::TrashEmpty { .. } => true,
+            Self::PackageManager { .. }
+            | Self::JournalVacuum { .. }
+            | Self::Packages { .. }
+            | Self::SnapRevision { .. }
+            | Self::FlatpakUnused
+            | Self::ContainerPrune { .. }
+            | Self::ContainerVolume { .. } => false,
+        }
+    }
+}
+
+/// Space nix can **see and account for but will not act on itself**.
+///
+/// # Why this exists
+///
+/// The failure mode this project exists to avoid is space that is real, large, and invisible. But
+/// there is a second failure mode just as bad: automating a destructive operation that has never
+/// been exercised. Some findings sit between the two — the bytes are certain, the remedy is known,
+/// and the tool that would carry it out is either absent or unverified on this machine.
+///
+/// Hiding those bytes would repeat the first mistake; offering a button would commit the second. An
+/// advisory is the honest third answer: report the size, name the remedy, and say plainly why nix is
+/// not doing it. The user keeps the information and the decision.
+///
+/// The concrete case that prompted it: 701 MiB of unreferenced objects in this machine's flatpak
+/// ostree repository, with no `ostree` binary installed to prune them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Advisory {
+    /// Where it is, when it is a place.
+    pub path: Option<PathBuf>,
+    /// What the user sees.
+    pub label: String,
+    /// On-disk bytes, measured the same way a candidate's are.
+    #[ts(type = "number")]
+    pub bytes: u64,
+    /// How much of `bytes` would actually come back, qualified as honestly as a candidate's.
+    pub reclaimable: Reclaimable,
+    /// Why nix will not do this itself. Required, because an advisory without this is just a
+    /// refusal with no explanation.
+    pub why_manual: String,
+    /// What the user can run instead. A command they can read before they run it.
+    pub remedy: String,
+    /// Which category reported it.
+    pub category: String,
 }
 
 /// How nix concluded what an entry is. Shown in the UI, so a user can judge our reasoning.
@@ -266,6 +562,14 @@ pub enum Provenance {
     ProjectMarker { marker: String },
     /// Reported by a filesystem-specific tool, e.g. btrfs.
     FilesystemTool { tool: String },
+    /// A synthetic entry standing in for children too small to be worth their own node. `STO-19`.
+    ///
+    /// Its bytes are exactly the sum of what it replaced, so a parent's total still equals the sum of
+    /// its children — the aggregate is a *summary*, never a rounding.
+    Aggregated {
+        #[ts(type = "number")]
+        count: u64,
+    },
 }
 
 /// One node: bytes attributed to a thing.
@@ -317,6 +621,35 @@ impl SpaceEntry {
             reclaim: None,
             last_used: None,
             is_dir,
+            children: Vec::new(),
+        }
+    }
+}
+
+impl SpaceEntry {
+    /// The stand-in for a directory's children that were too small for their own nodes. `STO-19`.
+    ///
+    /// Carries no path, because it is not a place — it is a statement about a set of places. The
+    /// count is structured rather than only being in the label, so the UI can decide how to phrase it
+    /// without parsing English.
+    #[must_use]
+    pub fn aggregated(parent: &Path, count: u64, apparent_size: u64, allocated: u64) -> Self {
+        Self {
+            // Derived from the parent's path, so it is stable across rescans like every other id.
+            id: EntryId::for_label("aggregated", &parent.to_string_lossy()),
+            path: None,
+            label: format!(
+                "{count} smaller {}",
+                if count == 1 { "item" } else { "items" }
+            ),
+            apparent_size,
+            allocated,
+            category: Category::Unknown,
+            provenance: Provenance::Aggregated { count },
+            safety: Safety::Never,
+            reclaim: None,
+            last_used: None,
+            is_dir: false,
             children: Vec::new(),
         }
     }
@@ -716,6 +1049,80 @@ mod tests {
         assert_eq!(Safety::Review.strictest(Safety::Safe), Safety::Review);
     }
 
+    // ---- reclaimable confidence ----
+
+    #[test]
+    fn an_exact_estimate_is_promisable_in_full() {
+        let exact = Reclaimable::Exact;
+        assert!(exact.is_exact());
+        assert_eq!(exact.promisable(1_000_000), 1_000_000);
+        assert_eq!(exact.caveat(), None);
+    }
+
+    /// The property this type exists for: a shared entry must not contribute its whole size to a
+    /// headline figure, because that space will not come back.
+    #[test]
+    fn a_shared_entry_promises_only_what_is_proven_exclusive() {
+        let partly = Reclaimable::AtMost {
+            exclusive: Some(200_000),
+            reason: "Shared with a snapshot.".into(),
+        };
+        assert!(!partly.is_exact());
+        assert_eq!(
+            partly.promisable(1_000_000),
+            200_000,
+            "only the portion proven to be referenced nowhere else"
+        );
+        assert!(
+            partly.caveat().is_some(),
+            "a qualified figure must explain itself"
+        );
+    }
+
+    #[test]
+    fn an_unprovable_entry_promises_nothing_at_all() {
+        // The specification's rule: suppress the estimate rather than fake it. Zero is the only
+        // honest contribution to a promise when nothing can be proven.
+        let unprovable = Reclaimable::AtMost {
+            exclusive: None,
+            reason: "Extents may be shared with a snapshot.".into(),
+        };
+        assert_eq!(unprovable.promisable(1_000_000), 0);
+
+        let unknown = Reclaimable::Unknown {
+            reason: "btrfs tools are unavailable.".into(),
+        };
+        assert_eq!(unknown.promisable(1_000_000), 0);
+        assert!(unknown.caveat().is_some());
+    }
+
+    #[test]
+    fn exactness_is_the_default_so_ordinary_filesystems_are_unaffected() {
+        assert!(Reclaimable::default().is_exact());
+    }
+
+    #[test]
+    fn reclaimable_round_trips_over_the_wire() {
+        for value in [
+            Reclaimable::Exact,
+            Reclaimable::AtMost {
+                exclusive: Some(42),
+                reason: "shared".into(),
+            },
+            Reclaimable::AtMost {
+                exclusive: None,
+                reason: "unknown sharing".into(),
+            },
+            Reclaimable::Unknown {
+                reason: "no tools".into(),
+            },
+        ] {
+            let json = serde_json::to_string(&value).unwrap();
+            let back: Reclaimable = serde_json::from_str(&json).unwrap();
+            assert_eq!(value, back, "{json}");
+        }
+    }
+
     #[test]
     fn only_trashing_is_reversible() {
         assert!(
@@ -732,10 +1139,45 @@ mod tests {
         );
         assert!(
             ReclaimMethod::JournalVacuum {
-                limit: "500M".into()
+                limit: VacuumLimit::Size { mebibytes: 500 }
             }
             .is_irreversible(),
             "vacuuming the journal cannot be undone"
+        );
+        assert!(
+            ReclaimMethod::SystemFile {
+                kind: ReclaimKind::RotatedLog,
+                path: PathBuf::from("/var/log/x.1.gz")
+            }
+            .is_irreversible()
+        );
+    }
+
+    /// The privileged methods carry typed values, not text. If any of these becomes a `String`,
+    /// caller-supplied text can reach a root command line.
+    #[test]
+    fn privileged_methods_carry_no_free_form_text() {
+        // Constructing them requires an enum or a number — there is no string to smuggle.
+        let _ = ReclaimMethod::PackageManager {
+            manager: Manager::Apt,
+        };
+        let _ = ReclaimMethod::JournalVacuum {
+            limit: VacuumLimit::Age { days: 7 },
+        };
+        let _ = ReclaimMethod::SystemFile {
+            kind: ReclaimKind::PackageCache,
+            path: PathBuf::from("/var/cache/apt/archives/x.deb"),
+        };
+
+        // And the wire form keeps them typed rather than collapsing to text.
+        let json = serde_json::to_string(&ReclaimMethod::PackageManager {
+            manager: Manager::Pacman,
+        })
+        .unwrap();
+        assert!(json.contains("\"pacman\""), "{json}");
+        assert!(
+            !json.contains("-Sc"),
+            "no command text should cross the wire: {json}"
         );
     }
 

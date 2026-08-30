@@ -1,0 +1,241 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Methuselah Nwodobeh
+
+name: Release
+
+# Every push to master, but a release is only *published* when the version has changed — see the
+# `decide` job. A workflow that released on every push would produce a release per commit; one that
+# needed a manual tag would mean the tag and the version could disagree, which is the failure
+# `scripts/check-version.mjs` exists to prevent. Deciding from the version in the tree is the only
+# arrangement where the tag cannot lie.
+on:
+  push:
+    branches: [master]
+  # And by hand, for a re-run after a transient failure. Deliberately not for forcing a release of a
+  # version already published: the guard below still applies.
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+# Read-only by default; only the job that publishes gets more.
+permissions:
+  contents: read
+
+jobs:
+  decide:
+    name: Is there a new version to release?
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      publish: ${{ steps.check.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Tags decide whether this version is already out, so a shallow clone without them would
+          # publish the same version twice.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Read the version, and check the three files agree
+        id: check
+        run: |
+          set -euo pipefail
+          version="$(node scripts/check-version.mjs --quiet)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          if git rev-parse "v$version" >/dev/null 2>&1; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::v$version is already tagged — nothing to release. Bump the version in package.json, src-tauri/tauri.conf.json and src-tauri/Cargo.toml to publish."
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::v$version is new — building a release."
+          fi
+
+  verify:
+    name: Test before publishing
+    needs: decide
+    if: needs.decide.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+            libayatana-appindicator3-dev libssl-dev patchelf rpm desktop-file-utils
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # The same gates as CI. Duplicated rather than depending on the CI run for this commit, because
+      # "CI passed on master" and "these exact sources produce a good build" are different claims once
+      # a cache or a runner image has moved underneath them — and this one ships to users.
+      - name: Format
+        working-directory: src-tauri
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        working-directory: src-tauri
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Build the helper
+        working-directory: src-tauri
+        run: cargo build -p nix-helper --release
+
+      - name: Test
+        working-directory: src-tauri
+        run: cargo test --workspace
+
+      - name: nix-core without D-Bus (the helper's configuration)
+        working-directory: src-tauri
+        run: cargo test -p nix-core
+
+      - run: pnpm tsc --noEmit
+      - run: node scripts/check-contrast.mjs
+      - run: node scripts/check-labels.mjs
+      - run: node scripts/check-i18n.mjs
+
+      # A release must ship attribution generated from the lockfile it was built with, not from
+      # whenever someone last remembered to run it.
+      - name: Third-party notices are current
+        run: |
+          set -euo pipefail
+          python3 scripts/collect-notices.py > /tmp/notices.md
+          if ! diff -q /tmp/notices.md THIRD-PARTY-NOTICES.md >/dev/null; then
+            echo "::error::THIRD-PARTY-NOTICES.md is out of date. Run 'make notices' and commit the result."
+            diff -u THIRD-PARTY-NOTICES.md /tmp/notices.md | head -40
+            exit 1
+          fi
+
+  build:
+    name: Build the packages
+    needs: [decide, verify]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+            libayatana-appindicator3-dev libssl-dev patchelf rpm desktop-file-utils
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # Before `tauri build`, not after: tauri.conf.json copies the helper out of target/release, and
+      # without this the bundle fails after a full release compile with a message about a missing file.
+      - name: Build the helper
+        working-directory: src-tauri
+        run: cargo build -p nix-helper --release
+
+      - run: pnpm tauri build
+
+      # Opening the package is the difference between "a build succeeded" and "a package that works".
+      # Among other things this asserts the path the polkit policy annotates is a path the package
+      # installs — two facts in two files that nothing else compares, and whose disagreement surfaces
+      # as every privileged action failing authorisation on a user's machine.
+      - name: Inspect the deb
+        run: ./scripts/check-bundle.sh src-tauri/target/release/bundle/deb/*.deb
+
+      - name: Install it and run it
+        run: |
+          sudo apt-get install -y ./src-tauri/target/release/bundle/deb/*.deb
+          installed="$(nix --version)"
+          echo "$installed"
+          test "$installed" = "nix ${{ needs.decide.outputs.version }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-bundles
+          path: |
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/rpm/*.rpm
+            src-tauri/target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
+
+  publish:
+    name: Tag and publish
+    needs: [decide, build]
+    runs-on: ubuntu-24.04
+    # The only job that can write, and only to create the tag and the release.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-bundles
+          path: bundles
+
+      - name: Tag
+        env:
+          VERSION: ${{ needs.decide.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Annotated, so the tag carries its own date and author rather than pointing bare at a commit.
+          git tag -a "v$VERSION" -m "nix $VERSION"
+          git push origin "v$VERSION"
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.decide.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          # `--generate-notes` writes the commit summary; this is what goes above it — the things a
+          # release page has to say and a commit list cannot.
+          cat > /tmp/notes.md <<'EOF'
+          ## Install
+
+          `.deb` and `.rpm` install the privileged helper and its polkit policy, so every feature works.
+
+          The **AppImage** is read-only for privileged operations: polkit authorises by absolute
+          executable path, and an AppImage mounts at a different path on every run. nix reports those
+          features as unavailable with a reason rather than failing at the point of use. See
+          `packaging/README.md`.
+
+          ## Verifying this build
+
+          Each package was opened and checked before publication: the helper is present at
+          `/usr/libexec/nix/nix-helper`, mode 0755 and not setuid; the polkit policy is installed and
+          annotates that exact path; the desktop entry validates; and the deb was installed on a clean
+          runner and asked for its version.
+          EOF
+
+          gh release create "v$VERSION" \
+            --title "nix $VERSION" \
+            --notes-file /tmp/notes.md \
+            --generate-notes \
+            bundles/deb/*.deb \
+            bundles/rpm/*.rpm \
+            bundles/appimage/*.AppImage

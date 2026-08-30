@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! Scan persistence. Task 1.4, implementing decision D6.
 //!
 //! # Why this exists
@@ -355,6 +358,7 @@ mod tests {
                 errors: Vec::new(),
                 cancelled: false,
                 errors_truncated: false,
+                aggregated_below: 0,
                 coverage_note: None,
             },
         };
@@ -398,6 +402,7 @@ mod tests {
             errors: Vec::new(),
             cancelled: false,
             errors_truncated: false,
+            aggregated_below: 0,
             coverage_note: None,
         };
 

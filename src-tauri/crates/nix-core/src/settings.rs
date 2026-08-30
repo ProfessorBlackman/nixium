@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! Persisted preferences. Task 0.6 (`FND-5`).
 //!
 //! Three properties the spec demands, each answering a specific Stacer failure:
@@ -14,7 +17,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::error::{AppError, Cause, ErrorCode, IoContext, Result};
+use crate::error::{AppError, Cause, ErrorCode, Result};
 use crate::paths;
 
 /// Format version. Bump when a change is not backward-compatible, and add a migration.
@@ -88,6 +91,31 @@ pub struct Settings {
     /// Opt-in periodic collection of category totals (`STO-16`). Off by default: it installs a
     /// systemd user timer, which is a change to the user's system.
     pub growth_history_enabled: bool,
+    /// Threshold alerts (`MON-6`). Empty by default: a monitoring tool that starts notifying about
+    /// thresholds nobody chose is one whose notifications get switched off wholesale.
+    pub alert_rules: Vec<crate::metrics::Rule>,
+    /// Process-table columns the user has hidden (`PRC-1`).
+    ///
+    /// Stored as the columns *hidden* rather than those shown, so a column added by a later version
+    /// appears by default instead of being invisible until someone finds the setting.
+    pub hidden_process_columns: Vec<String>,
+    /// Show a tray icon, and keep running when the window closes. `PLT-3`.
+    ///
+    /// Off by default. A tray icon is a claim on the user's panel and a process that outlives the
+    /// window they closed, and neither is something to assume they wanted — Stacer had no tray at all,
+    /// so nobody is losing behaviour they had.
+    pub tray_enabled: bool,
+    /// With a tray icon, whether closing the window quits or hides. `PLT-3`.
+    ///
+    /// Ignored entirely when [`Settings::tray_enabled`] is false: hiding to a tray that is not there
+    /// leaves a process with no way back to it, which is the worst of both.
+    pub close_to_tray: bool,
+    /// Whether the first-run introduction has been shown. `PLT-4`.
+    ///
+    /// Stored rather than inferred from the settings file's existence, because those are different
+    /// questions: a user who deletes their settings has not become a new user, and one restoring a
+    /// backup should not be introduced to the tool again.
+    pub introduced: bool,
 }
 
 impl Default for Settings {
@@ -100,6 +128,11 @@ impl Default for Settings {
             protected_paths: Vec::new(),
             show_pseudo_filesystems: false,
             growth_history_enabled: false,
+            alert_rules: Vec::new(),
+            hidden_process_columns: Vec::new(),
+            tray_enabled: false,
+            close_to_tray: false,
+            introduced: false,
         }
     }
 }
@@ -203,19 +236,12 @@ impl Store {
         }
     }
 
-    /// Save atomically: write a sibling temporary file, fsync it, then rename over the target.
+    /// Save atomically.
     ///
-    /// The temporary lives in the *same directory* so the rename cannot cross a filesystem — which
-    /// is exactly the mistake Stacer's hosts editor made by staging in `/tmp` and moving to `/etc`,
-    /// turning an atomic replace into a copy and opening a symlink race.
+    /// The atomicity lives in [`crate::fs::write_atomically`], which is shared with growth history —
+    /// one implementation rather than one per caller, because a second copy is a second chance to
+    /// stage in the wrong directory and turn an atomic replace into a copy.
     pub fn save(&self, settings: &Settings) -> Result<()> {
-        let dir = self.path.parent().ok_or_else(|| {
-            AppError::internal("Settings path has no parent directory.").with_path(&self.path)
-        })?;
-        std::fs::create_dir_all(dir)
-            .doing("create the settings directory")
-            .map_err(|e| e.with_path(dir))?;
-
         let mut to_write = settings.clone();
         to_write.version = CURRENT_VERSION;
         let json = serde_json::to_string_pretty(&to_write).map_err(|e| {
@@ -224,31 +250,9 @@ impl Store {
             })
         })?;
 
-        let tmp = self
-            .path
-            .with_extension(format!("json.tmp.{}", std::process::id()));
-        {
-            use std::io::Write;
-            let mut f = std::fs::File::create(&tmp)
-                .doing("write your settings")
-                .map_err(|e| e.with_path(&tmp))?;
-            f.write_all(json.as_bytes())
-                .doing("write your settings")
-                .map_err(|e| e.with_path(&tmp))?;
-            f.write_all(b"\n")
-                .doing("write your settings")
-                .map_err(|e| e.with_path(&tmp))?;
-            // Durability before the rename, so a crash cannot leave an empty file in place.
-            f.sync_all()
-                .doing("write your settings")
-                .map_err(|e| e.with_path(&tmp))?;
-        }
-
-        std::fs::rename(&tmp, &self.path).map_err(|e| {
-            // Leave no debris behind if the rename failed.
-            std::fs::remove_file(&tmp).ok();
-            AppError::from_io(&e, "save your settings").with_path(&self.path)
-        })
+        let mut body = json.into_bytes();
+        body.push(b'\n');
+        crate::fs::write_atomically(&self.path, &body)
     }
 }
 

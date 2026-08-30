@@ -1,7 +1,9 @@
 # Architecture
 
 Living document. Records structural decisions and the rules that keep them from eroding.
-Feature-level detail belongs in [SPEC.md](SPEC.md); sequencing belongs in [PLAN.md](PLAN.md).
+Feature-level detail belongs in [SPEC.md](SPEC.md); sequencing belongs in [PLAN.md](PLAN.md); the
+defects that produced several of the rules below are logged in
+[issues/](issues/README.md), which also lists what is known to be unverified.
 
 ## Crate layout
 
@@ -99,6 +101,20 @@ Built in M3:
 | `trash` | 1.10 | the freedesktop trash specification |
 | `reclaim` | 1.8–1.9 | the preview pipeline and the category registry |
 
+Built in M4:
+
+| Module | Task | Contents |
+| --- | --- | --- |
+| `reclaim::caches` | 1.11 | application caches, attributed to the apps that own them |
+| `reclaim::logs` | 1.12 | rotated logs and the systemd journal |
+| `reclaim::packages` | 1.13 | package manager caches, cleaned through the owning tool |
+| `pkg` | STO-10 | package database queries; parsers tested against real captured output |
+| `reclaim::kernels` | STO-11 | superseded kernels and residual configuration |
+| `cow` | STO-17 | copy-on-write sharing, so an estimate is never overstated |
+| `pkg::snap` | STO-12 | snap revisions, with hard-link-aware sizing |
+| `pkg::flatpak` | STO-12 | flatpak refs, unused runtimes, ostree repository |
+| `tests/reclaim_accuracy` | 1.14 | the specification's 2% criterion, verified end to end |
+
 ## How "nothing bypasses preview" is enforced
 
 Not by convention, and not by a code review rule that erodes. `reclaim::execute` requires a
@@ -116,6 +132,130 @@ Two guards then run again **at execution time**, per item:
 
 That second guard is also what makes decision D6 safe: the explorer may serve a cached tree because
 stale data can misinform a reader but cannot misdirect a deletion.
+
+## The privileged surface, and how it is kept small
+
+The helper's operation enum is the security boundary, and M4 grew it from two operations to seven.
+The rule that makes that growth safe:
+
+> **An operation carries its category, and the helper independently re-derives which roots that
+> category owns.**
+
+`ReclaimFile { kind: RotatedLog, path: "/etc/shadow" }` is refused, because `/etc` is not a root of
+any category. The unprivileged side cannot widen its own access by mislabelling a path — which is
+specification invariant 4 ("`Unlink` is only emitted for a path inside its category's declared
+root") enforced where it matters rather than trusted from the caller.
+
+Three further properties fall out of the same design:
+
+- **An active log cannot be deleted at all.** The helper checks the *filename shape*, so
+  `/var/log/syslog` is refused while `/var/log/syslog.1.gz` is not. Deleting a file a running
+  service holds open frees nothing until it restarts and breaks its logging meanwhile. The policy
+  check runs before any filesystem access, so the refusal does not depend on the file existing —
+  an earlier version returned `NotFound` on journald-only systems, making the guard's behaviour vary
+  by distribution.
+- **No caller-supplied text reaches a root command line.** `ReclaimMethod::PackageManager` carries
+  a `Manager` enum, not a command string; `JournalVacuum` carries a number, not a limit string. The
+  argument vectors are fixed inside the helper.
+- **Destructive operations are audited distinctly** from reads. An audit trail whose deletions look
+  like its reads is not much of an audit trail.
+
+One privileged session is opened per *batch*, not per item — Stacer re-ran every command under
+`pkexec`, so toggling five services meant five dialogs.
+
+## Copy-on-write filesystems: a qualified estimate, never a bare number
+
+On btrfs, ZFS, or an LVM thin volume a file's extents may be shared with a snapshot. Deleting the
+file removes the name, but the blocks stay allocated until every reference is gone — so the space
+does not come back. A user who deletes 8 GiB and sees `df` move by nothing has been lied to by
+whatever told them 8 GiB was reclaimable.
+
+`space::Reclaimable` therefore qualifies every estimate:
+
+| Variant | Meaning | Contributes to a headline total |
+| --- | --- | --- |
+| `Exact` | Freeing this returns the stated size | the whole size |
+| `AtMost { exclusive: Some(n) }` | Partly shared; `n` is proven exclusive | `n` only |
+| `AtMost { exclusive: None }` | Shared, and the exclusive part is unprovable | **nothing** |
+| `Unknown` | A CoW filesystem nix could not ask about | **nothing** |
+
+A `Preview` carries both `total_bytes` (every stated size at face value) and `promisable_bytes`
+(what nix will actually promise). The UI leads with the second and states the difference. That is
+`STO-17`'s rule made concrete: *where exclusive size is unobtainable, suppress the estimate rather
+than fake it.*
+
+The pessimistic default is the important part. A CoW filesystem whose tool is absent yields
+`Unknown`, not an assumption of exclusivity — assuming exclusivity is exactly how a tool ends up
+promising space that never arrives.
+
+**Snapshots are attributed, never deleted.** They are inventoried so their space lands in the
+`Snapshot` category rather than in `Unknown`, but nix does not offer to remove one: a snapper or
+Timeshift snapshot may be somebody's only route back from a bad upgrade.
+
+### An honest limitation
+
+The free-space half of `STO-17` landed in `STO-1` and is verified against a real filesystem. The
+`cow` module is not: the development machine is ext4 with no btrfs, ZFS or LVM tooling, so those
+parsers are written to each tool's documented output format and tested against fixtures built from
+that documentation — not against captured output. The package parsers found two real bugs precisely
+*because* they ran against a live database, and these have had no equivalent exposure. **They need
+re-verifying on a real btrfs and ZFS system before their numbers are trusted.** What is fully tested
+is the suppression logic, because that is pure and runs everywhere.
+
+`pkg::flatpak`'s runtime listing is in the same position for the same reason: this machine has a
+flatpak installation but nothing installed in it, so the unused-runtime derivation and the
+extension-matching rule are tested against fixtures rather than captured output. The repository
+measurement *is* exercised against real data, because 699 MiB of orphaned objects are sitting there.
+
+`pkg::snap` needs no such caveat — every parser and the hard-link accounting run against live snapd
+output on each test run.
+
+### Sharing is not a copy-on-write problem
+
+`space::Reclaimable` was built for btrfs and ZFS snapshots, on the assumption that shared extents
+were a filesystem-specific concern. They are not. The same problem turned up twice more on plain
+ext4:
+
+| Where | What shares the blocks | What that means |
+| --- | --- | --- |
+| btrfs, ZFS, LVM | snapshots holding old extents | freeing a file may free nothing |
+| snapd | every blob hard-linked into `/var/lib/snapd/cache` | removing a revision frees nothing until snapd prunes |
+| flatpak | deployments hard-linked out of the ostree repository | uninstalling frees nothing until the repository is pruned |
+
+One type expresses all three, which is a reasonable sign it models something real. Where the sharing
+can be *removed* it is removed rather than reported: the helper unlinks snapd's cache entry along with
+the blob, matched by inode, so a snap revision's figure is exact instead of qualified.
+
+### Paths and logical entries
+
+Not everything reclaimable is a file. A kernel, a snap revision, a package manager's cache — these are
+logical objects, and the `Candidate` for one carries a descriptive path like
+`kernel 6.8.0-136-generic` that was never meant to exist on disk.
+
+Two guards assume otherwise: the path protection rules, and the time-of-check fingerprint. Applied to
+a logical entry the first refuses it ("only absolute paths can be checked") and the second concludes
+it is already gone. Both fired silently, and between them they made every kernel and snap-revision
+candidate inert — measured correctly, then discarded before the user saw it.
+
+`ReclaimMethod::acts_on_path` is the distinction those guards were missing. Path rules and
+fingerprints apply where the path *is* the target. A logical entry is guarded instead by the
+privileged helper re-deriving its own eligible set at the moment it acts, which is stronger than a
+fingerprint: a kernel that stopped qualifying between preview and execution is refused by the process
+that would carry out the removal.
+
+### Advisories: measured, not automated
+
+`space::Advisory` covers space nix can account for but will not act on itself. There are two failure
+modes to avoid and they pull in opposite directions — hiding real space is the failure this project
+exists to correct, and automating an untested destructive operation is worse. An advisory is the third
+answer: report the bytes, name the remedy as a command the user can read, and say plainly why nix is
+not running it.
+
+Advisories are deliberately excluded from `Preview::total_bytes` and `promisable_bytes`, because those
+figures are promises about what the preview would reclaim.
+
+The case that forced the type: 699 MiB of unreferenced objects in this machine's flatpak ostree
+repository, and no `ostree` binary installed to prune them.
 
 ## The report checks its own arithmetic
 
@@ -144,6 +284,98 @@ child finishes, so a tree of nested scopes fills the pool with threads waiting o
 those same threads. In isolation it measured 35 ms for 2,590 files; with concurrent scans it
 collapsed to fifteen seconds, and cancellation could not unwind through the blocked scopes.
 `par_iter` is built on `join` and nests correctly.
+
+## Where scan time actually goes
+
+Worth writing down, because it was assumed wrong twice. Measured on `/usr` — 422,330 files, 45,488
+directories, eight cores:
+
+| | |
+| --- | --- |
+| parallel `readdir` + `stat`, accumulating only a byte total | **344 ms** — the floor |
+| the scan as it now stands, 454,129 nodes | **759 ms** |
+| the scan before this was measured | 1.5 s |
+
+**The scan is not filesystem-bound.** It never was. Two thirds of the original 1.5 s went on building
+tree nodes, one `Mutex<SpaceTree>` acquisition per entry at roughly 2 µs each.
+
+Three rules follow, and the module documentation in `scan.rs` records why each is not negotiable:
+
+1. **Nodes are batched, one append per directory** — 45,488 lock acquisitions rather than 454,129.
+2. **Only ids travel up the recursion.** A `SpaceEntry` is 200 bytes and an `EntryId` is eight. An
+   attempt at merging node vectors upward copied every node once per level of tree above it, so a node
+   twelve deep was copied twelve times; it bought 13% where 3× was expected.
+3. **The map is built once, pre-sized, outside the lock.** Writing into it *under* the lock made the
+   scan slower than the original — 2.3 s — because a map growing to 454,129 entries rehashes about
+   nineteen times and each rehash blocks every other thread.
+
+This is possible only because `EntryId::for_path` is a pure function of the path. There is no central
+id allocator to serialise on, so a node built on any thread has the id it would have had in a shared
+tree.
+
+`budget::SCAN_PER_FILE` guards the result at 10 µs per file, against a measured 1.59 µs.
+
+### The memory cost is not yet bounded
+
+The same measurements against a real home directory — 5,406,062 files, 782,107 directories — take
+34.7 s and peak at **4.2 GiB resident**, because the model materialises a node per file: 5,454,451
+nodes at 200 bytes, plus each node's heap-allocated path and label, plus the staging vector alive
+alongside the finished map.
+
+`Options::max_depth` was meant to bound this and does not: at its default of 12, almost every file in
+a home directory is still inside the cap.
+
+The accounting itself is right — 307.2 GiB against `du`'s 310.4 GiB, the gap being 427 permission
+errors and not crossing filesystem boundaries. Nothing is miscounted; there is simply a node for every
+file when what a user needs is to know where the bytes are.
+
+### Bounded by significance, not by depth
+
+**STO-19, done.** A directory keeps individual nodes for children at or above a size threshold and
+folds the rest into a single `SpaceEntry::aggregated` node — "*1,234 smaller items*" — carrying exactly
+the bytes it replaced. This is decision D8's pixel-level aggregation applied at the model level.
+
+| | before | after |
+| --- | --- | --- |
+| peak resident memory | 4,211.8 MiB | **94.9 MiB** |
+| tree nodes | 5,454,451 | **48,848** |
+| time | 34.7 s | **28.0 s** |
+
+Four properties hold this together, and each has a test:
+
+1. **An aggregate is a summary, never a rounding.** Its bytes are the sum of what it replaced, so a
+   parent still equals the sum of its children and no total moves. The budget trades away *listing*,
+   never *accounting*.
+2. **Significance is judged on allocated bytes**, not apparent ones. A sparse ten-gigabyte image
+   occupying one block is not among the largest things on the disk, whatever it claims.
+3. **The threshold is fixed for the whole walk**, which is what makes folding local and exact: a
+   directory decides each child on the spot with nothing to revisit. A threshold that moved mid-walk
+   would mean pruning nodes whose parents did not exist yet.
+4. **Aggregates are built by the parent**, not by the directory they summarise — because whether a
+   directory survives is the parent's decision, made after the child's walk returns. See
+   [issues §05](issues/05-concurrency-and-performance.md) for what happened when it was the other way
+   round.
+
+Because a child can never hold more than its parent, a folded directory has nothing significant inside
+it either. So folding prunes whole subtrees, which is what bounds the *directory* count — and the
+directory count is what actually dominates: a per-directory rule such as "keep the largest sixteen"
+would still leave 782,119 directories to describe.
+
+#### Choosing the threshold without knowing the total
+
+The threshold is a share of the tree's total, and the total is not knowable before walking. Counting
+first and building second is the obvious answer and was measured as the wrong one: it took the
+home-directory scan to 61.2 s, because that tree is syscall-bound and a second traversal doubles the
+dominant cost.
+
+So it is estimated from the filesystem's used bytes, which `statvfs` gives for free, and corrected by a
+second walk only when the estimate proves more than 8x too coarse. That keeps the cases that matter —
+a whole home directory, a whole filesystem — to a single traversal, and pays a second one only for a
+small subtree, where a walk is cheap. `Options::size_hint` lets a caller supply the figure outright;
+the obvious source is the previous scan of the same root, so a rescan never pays the correction.
+
+Getting the estimate wrong is not a correctness problem. It only decides how much detail the tree
+carries, never what the totals are.
 
 ## The privileged helper
 
@@ -181,6 +413,36 @@ command, no argument vector, and no path it has not validated. Properties that h
 the helper **directly as the current user**, which exercises serialisation, dispatch, validation,
 rejection and auditing without root. The only path CI does not cover is escalation itself, which is
 a single `Command` invocation.
+
+### Verified against a real polkit prompt
+
+Run on 2026-08-27, installed as it ships — helper at `/usr/libexec/nix/nix-helper`, action at
+`/usr/share/polkit-1/actions/com.tlc.nix.policy`:
+
+```
+nix-helper: start version=0.1.0 protocol=4 uid=0
+nix-helper: ok id=1 op=ping
+nix-helper: ok id=2 op=read_text_file
+nix-helper: denied id=3 op=read_text_file code=helper_rejected
+```
+
+Four things that had until then only been reasoned about:
+
+1. The helper really runs as **root** through `pkexec`, and reports `uid=0` back across the handshake
+   so the client can confirm it rather than assume it.
+2. **Three operations, one password prompt.** That is `auth_admin_keep`, and it is the whole point of
+   the single-session design — Stacer re-ran `pkexec` per action, so toggling five services meant five
+   dialogs.
+3. The exact-path allow-list **refused `/etc/shadow`**. That check was a directory-prefix test in
+   Phase 0 and would have permitted it; see [issues §01](issues/01-privilege-and-security.md).
+4. The audit log went to the root-owned `/var/log/nix/helper-audit.log` rather than the per-user
+   fallback — world-readable, so a user can read what was done in their name, and root-owned, so they
+   cannot rewrite it.
+
+**Still unexercised:** every *destructive* operation. `PackageManagerClean`, `JournalVacuum`,
+`ReclaimFile`, `RemovePackages` and `RemoveSnapRevision` have only run against a directly-spawned
+helper in tests, which does not exercise `pkexec`, the session, or the re-derivation under root. Reads
+are the easy half.
 
 ## Generated TypeScript
 

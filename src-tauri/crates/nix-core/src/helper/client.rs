@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! Client side of the helper: spawns it, authenticates once, and exchanges typed messages.
 
 use std::io::{BufRead, BufReader, Write};
@@ -61,12 +64,23 @@ impl Transport {
     }
 }
 
-/// Where the helper is installed. Overridable for development via `NIX_HELPER_PATH`.
+/// Where the helper is installed when nix is packaged.
+///
+/// The polkit action authorises **this exact path**, so it is a constant rather than a literal buried
+/// in a function: the two declarations have to be compared, and
+/// `the_polkit_action_names_the_path_the_client_will_launch` does that.
+pub(crate) const INSTALLED_HELPER: &str = "/usr/libexec/nix/nix-helper";
+
+/// Where to look for the helper. Overridable for development via `NIX_HELPER_PATH`.
+///
+/// An override still works, but it means `pkexec` finds no matching polkit action and falls back to
+/// its generic one — so the prompt loses nix's wording and `auth_admin_keep` stops applying. Only
+/// [`INSTALLED_HELPER`] gets the real thing.
 fn default_helper_path() -> PathBuf {
     if let Some(p) = std::env::var_os("NIX_HELPER_PATH").filter(|v| !v.is_empty()) {
         return PathBuf::from(p);
     }
-    PathBuf::from("/usr/libexec/nix/nix-helper")
+    PathBuf::from(INSTALLED_HELPER)
 }
 
 /// A live privileged session.
@@ -256,6 +270,89 @@ impl Drop for Client {
 mod tests {
     use super::*;
 
+    /// The polkit action and the compiled-in helper path must agree.
+    ///
+    /// # Why this is a test and not a comment
+    ///
+    /// polkit matches an action to a program by the **absolute path** in its
+    /// `org.freedesktop.policykit.exec.path` annotation. If that annotation and
+    /// [`default_helper_path`] ever drift apart, `pkexec` finds no matching action and silently falls
+    /// back to `org.freedesktop.policykit.exec` — which still authenticates, still runs the helper,
+    /// and still works.
+    ///
+    /// What is lost is invisible from the code: the prompt stops saying *"Authentication is required
+    /// to inspect and reclaim system storage"* and says *"run a program as another user"* instead, and
+    /// `auth_admin_keep` stops applying, so a user is asked for a password once per operation rather
+    /// than once per batch — reintroducing precisely the Stacer behaviour the helper exists to avoid.
+    ///
+    /// A failure that leaves the feature working is a failure nobody reports, so it gets a test.
+    #[test]
+    fn the_polkit_action_names_the_path_the_client_will_launch() {
+        let policy = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../packaging/polkit/com.tlc.nix.policy");
+        let text = std::fs::read_to_string(&policy)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", policy.display()));
+
+        let annotated = text
+            .lines()
+            .find_map(|line| {
+                let line = line.trim();
+                let rest =
+                    line.strip_prefix(r#"<annotate key="org.freedesktop.policykit.exec.path">"#)?;
+                rest.strip_suffix("</annotate>")
+            })
+            .expect("the policy must annotate an exec.path");
+
+        // Compared against the **shipped** path, not `default_helper_path()`, which honours a
+        // `NIX_HELPER_PATH` override — and the test suite sets one deliberately, so comparing against
+        // that would only ever test the override.
+        assert_eq!(
+            annotated, INSTALLED_HELPER,
+            "the polkit action authorises {annotated} but nix installs to {INSTALLED_HELPER} — pkexec \
+             would fall back to its generic action, losing nix's own prompt wording and the \
+             one-prompt-per-batch that auth_admin_keep provides"
+        );
+    }
+
+    /// `auth_admin_keep` is what makes one prompt cover a whole batch.
+    ///
+    /// Without it the helper still works and a user is asked once per privileged operation, which is
+    /// the Stacer behaviour: five service toggles meant five dialogs. Asserted because it is a single
+    /// word in an XML file and nothing else would notice it changing.
+    #[test]
+    fn the_policy_keeps_authorisation_for_the_session() {
+        let policy = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../packaging/polkit/com.tlc.nix.policy");
+        let text = std::fs::read_to_string(&policy).expect("read the policy");
+
+        assert!(
+            text.contains("<allow_active>auth_admin_keep</allow_active>"),
+            "one prompt per batch depends on auth_admin_keep for the active session"
+        );
+        // And the inactive and any cases must *not* keep it: a session that is not the user's own
+        // should re-authenticate every time.
+        assert!(text.contains("<allow_any>auth_admin</allow_any>"));
+        assert!(text.contains("<allow_inactive>auth_admin</allow_inactive>"));
+    }
+
+    /// Connect for a test, turning a stale-binary version mismatch into a clear instruction.
+    ///
+    /// The protocol version guard is doing its job when it refuses an old binary, but a raw panic
+    /// on an unwrap does not say so. `cargo test` does not rebuild the helper; `make test` does.
+    fn connect_for_test(transport: &Transport) -> Option<Client> {
+        match Client::connect(transport) {
+            Ok(client) => Some(client),
+            Err(e) if e.code == ErrorCode::VersionMismatch => {
+                panic!(
+                    "the helper binary is stale ({}). Run `make test`, or \
+                     `cargo build -p nix-helper` first — `cargo test` does not rebuild it.",
+                    e.message
+                );
+            }
+            Err(e) => panic!("handshake failed: {e}"),
+        }
+    }
+
     /// Path to the freshly built helper binary next to the test executable.
     fn built_helper() -> Option<PathBuf> {
         let exe = std::env::current_exe().ok()?;
@@ -274,7 +371,7 @@ mod tests {
         let transport = Transport::Direct {
             helper_path: helper,
         };
-        let mut client = Client::connect(&transport).expect("handshake should succeed");
+        let mut client = connect_for_test(&transport).expect("handshake should succeed");
 
         // Run as the current user in tests, so it must NOT claim elevation.
         assert!(!client.is_elevated(), "a direct-spawned helper is not root");
@@ -296,10 +393,10 @@ mod tests {
             eprintln!("skipping: nix-helper not built yet");
             return;
         };
-        let mut client = Client::connect(&Transport::Direct {
+        let mut client = connect_for_test(&Transport::Direct {
             helper_path: helper,
         })
-        .unwrap();
+        .expect("handshake should succeed");
         let err = client
             .request(&Op::ReadTextFile {
                 path: PathBuf::from("/home/someone/.ssh/id_rsa"),

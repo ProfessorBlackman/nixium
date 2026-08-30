@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! The command surface. Task 0.3 (`FND-2`).
 //!
 //! Conventions, applied without exception:
@@ -20,14 +23,21 @@ use std::path::PathBuf;
 
 use nix_core::cache::{Cache, CachedScan};
 use nix_core::caps;
+use nix_core::cow::{self, Snapshot};
 use nix_core::error::{AppError, ErrorCode, Result};
 use nix_core::helper::{self, Op, OpResult};
 use nix_core::logging::{self, Diagnostics};
 use nix_core::op::{Completion, OperationId, Progress};
+use nix_core::pkg;
 use nix_core::protect::Refusal;
 use nix_core::reclaim::{Preview, Report, Ticket};
 use nix_core::settings::Settings;
-use nix_core::{fs as nixfs, scan};
+// `Manager` is `tauri::Manager` here, so the package manager enum is renamed rather than shadowing it.
+use nix_core::space::Manager as PkgManager;
+use nix_core::{
+    apt_sources, autostart, detail, find, fs as nixfs, history, hosts, journal, metrics, process,
+    scan, search, timer, units,
+};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -61,13 +71,13 @@ pub(crate) fn diagnostics() -> Result<Diagnostics> {
 
 /// What this host can do. Drives which features the UI offers (`FND-7`).
 #[tauri::command]
-pub(crate) fn capabilities() -> caps::Snapshot {
+pub(crate) fn capabilities() -> caps::Capabilities {
     caps::registry().snapshot()
 }
 
 /// Re-probe capabilities. Call after anything that could install or remove a tool.
 #[tauri::command]
-pub(crate) fn capabilities_refresh() -> caps::Snapshot {
+pub(crate) fn capabilities_refresh() -> caps::Capabilities {
     caps::registry().invalidate();
     caps::registry().snapshot()
 }
@@ -162,6 +172,911 @@ pub(crate) fn scan_cached(path: PathBuf, max_depth: Option<usize>) -> Option<Cac
     Cache::discover().ok()?.load_for(&options)
 }
 
+/// The largest files in the cached scan. `STO-15`.
+///
+/// A projection, not a search. Stacer made the user fill in a `find` dialogue — path, pattern, size,
+/// unit — and then listed the results without their sizes. The scan already knows.
+#[tauri::command]
+pub(crate) fn largest_files(
+    path: PathBuf,
+    limit: Option<usize>,
+) -> Vec<nix_core::space::SpaceEntry> {
+    let Some(cached) = Cache::discover().ok().and_then(|c| c.load(&path)) else {
+        return Vec::new();
+    };
+    find::largest_files(&cached.result.tree, limit.unwrap_or(100))
+}
+
+/// Event carrying a finished duplicate search.
+pub(crate) const EVENT_DUPLICATES_DONE: &str = "duplicates://done";
+
+/// Search the cached scan for duplicate content. `STO-15`.
+///
+/// Returns immediately; the search runs on its own thread, reports progress on `op://progress`, and
+/// delivers its result on `duplicates://done`. Hashing is staged and cancellable between chunks, so a
+/// stop does not wait for a gigabyte to finish.
+#[tauri::command]
+pub(crate) fn duplicates_find(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: PathBuf,
+    minimum_bytes: Option<u64>,
+) -> OperationId {
+    let (id, token) = state.operations.start();
+    let minimum = minimum_bytes.unwrap_or(find::MIN_DUPLICATE_BYTES);
+
+    std::thread::spawn(move || {
+        let cached = Cache::discover().ok().and_then(|c| c.load(&path));
+        let Some(cached) = cached else {
+            let completion = Completion::Failed {
+                id,
+                error: AppError::new(
+                    ErrorCode::Unsupported,
+                    "There is no scan to search for duplicates in.",
+                )
+                .with_remedy("Scan a directory first, then look for duplicates in the result."),
+            };
+            if let Err(e) = app.emit(EVENT_DONE, &completion) {
+                tracing::warn!(error = %e, "could not emit duplicate completion");
+            }
+            return;
+        };
+
+        let progress_handle = app.clone();
+        let outcome = find::duplicates(&cached.result.tree, minimum, &token, move |done, total| {
+            let progress = Progress::new(id, done)
+                .with_total(total)
+                .with_message(format!("hashed {done} of {total} candidates"));
+            if let Err(e) = progress_handle.emit(EVENT_PROGRESS, &progress) {
+                tracing::warn!(error = %e, "could not emit duplicate progress");
+            }
+        });
+
+        let completion = match outcome {
+            Ok((groups, stats)) => {
+                let report = find::DuplicateReport {
+                    recoverable: groups.iter().map(|g| g.recoverable).sum(),
+                    cancelled: token.is_cancelled(),
+                    groups,
+                    stats,
+                };
+                let cancelled = report.cancelled;
+                if let Err(e) = app.emit(EVENT_DUPLICATES_DONE, &report) {
+                    tracing::warn!(error = %e, "could not emit duplicate report");
+                }
+                if cancelled {
+                    Completion::Cancelled { id }
+                } else {
+                    Completion::Done { id }
+                }
+            }
+            Err(error) if !error.is_fault() => Completion::Cancelled { id },
+            Err(error) => Completion::Failed { id, error },
+        };
+        if let Err(e) = app.emit(EVENT_DONE, &completion) {
+            tracing::warn!(error = %e, "could not emit duplicate completion");
+        }
+    });
+
+    id
+}
+
+/// The last reclaim preview's totals, without computing one. `MON-2`.
+///
+/// `None` until a preview has been run this session. The dashboard says "not measured yet" rather
+/// than scanning on mount, which the acceptance criterion forbids.
+#[tauri::command]
+pub(crate) fn reclaim_last_total(state: State<'_, AppState>) -> Option<(u64, u64)> {
+    state.reclaim.last_preview()
+}
+
+// ---- systemd units. `SVC-1` to `SVC-5` ----
+
+/// Event carrying the name of a unit that changed. `SVC-3`.
+pub(crate) const EVENT_UNIT_CHANGED: &str = "units://changed";
+
+/// Every loaded unit. `SVC-1`.
+///
+/// One D-Bus round trip: 757 units in 11.7 ms on the development machine, against the `1 + 2N`
+/// subprocess spawns Stacer needed for the same screen.
+#[tauri::command]
+pub(crate) fn units_list(scope: units::Scope) -> Result<Vec<units::Unit>> {
+    units::list(scope)
+}
+
+/// Every unit *file*, loaded or not. `SVC-1`.
+///
+/// Deliberately a separate command rather than part of `units_list`, because it is **slow**: 491 files
+/// took 2.2 s here, since systemd walks the unit directories on disk to answer. It is only needed to
+/// decide whether something can be enabled, so the UI asks for it once, on demand, rather than on every
+/// refresh.
+#[tauri::command]
+pub(crate) fn unit_files(scope: units::Scope) -> Result<Vec<units::UnitFile>> {
+    units::list_files(scope)
+}
+
+/// Timers with their schedules. `SVC-4`.
+#[tauri::command]
+pub(crate) fn units_timers(scope: units::Scope) -> Result<Vec<units::Timer>> {
+    units::timers(scope)
+}
+
+/// Start, stop, enable, mask a unit. `SVC-2`.
+///
+/// systemd asks polkit itself, so there is no helper and no nix-authored privileged code — and a
+/// refused authorisation comes back as a denial rather than as a success.
+#[tauri::command]
+pub(crate) fn unit_act(scope: units::Scope, unit: String, action: units::Action) -> Result<()> {
+    units::act(scope, &unit, action)
+}
+
+/// Start watching for unit changes. `SVC-3`.
+///
+/// Idempotent: the watcher is started once and lives for the process, blocked on the bus socket rather
+/// than polling. Changes made in a terminal arrive here too, which is the acceptance criterion.
+#[tauri::command]
+pub(crate) fn units_watch(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
+    let mut watching = match state.units_watching.lock() {
+        Ok(watching) => watching,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if *watching {
+        return Ok(());
+    }
+
+    let emitter = app.clone();
+    units::watch(units::Scope::System, move |unit| {
+        if let Err(e) = emitter.emit(EVENT_UNIT_CHANGED, unit) {
+            tracing::warn!(error = %e, "could not emit a unit change");
+        }
+    })?;
+    *watching = true;
+    Ok(())
+}
+
+/// Journal entries for one unit. `SVC-5`.
+///
+/// Passing `after` turns this into a follow: only what has appeared since that cursor comes back, so
+/// polling a quiet unit costs almost nothing.
+#[tauri::command]
+pub(crate) fn unit_logs(
+    scope: units::Scope,
+    unit: String,
+    limit: Option<u32>,
+    after: Option<String>,
+) -> Result<journal::Page> {
+    journal::entries(scope, &unit, limit.unwrap_or(100), after.as_deref())
+}
+
+// ---- Installed software. `PKG-1` ----
+
+/// The installed-software inventory, with any measurements already taken. `PKG-1`.
+///
+/// Live every time rather than cached: the whole query costs 71 ms for 2,658 rows here, which is
+/// cheaper than any staleness rule would be to reason about. Only *measurements* are cached, keyed by
+/// version, so they cannot describe a package that has since been upgraded.
+///
+/// Every backend on the machine, not the first one found — the mistake that meant Stacer's users only
+/// ever saw one manager.
+#[tauri::command]
+pub(crate) fn packages_list(state: State<'_, AppState>) -> Result<Vec<pkg::Package>> {
+    let mut all = Vec::new();
+    let mut store = state.measured.lock().unwrap_or_else(|e| e.into_inner());
+
+    for backend in pkg::backends() {
+        let manager = backend.manager();
+        let mut packages = backend.installed()?;
+
+        // Attach what has already been measured, and forget entries for versions no longer installed
+        // so the store cannot grow one entry per upgrade forever.
+        let current: Vec<(String, String)> = packages
+            .iter()
+            .map(|p| (p.id.clone(), p.version.clone()))
+            .collect();
+        store.retain_current(manager, &current);
+
+        for package in &mut packages {
+            package.measured = store.get(manager, &package.id, &package.version);
+        }
+        all.extend(packages);
+    }
+
+    // Largest first: this is a storage tool, and the answer to "what is taking up room" should not
+    // need a click to reveal.
+    all.sort_unstable_by_key(|p| std::cmp::Reverse(p.display_bytes()));
+    Ok(all)
+}
+
+/// Walk one package's files and report what is really on disk. `PKG-1`, decision D2.
+///
+/// Deliberately per-package and on demand. Measuring the whole inventory means stat-ing every file
+/// dpkg knows about — several hundred thousand here — and the recorded figure is good enough to sort
+/// by, so this answers the question the user actually asks: *is this one as big as it claims?*
+///
+/// The result is **added to** the package, never substituted for the manager's own number. See
+/// `nix_core::pkg` for why the two are different metrics and why their difference is not "growth".
+#[tauri::command]
+pub(crate) fn package_measure(
+    state: State<'_, AppState>,
+    manager: PkgManager,
+    id: String,
+    version: String,
+) -> Result<pkg::Measured> {
+    let backends = pkg::backends();
+    let backend = backends
+        .iter()
+        .find(|b| b.manager() == manager)
+        .ok_or_else(|| AppError::unsupported(manager.name()))?;
+
+    let measured = backend.measure(&id)?;
+
+    let mut store = state.measured.lock().unwrap_or_else(|e| e.into_inner());
+    store.put(manager, &id, &version, measured);
+    // A cache that cannot be written is a missed optimisation, not a failed measurement: the figure is
+    // already in hand, so it is returned and the failure only logged.
+    if let Err(e) = store.save() {
+        tracing::warn!(error = %e, "could not persist a measured package size");
+    }
+
+    Ok(measured)
+}
+
+/// What removing these packages would actually do. `PKG-2`.
+///
+/// The manager's own simulation is the authority on the cascade — guessing at dependencies would be
+/// both wrong and dangerous — and nix classifies the result itself, because `apt-get -s remove bash`
+/// exits **zero** while planning to take `ubuntu-desktop` and the display manager with it.
+///
+/// Nothing is invoked for an empty selection. Stacer ran `pkexec snap remove` with no arguments on
+/// every uninstall: a password prompt for a command that could not work.
+#[tauri::command]
+pub(crate) fn packages_removal_preview(ids: Vec<String>) -> Result<pkg::RemovalPreview> {
+    if ids.is_empty() {
+        return Ok(pkg::RemovalPreview::default());
+    }
+    let backends = pkg::backends();
+    let backend = backends
+        .first()
+        .ok_or_else(|| AppError::unsupported("a package manager"))?;
+    backend.removal_preview(&ids)
+}
+
+/// Remove the selected packages, and then check what actually happened. `PKG-2`.
+///
+/// Three things are worth knowing about this path.
+///
+/// **The preview shown to the user is not what authorises the removal.** It is re-derived here, and
+/// then the helper re-derives it a third time and applies the fatal rules itself — see
+/// [`Op::RemoveSelected`]. A stale preview cannot approve anything, which is the same reasoning that
+/// makes the reclaim pipeline re-stat every path before acting.
+///
+/// **A refusal is refused here too, before a password is ever asked for.** Prompting for
+/// administrator rights and *then* declining would train users to approve prompts.
+///
+/// **The outcome is measured, not assumed.** apt exits once for the whole transaction, so the
+/// inventory is read before and after and diffed against the preview.
+#[tauri::command]
+pub(crate) fn packages_remove(ids: Vec<String>) -> Result<pkg::RemovalOutcome> {
+    if ids.is_empty() {
+        return Ok(pkg::RemovalOutcome::default());
+    }
+
+    let backends = pkg::backends();
+    let backend = backends
+        .first()
+        .ok_or_else(|| AppError::unsupported("a package manager"))?;
+
+    // Re-derived rather than carried from the frontend: a preview the user is looking at may describe
+    // a machine that has since changed.
+    let preview = backend.removal_preview(&ids)?;
+    if let Some(refusal) = preview.refusal() {
+        return Err(AppError::refused(format!(
+            "{} {}.",
+            refusal.package,
+            refusal.concern.explanation()
+        ))
+        .with_remedy(match preview.manual_command() {
+            Some(command) => format!(
+                "nix will not carry this out. If you are certain, run it yourself: {command}"
+            ),
+            None => "nix will not carry this out.".to_string(),
+        }));
+    }
+
+    let before: Vec<String> = backend.installed()?.into_iter().map(|p| p.id).collect();
+
+    let transport = helper::Transport::production()?;
+    let mut client = helper::Client::connect(&transport)?;
+    match client.request(&Op::RemoveSelected { packages: ids })? {
+        OpResult::Reclaimed { .. } => {}
+        other => {
+            return Err(AppError::internal(format!(
+                "The helper answered a removal with {other:?}"
+            )));
+        }
+    }
+
+    let after: Vec<String> = backend.installed()?.into_iter().map(|p| p.id).collect();
+    Ok(pkg::RemovalOutcome::compare(&preview, &before, &after))
+}
+
+/// Configuration left behind by packages removed without `--purge`. `STO-9`, surfaced here too.
+#[tauri::command]
+pub(crate) fn packages_residual() -> Result<Vec<pkg::ResidualConfig>> {
+    let mut all = Vec::new();
+    for backend in pkg::backends() {
+        all.extend(backend.residual_config()?);
+    }
+    all.sort_unstable_by_key(|r| std::cmp::Reverse(r.bytes));
+    Ok(all)
+}
+
+// ---- File search. `SYS-2` ----
+
+/// Search results, in batches.
+pub(crate) const EVENT_SEARCH_HITS: &str = "search://hits";
+
+/// How a search ended: counts, and whether it was truncated or cancelled.
+///
+/// Separate from `Completion`, which carries only an id — and the counts are the point here. A search
+/// that examined 400,000 paths and could not read 12 of them has told the user something a bare "done"
+/// does not.
+pub(crate) const EVENT_SEARCH_DONE: &str = "search://done";
+
+/// Search for files, streaming results as they are found. `SYS-2`.
+///
+/// Returns an operation id immediately; hits arrive on [`EVENT_SEARCH_HITS`] in batches and the run
+/// finishes with a `Completion`. Cancellable through the same registry as every other long operation.
+///
+/// **No row cap.** Stacer displayed `foundFiles.mid(1, 2000)` and said so in its label; a search that
+/// silently stops at a round number makes "is it in there?" unanswerable. A `limit` may be asked for,
+/// and when it bites the summary says `truncated`.
+///
+/// **Unprivileged.** Stacer ran `find` through `sudoExec` for roots outside `$HOME`, so looking for a
+/// file meant a password prompt and a root-privileged traversal. Searching is a read: this walks as
+/// the user and reports what it could not enter.
+#[tauri::command]
+pub(crate) fn search_start(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    query: search::Query,
+) -> OperationId {
+    let (id, token) = state.operations.start();
+
+    std::thread::spawn(move || {
+        let emitter = app.clone();
+        let outcome = search::run(&query, &token, move |batch| {
+            // A failed emit means the window is gone, which is a reason to stop walking rather than to
+            // keep filling a channel nobody is reading.
+            emitter
+                .emit(EVENT_SEARCH_HITS, &SearchBatch { id, hits: batch })
+                .is_ok()
+        });
+
+        let completion = match outcome {
+            Ok(summary) => {
+                let cancelled = summary.cancelled;
+                if let Err(e) = app.emit(EVENT_SEARCH_DONE, &SearchDone { id, summary }) {
+                    tracing::warn!(error = %e, "could not emit search summary");
+                }
+                if cancelled {
+                    Completion::Cancelled { id }
+                } else {
+                    Completion::Done { id }
+                }
+            }
+            Err(error) => Completion::Failed { id, error },
+        };
+        if let Err(e) = app.emit(EVENT_DONE, &completion) {
+            tracing::warn!(error = %e, "could not emit search completion");
+        }
+    });
+
+    id
+}
+
+/// A batch of search results, tagged with the operation that produced it.
+///
+/// Tagged because two searches can overlap — the user starts one, changes their mind, starts another —
+/// and results from the abandoned one must not appear in the new one's list.
+#[derive(Debug, Clone, Serialize)]
+struct SearchBatch {
+    id: OperationId,
+    hits: Vec<search::Hit>,
+}
+
+/// A finished search, with its counts.
+#[derive(Debug, Clone, Serialize)]
+struct SearchDone {
+    id: OperationId,
+    summary: search::Summary,
+}
+
+// ---- APT repositories. `PKG-5` ----
+
+/// Every repository apt reads, in both formats. `PKG-5`.
+///
+/// Includes deb822 `.sources` files, which Stacer's `*.list` glob could not see — two repositories on
+/// this machine, with their `Signed-By` keyrings. Excludes the `.save` and `.distUpgrade` leftovers:
+/// `/etc/apt/sources.list.d` holds 53 files here and apt reads 18 of them.
+#[tauri::command]
+pub(crate) fn apt_sources_list() -> Vec<apt_sources::Repository> {
+    apt_sources::list()
+}
+
+/// Turn a repository on or off. `PKG-5`.
+///
+/// Addressed by file and **position** — line number for a one-line entry, stanza index for deb822.
+/// Never by matching the entry's text, which is how an edit ends up on a different line.
+#[tauri::command]
+pub(crate) fn apt_source_set_enabled(
+    at: apt_sources::Location,
+    enabled: bool,
+) -> Result<Vec<apt_sources::Repository>> {
+    let mut file = apt_sources::open(&at.file)?;
+    file.set_enabled(at.index, enabled)?;
+    write_apt_source_file(&file)?;
+    Ok(apt_sources::list())
+}
+
+/// Remove a repository entry. `PKG-5`.
+#[tauri::command]
+pub(crate) fn apt_source_remove(at: apt_sources::Location) -> Result<Vec<apt_sources::Repository>> {
+    let mut file = apt_sources::open(&at.file)?;
+    file.remove(at.index)?;
+    write_apt_source_file(&file)?;
+    Ok(apt_sources::list())
+}
+
+/// Send a modified source file to the helper.
+///
+/// The file's own `original` is the precondition, so an edit made in a terminal since it was read is
+/// reported rather than overwritten. Validated here for an actionable error before any password
+/// prompt; validated again in the helper because that is where it matters.
+fn write_apt_source_file(file: &apt_sources::SourceFile) -> Result<()> {
+    let content = file.render();
+    apt_sources::validate_document(file.format, &content)?;
+    if !file.is_modified() {
+        return Ok(());
+    }
+
+    let transport = helper::Transport::production()?;
+    let mut client = helper::Client::connect(&transport)?;
+    match client.request(&Op::WriteAptSource {
+        path: file.path.clone(),
+        expected: file.original().to_string(),
+        content,
+    })? {
+        OpResult::Reclaimed { .. } => Ok(()),
+        other => Err(AppError::internal(format!(
+            "The helper answered a repository write with {other:?}"
+        ))),
+    }
+}
+
+// ---- Startup applications. `PKG-4` ----
+
+/// Everything that starts at login, from both autostart directories. `PKG-4`.
+///
+/// Includes `/etc/xdg/autostart`, which Stacer never read — 42 of the 44 entries on this machine, and
+/// the ones a user is most likely to want to stop. Entries with `NoDisplay=true` are included too:
+/// 40 of the 42 set it, and filtering them out would leave a startup screen showing almost nothing.
+#[tauri::command]
+pub(crate) fn autostart_list() -> Result<Vec<autostart::Entry>> {
+    autostart::list()
+}
+
+/// Turn a startup entry on or off. `PKG-4`.
+///
+/// **Never privileged, and never writes to `/etc`.** A system entry is turned off by writing a copy
+/// into the user's autostart directory, which XDG defines as shadowing the system file — the
+/// specification already solved the problem that would otherwise have needed the helper.
+#[tauri::command]
+pub(crate) fn autostart_set_enabled(id: String, enabled: bool) -> Result<Vec<autostart::Entry>> {
+    autostart::set_enabled(&id, enabled)?;
+    autostart::list()
+}
+
+/// Add a startup entry of your own. `PKG-4`.
+#[tauri::command]
+pub(crate) fn autostart_add(
+    name: String,
+    exec: String,
+    comment: Option<String>,
+) -> Result<Vec<autostart::Entry>> {
+    autostart::add(&name, &exec, comment.as_deref())?;
+    autostart::list()
+}
+
+/// Delete one of your own startup entries. `PKG-4`.
+///
+/// A system entry cannot be deleted — the file belongs to a package — but it can be turned off.
+#[tauri::command]
+pub(crate) fn autostart_remove(id: String) -> Result<Vec<autostart::Entry>> {
+    autostart::remove(&id)?;
+    autostart::list()
+}
+
+// ---- The hosts file. `SYS-1` ----
+
+/// Read and parse `/etc/hosts`.
+///
+/// Unprivileged: the file is world-readable, so only writing needs the helper. The document carries
+/// the exact bytes it was read from, which is what makes the save a compare-and-swap.
+#[tauri::command]
+pub(crate) fn hosts_load() -> Result<hosts::HostsFile> {
+    hosts::HostsFile::load()
+}
+
+/// Write `/etc/hosts`, refusing if it changed since it was read. `SYS-1`.
+///
+/// The frontend sends the whole document back, `original` included. That field is not decoration: it
+/// is the precondition, and the helper re-reads the file and compares against it byte for byte. An
+/// edit made in a terminal while this window was open is therefore **detected and reported**, never
+/// silently overwritten.
+///
+/// Validated here as well as in the helper. Here it gives the user an error they can act on before a
+/// password prompt; there it is what stops the operation being an arbitrary privileged write.
+#[tauri::command]
+pub(crate) fn hosts_save(file: hosts::HostsFile) -> Result<hosts::HostsFile> {
+    let content = file.render();
+    hosts::validate_document(&content)?;
+
+    // Nothing to do is not worth a password prompt.
+    if content == file.original {
+        return Ok(file);
+    }
+
+    let transport = helper::Transport::production()?;
+    let mut client = helper::Client::connect(&transport)?;
+    match client.request(&Op::WriteHostsFile {
+        expected: file.original.clone(),
+        content,
+    })? {
+        OpResult::Reclaimed { .. } => {}
+        other => {
+            return Err(AppError::internal(format!(
+                "The helper answered a hosts write with {other:?}"
+            )));
+        }
+    }
+
+    // Re-read rather than assuming the render is now the file. It is also how the caller gets a
+    // document whose `original` matches disk, so a second save in the same session has a valid
+    // precondition instead of the one from before the first.
+    hosts::HostsFile::load()
+}
+
+// ---- The process table. `PRC-1`, `PRC-2` ----
+
+/// Every process, busiest first. `PRC-1`.
+///
+/// Poll this while the view is open; nothing samples otherwise (§P9). The first call reports zero CPU
+/// for everything, because one reading of a cumulative counter is not a rate — the second call onward
+/// carries real instantaneous figures.
+///
+/// The interval is measured here rather than assumed, so a slow frame or a paused laptop produces a
+/// correct percentage rather than one scaled by a tick length that did not happen.
+#[tauri::command]
+pub(crate) fn processes_list(state: State<'_, AppState>) -> Vec<process::Process> {
+    let mut held = match state.processes.lock() {
+        Ok(held) => held,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let (sampler, last) = &mut *held;
+
+    let elapsed = last.map_or(process::TABLE_INTERVAL, |at| {
+        // A floor, so a caller polling twice in quick succession cannot divide a tiny interval into a
+        // huge percentage.
+        at.elapsed().max(std::time::Duration::from_millis(100))
+    });
+    *last = Some(std::time::Instant::now());
+    sampler.sample(elapsed)
+}
+
+/// Forget the process table's delta state. `PRC-1`.
+///
+/// Called when the view unmounts. Without it, reopening the view after ten minutes would compute a
+/// percentage from a ten-minute-old counter over an assumed interval — a figure that is neither
+/// instantaneous nor an average, which is the worst of both.
+#[tauri::command]
+pub(crate) fn processes_forget(state: State<'_, AppState>) {
+    let mut held = match state.processes.lock() {
+        Ok(held) => held,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    *held = (process::ProcessSampler::new(), None);
+}
+
+/// Send a signal to a process. `PRC-2`.
+///
+/// Tries as the current user first and only escalates on `EPERM`, so signalling your own processes
+/// never prompts — and a prompt, when it appears, means the process really does belong to someone
+/// else. `state` is the process's state as the table last saw it, used to refuse a zombie before
+/// anything is sent.
+#[tauri::command]
+pub(crate) fn process_signal(
+    pid: u32,
+    signal: nix_core::signal::Signal,
+    process_state: process::ProcessState,
+) -> Result<()> {
+    match nix_core::signal::send(pid, process_state, signal) {
+        Ok(()) => Ok(()),
+        // Only a permission failure is worth escalating. A missing process or a zombie is a fact, not
+        // an authorisation problem, and asking for a password would not change it.
+        Err(error) if error.code == ErrorCode::AuthDenied => {
+            let transport = helper::Transport::production()?;
+            let mut client = helper::Client::connect(&transport)?;
+            match client.request(&Op::SignalProcess { pid, signal })? {
+                OpResult::Reclaimed { .. } => Ok(()),
+                other => Err(AppError::internal(format!(
+                    "The helper answered a signal with {other:?}"
+                ))),
+            }
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Change a process's niceness. `PRC-2`.
+///
+/// Escalates on permission failure for the same reason, and that is more often here: lowering a
+/// niceness is privileged even for your own process.
+#[tauri::command]
+pub(crate) fn process_renice(pid: u32, niceness: i32) -> Result<()> {
+    match nix_core::signal::renice(pid, niceness) {
+        Ok(()) => Ok(()),
+        Err(error) if error.code == ErrorCode::AuthDenied => {
+            let transport = helper::Transport::production()?;
+            let mut client = helper::Client::connect(&transport)?;
+            match client.request(&Op::ReniceProcess { pid, niceness })? {
+                OpResult::Reclaimed { .. } => Ok(()),
+                other => Err(AppError::internal(format!(
+                    "The helper answered a renice with {other:?}"
+                ))),
+            }
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Everything readable about one process. `PRC-3`.
+///
+/// Never escalates. Most of this is unreadable for another user's process by design, and the sections
+/// that are missing say why — including that nix deliberately will not ask for administrator rights to
+/// read someone else's environment, which routinely holds credentials.
+#[tauri::command]
+pub(crate) fn process_detail(pid: u32) -> detail::Detail {
+    detail::read(std::path::Path::new("/proc"), pid)
+}
+
+/// The process tree with subtree totals. `PRC-4`.
+///
+/// Built from the same sample the table uses, so the two cannot disagree about who is busy.
+#[tauri::command]
+pub(crate) fn process_tree(state: State<'_, AppState>) -> Vec<detail::TreeNode> {
+    detail::tree(&processes_list(state))
+}
+
+// ---- Live metrics. `MON-1` ----
+
+/// Event carrying one metrics reading.
+pub(crate) const EVENT_METRICS_TICK: &str = "metrics://tick";
+
+/// Start sampling and return the history that already exists.
+///
+/// The return value is the acceptance criterion made concrete: a view mounting late is handed the
+/// whole window rather than starting its charts from an empty axis. Sampling continues until
+/// [`metrics_unsubscribe`], and nothing samples before this is called (§P9).
+#[tauri::command]
+pub(crate) fn metrics_subscribe(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Vec<metrics::Reading> {
+    let mut held = match state.metrics_subscription.lock() {
+        Ok(held) => held,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+
+    if held.is_none() {
+        // Registered before subscribing, so the very first reading is delivered rather than missed.
+        let emitter = app.clone();
+        state.metrics.observe(move |reading| {
+            if let Err(e) = emitter.emit(EVENT_METRICS_TICK, reading) {
+                tracing::warn!(error = %e, "could not emit a metrics reading");
+            }
+        });
+        *held = Some(state.metrics.subscribe());
+    }
+
+    state.metrics.history()
+}
+
+/// Stop sampling.
+///
+/// Idempotent, and the only way sampling stops — which is deliberate: the subscription's `Drop` is
+/// what pauses the pipeline, so there is no path where the state says "not sampling" while the worker
+/// carries on.
+#[tauri::command]
+pub(crate) fn metrics_unsubscribe(state: State<'_, AppState>) {
+    let mut held = match state.metrics_subscription.lock() {
+        Ok(held) => held,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    *held = None;
+}
+
+/// The window as it stands, without subscribing.
+#[tauri::command]
+pub(crate) fn metrics_history(state: State<'_, AppState>) -> Vec<metrics::Reading> {
+    state.metrics.history()
+}
+
+/// Whether the pipeline is currently sampling. Shown in About, so §P9 is visible rather than claimed.
+#[tauri::command]
+pub(crate) fn metrics_sampling(state: State<'_, AppState>) -> bool {
+    state.metrics.is_sampling()
+}
+
+/// Evaluate the alert rules against the latest reading. `MON-6`.
+///
+/// Returns only rules that **just** crossed — a rule already firing, one inside its cooldown, and one
+/// that merely cleared all return nothing, which is the acceptance criterion. Called by the frontend
+/// on each tick, so the state machine lives in one place rather than being reimplemented there.
+#[tauri::command]
+pub(crate) fn alerts_evaluate(state: State<'_, AppState>) -> Vec<metrics::Metric> {
+    let rules = state.settings().alert_rules;
+    if rules.is_empty() {
+        return Vec::new();
+    }
+    let Some(reading) = state.metrics.latest() else {
+        return Vec::new();
+    };
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
+
+    let mut alerts = match state.alerts.lock() {
+        Ok(alerts) => alerts,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+
+    let mut fired = Vec::new();
+    for rule in &rules {
+        let Some(value) = value_for(&rule.metric, &reading) else {
+            continue;
+        };
+        if alerts.evaluate(rule, value, now).notifies() {
+            fired.push(rule.metric.clone());
+        }
+    }
+    fired
+}
+
+/// The current value of a metric, or `None` when this machine cannot answer.
+///
+/// A rule watching a filesystem that has been unmounted, or a temperature on hardware that has none,
+/// evaluates to nothing rather than to zero — which would fire a free-space alert on a disk that is
+/// simply not there.
+fn value_for(metric: &metrics::Metric, reading: &metrics::Reading) -> Option<f64> {
+    match metric {
+        metrics::Metric::CpuUsage => Some(f64::from(reading.cpu.total)),
+        metrics::Metric::MemoryPressure => reading.memory.pressure().map(f64::from),
+        metrics::Metric::SwapPressure => reading.memory.swap_pressure().map(f64::from),
+        metrics::Metric::Temperature => reading
+            .sensors
+            .temperatures
+            .iter()
+            .map(|t| f64::from(t.celsius))
+            .fold(None, |best: Option<f64>, c| {
+                Some(best.map_or(c, |b| b.max(c)))
+            }),
+        metrics::Metric::DiskUsage { mount } => nixfs::filesystems(false)
+            .ok()?
+            .into_iter()
+            .find(|fs| fs.mount_point.to_string_lossy() == *mount)
+            .and_then(|fs| fs.used_fraction()),
+        metrics::Metric::DiskSpaceRemaining { mount } => nixfs::filesystems(false)
+            .ok()?
+            .into_iter()
+            .find(|fs| fs.mount_point.to_string_lossy() == *mount)
+            .map(|fs| {
+                #[allow(clippy::cast_precision_loss)]
+                let available = fs.available as f64;
+                available
+            }),
+    }
+}
+
+// ---- Growth history. `STO-16` ----
+
+/// Every stored sample, oldest first.
+#[tauri::command]
+pub(crate) fn history_samples() -> Vec<history::Sample> {
+    history::History::discover()
+        .map(|h| h.samples())
+        .unwrap_or_default()
+}
+
+/// Samples bucketed onto an interval, with gaps left as gaps.
+///
+/// `interval_seconds` defaults to a day. Nothing here interpolates: a missing interval means the
+/// machine was off, on battery, or nix was not running, and inventing a point would turn "we do not
+/// know" into a number someone might act on (§P8).
+#[tauri::command]
+pub(crate) fn history_series(interval_seconds: Option<i64>) -> history::Series {
+    let samples = history_samples();
+    history::series(&samples, interval_seconds.unwrap_or(86_400))
+}
+
+#[tauri::command]
+pub(crate) fn history_growth(since_seconds: i64, limit: Option<usize>) -> history::GrowthReport {
+    let samples = history_samples();
+    history::GrowthReport {
+        total: history::growth(&samples, since_seconds),
+        directories: history::fastest_growing(&samples, since_seconds, limit.unwrap_or(10)),
+    }
+}
+
+/// Delete all collected history. Offered because data a user cannot delete is data taken from them.
+#[tauri::command]
+pub(crate) fn history_clear() -> Result<()> {
+    history::History::discover()?.clear()
+}
+
+/// Take a sample now, from the cached scan rather than by walking.
+///
+/// The timer's job does a full scan; this exists so a user can seed a series without waiting for
+/// tomorrow, and so the feature can be seen working. It refuses rather than guessing when there is no
+/// scan to sample.
+#[tauri::command]
+pub(crate) fn history_snapshot_now(path: PathBuf) -> Result<history::Sample> {
+    let cached = Cache::discover()?.load(&path).ok_or_else(|| {
+        AppError::new(
+            ErrorCode::Unsupported,
+            "There is no scan to take a sample from.",
+        )
+        .with_remedy("Scan a directory first, then record a sample of it.")
+    })?;
+
+    let at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let sample = history::Sample::from_scan(at, &cached.result, 40);
+    history::History::discover()?.record(&sample)?;
+    Ok(sample)
+}
+
+// ---- The collection timer. `STO-16`, decision D5 ----
+
+/// The path of the running executable, which is what a unit's `ExecStart` has to name.
+fn executable() -> PathBuf {
+    std::env::current_exe().unwrap_or_else(|_| PathBuf::from("nix"))
+}
+
+/// What is installed, and whether it is current.
+///
+/// Called at startup so an orphaned unit from a previous version is *detected* rather than left
+/// failing silently every day.
+#[tauri::command]
+pub(crate) fn timer_state() -> timer::State {
+    timer::state(&executable())
+}
+
+/// Install the units and enable the timer. Installing over an orphan is how an orphan is repaired.
+#[tauri::command]
+pub(crate) fn timer_install() -> Result<timer::State> {
+    timer::install(&executable())
+}
+
+/// Disable the timer, remove the units, and delete the collected data.
+#[tauri::command]
+pub(crate) fn timer_uninstall() -> Result<timer::State> {
+    timer::uninstall(&executable())
+}
+
 /// Forget cached scans. Offered because a cache the user cannot clear is a cache they cannot trust.
 #[tauri::command]
 pub(crate) fn scan_cache_clear() -> Result<()> {
@@ -252,6 +1167,18 @@ pub(crate) fn home_directory() -> Result<PathBuf> {
         )
         .with_remedy("Set HOME and try again.")
     })
+}
+
+/// Snapshots holding space on copy-on-write filesystems. `STO-17`.
+///
+/// **Attribution only.** These are reported so their space lands in a named category rather than in
+/// `Unknown` — a user should be able to see that 40 GiB is held by snapper. nix does not offer to
+/// delete them: a snapper or Timeshift snapshot may be somebody's only route back from a bad
+/// upgrade, and that decision is not one to make on their behalf. Deleting them is backlog, behind
+/// explicit opt-in and its own design review.
+#[tauri::command]
+pub(crate) fn snapshots() -> Vec<Snapshot> {
+    cow::snapshots()
 }
 
 /// What could be reclaimed, and at what cost. `STO-3`.

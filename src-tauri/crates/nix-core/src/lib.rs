@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! Core library for nix: the space model, filesystem scanners, and metric samplers.
 //!
 //! This crate deliberately has **no GUI and no Tauri dependency**, so that everything it does can
@@ -29,6 +32,7 @@
 //! |---|---|---|
 //! | [`space`] | 1.1 | the space model and its invariants |
 //! | [`fs`] | 1.2 | mount enumeration, per-filesystem accounting, btrfs honesty |
+//! | [`cow`] | STO-17 | copy-on-write sharing, so a reclaim estimate is never overstated |
 //! | [`scan`] | 1.3 | streaming, cancellable, parallel walker |
 //! | [`cache`] | 1.4 | scan persistence, so the explorer opens on the last result |
 //! | [`watch`] | 1.15 | inotify staleness watching over the largest directories |
@@ -38,22 +42,37 @@
 //!
 //! Next: `reclaim` (1.8–1.9).
 
+pub mod apt_sources;
+pub mod autostart;
 pub mod budget;
 pub mod cache;
 pub mod caps;
+pub mod cow;
+pub mod detail;
 pub mod error;
+pub mod find;
 pub mod fixture;
 pub mod fs;
 pub mod helper;
+pub mod history;
+pub mod hosts;
+pub mod journal;
 pub mod logging;
+pub mod metrics;
 pub mod op;
 pub mod paths;
+pub mod pkg;
+pub mod process;
 pub mod protect;
 pub mod reclaim;
 pub mod scan;
+pub mod search;
 pub mod settings;
+pub mod signal;
 pub mod space;
+pub mod timer;
 pub mod trash;
+pub mod units;
 pub mod watch;
 
 /// Crate version, surfaced so the app and helper can verify they were built together.
@@ -92,16 +111,136 @@ mod tests {
         assert!(!VERSION.is_empty());
     }
 
-    /// The dependency rule from `docs/ARCHITECTURE.md`, asserted rather than trusted: this crate
-    /// must not reach for a GUI toolkit. If someone adds `tauri` to `nix-core`, this fails.
+    /// Two Rust types with the same name generate the same TypeScript file, and ts-rs silently lets
+    /// the second overwrite the first — so one type ends up with no binding at all while the code
+    /// still compiles. That happened once, with `caps::Snapshot` clobbering `cow::Snapshot`, and it
+    /// only surfaced because a binding was noticed missing. This makes it a build failure instead.
+    #[test]
+    fn no_two_exported_types_share_a_name() {
+        use std::collections::HashMap;
+
+        let mut seen: HashMap<String, Vec<String>> = HashMap::new();
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+
+        fn walk(dir: &std::path::Path, found: &mut Vec<(String, String)>) {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return;
+            };
+            for entry in entries.filter_map(std::result::Result::ok) {
+                let path = entry.path();
+                if path.is_dir() {
+                    walk(&path, found);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    let Ok(source) = std::fs::read_to_string(&path) else {
+                        continue;
+                    };
+                    // A type is exported when a `#[ts(export...)]` attribute precedes it.
+                    let lines: Vec<&str> = source.lines().collect();
+                    for (i, line) in lines.iter().enumerate() {
+                        if !line.trim_start().starts_with("#[ts(export") {
+                            continue;
+                        }
+                        // An explicit `rename` decides the exported name, and is how a genuine clash
+                        // is *resolved* — so a guard that ignores it reports the resolved case as
+                        // still broken. `autostart::Entry` is renamed to `AutostartEntry` for exactly
+                        // this reason, and this test failed on it until it learned to look.
+                        if let Some(renamed) = line
+                            .split_once("rename = \"")
+                            .and_then(|(_, rest)| rest.split_once('"'))
+                            .map(|(name, _)| name)
+                        {
+                            found.push((renamed.to_string(), path.display().to_string()));
+                            continue;
+                        }
+
+                        // The declaration is the next line that declares a type.
+                        for next in lines.iter().skip(i + 1).take(6) {
+                            if let Some(name) = next
+                                .split_whitespace()
+                                .skip_while(|w| *w != "struct" && *w != "enum")
+                                .nth(1)
+                            {
+                                let name = name
+                                    .trim_end_matches(|c: char| !c.is_alphanumeric() && c != '_');
+                                if !name.is_empty() {
+                                    found.push((name.to_string(), path.display().to_string()));
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut found = Vec::new();
+        walk(&root, &mut found);
+        assert!(
+            found.len() > 20,
+            "the scan found only {} exported types",
+            found.len()
+        );
+
+        for (name, file) in found {
+            seen.entry(name).or_default().push(file);
+        }
+
+        let clashes: Vec<_> = seen.iter().filter(|(_, files)| files.len() > 1).collect();
+        assert!(
+            clashes.is_empty(),
+            "these type names are exported more than once, so their bindings overwrite each \
+             other: {clashes:?}"
+        );
+    }
+
+    /// The dependency rule from `docs/ARCHITECTURE.md`, asserted rather than trusted: this crate must
+    /// not reach for a GUI toolkit. If someone adds `tauri` to `nix-core`, this fails.
+    ///
+    /// # Why this reads declarations rather than the whole file
+    ///
+    /// It used to be `manifest.contains(forbidden)` over the raw text, which includes **comments** —
+    /// so a comment explaining *why* a dependency is gated behind a feature only `nix-app` enables
+    /// tripped it. A guard that a comment can fail is a guard people route around by rewording
+    /// comments, which is strictly worse than no guard, because the next reader believes it.
+    ///
+    /// So the manifest is read as what it is: comments stripped, and only lines inside a dependency
+    /// table considered.
     #[test]
     fn core_has_no_gui_dependency() {
         let manifest = include_str!("../Cargo.toml");
+        let mut in_dependencies = false;
+        let mut declarations: Vec<&str> = Vec::new();
+
+        for line in manifest.lines() {
+            // Strip a trailing comment. No dependency line contains a `#`, so this is exact enough.
+            let code = line.split('#').next().unwrap_or_default().trim();
+            if code.is_empty() {
+                continue;
+            }
+
+            if let Some(table) = code.strip_prefix('[').and_then(|t| t.strip_suffix(']')) {
+                // `[dependencies]`, `[dev-dependencies]`, `[target.'…'.dependencies]`.
+                in_dependencies = table.ends_with("dependencies");
+                continue;
+            }
+            if in_dependencies {
+                declarations.push(code);
+            }
+        }
+
+        assert!(
+            !declarations.is_empty(),
+            "no dependency declarations were found, so this test is checking nothing"
+        );
+
         for forbidden in ["tauri", "gtk", "webkit", "nix-app"] {
-            assert!(
-                !manifest.contains(forbidden),
-                "nix-core must not depend on {forbidden} — see docs/ARCHITECTURE.md"
-            );
+            for declaration in &declarations {
+                assert!(
+                    !declaration.contains(forbidden),
+                    "nix-core must not depend on {forbidden} — see docs/ARCHITECTURE.md \
+                     (in: {declaration})"
+                );
+            }
         }
     }
 }

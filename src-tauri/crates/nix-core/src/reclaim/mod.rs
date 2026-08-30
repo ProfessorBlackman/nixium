@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! Reclaiming space. Tasks 1.8 (`STO-4`) and 1.9 (`STO-3`).
 //!
 //! # The pipeline is the point
@@ -26,20 +29,37 @@
 //!   rather than acted on. This is also what makes it safe for the explorer to serve a cached tree
 //!   (decision D6): stale data can misinform a reader, but it cannot misdirect a deletion.
 
+mod artifacts;
+mod caches;
+mod containers;
+mod kernels;
+mod logs;
+mod packages;
 mod registry;
+mod snaps;
 
+pub use artifacts::{BuildArtifactCategory, PackageStoreCategory};
+pub use caches::AppCacheCategory;
+pub use containers::ContainerCategory;
+pub use kernels::{OldKernelCategory, ResidualConfigCategory};
+pub use logs::{JournalCategory, LogCategory};
+pub use packages::PackageCacheCategory;
 pub use registry::{Candidate, Category, Registry, TrashCategory};
+pub use snaps::{FlatpakUnusedCategory, SnapRevisionCategory};
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::cow::{self, CowMap};
 use crate::error::{AppError, ErrorCode, Result};
+use crate::helper;
 use crate::op::CancelToken;
 use crate::protect::{Guard, Refusal};
-use crate::space::{ReclaimMethod, Safety};
+use crate::space::{Advisory, ReclaimMethod, Reclaimable, Safety};
 use crate::trash;
 
 /// Proof that a preview was computed and shown.
@@ -47,7 +67,8 @@ use crate::trash;
 /// The only way to obtain one is [`preview`]. It carries the identity of the set it describes, so
 /// [`execute`] can refuse a selection the user was never shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(transparent)]
+// No `serde(transparent)`: a single-field newtype already serialises as its inner value in JSON, and
+// the attribute made ts-rs warn on every build without changing anything. See `op::OperationId`.
 #[ts(export, type = "number")]
 pub struct Ticket(u64);
 
@@ -77,6 +98,12 @@ pub struct PreviewItem {
     pub cost: Option<String>,
     /// The category that proposed it.
     pub category: String,
+    /// How much of `bytes` will actually come back.
+    ///
+    /// [`Reclaimable::Exact`] for the ordinary case. On a copy-on-write filesystem where extents may
+    /// be shared with a snapshot this is qualified, and the UI must show the caveat beside the size
+    /// rather than presenting the number bare.
+    pub reclaimable: Reclaimable,
     /// Size at preview time, so execution can detect a change underneath it.
     #[ts(type = "number")]
     fingerprint: u64,
@@ -96,15 +123,41 @@ impl PreviewItem {
 pub struct Preview {
     pub ticket: Ticket,
     pub items: Vec<PreviewItem>,
-    /// Total if everything offered were reclaimed.
+    /// Total if everything offered were reclaimed, taking every stated size at face value.
     #[ts(type = "number")]
     pub total_bytes: u64,
+    /// The part of [`Preview::total_bytes`] nix is willing to **promise**.
+    ///
+    /// Lower than the total whenever some entry sits on a copy-on-write filesystem and its
+    /// exclusivity could not be proven. Those entries contribute nothing here, because a total is a
+    /// promise and a promise assembled from maybes is not one. When the two figures differ, the UI
+    /// must lead with this one.
+    #[ts(type = "number")]
+    pub promisable_bytes: u64,
     /// Total of only the entries safe enough to pre-check.
     #[ts(type = "number")]
     pub safe_bytes: u64,
+    /// The part of the total that would be **moved to the trash** rather than removed.
+    ///
+    /// Trashing frees nothing on its own: the trash sits on the same filesystem as its contents,
+    /// because the move is a rename. So this much of [`Preview::total_bytes`] needs the trash emptying
+    /// before it comes back, and the UI has to say so *before* the user commits — not only afterwards
+    /// in the report.
+    #[ts(type = "number")]
+    pub trashable_bytes: u64,
     /// Things a category proposed that the protection rules refused. Shown, not hidden: a user
     /// should be able to see that nix declined to touch something.
     pub refused: Vec<Refusal>,
+    /// Space nix can account for but will not act on. Deliberately **not** part of
+    /// [`Preview::total_bytes`] or [`Preview::promisable_bytes`]: those are promises about what this
+    /// preview would reclaim, and an advisory is by definition something it will not.
+    pub advisories: Vec<Advisory>,
+    /// What each category involved actually does, keyed by its label. `PLT-7`.
+    ///
+    /// Carried on the preview rather than fetched separately so the explanation cannot be missing for
+    /// a category that is present — they are built from the same pass.
+    #[ts(as = "std::collections::HashMap<String, String>")]
+    pub explanations: BTreeMap<String, String>,
 }
 
 impl Preview {
@@ -119,6 +172,21 @@ impl Preview {
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
+
+    /// Whether any entry's size is qualified, so the headline total is an upper bound.
+    #[must_use]
+    pub fn total_is_upper_bound(&self) -> bool {
+        self.promisable_bytes < self.total_bytes
+    }
+
+    /// Entries whose stated size cannot be taken at face value.
+    #[must_use]
+    pub fn qualified(&self) -> Vec<&PreviewItem> {
+        self.items
+            .iter()
+            .filter(|i| !i.reclaimable.is_exact())
+            .collect()
+    }
 }
 
 /// What happened to one item.
@@ -126,11 +194,33 @@ impl Preview {
 #[serde(tag = "outcome", rename_all = "snake_case")]
 #[ts(export)]
 pub enum ItemOutcome {
-    /// Reclaimed, freeing this many bytes.
+    /// Removed outright. These bytes are back.
     Reclaimed {
         #[ts(type = "number")]
         id: u64,
         path: PathBuf,
+        #[ts(type = "number")]
+        bytes: u64,
+    },
+    /// Moved to the trash. Recoverable, and **not yet freed**.
+    ///
+    /// # Why this is a separate outcome
+    ///
+    /// The trash lives on the same filesystem as what it holds — it has to, because the move is a
+    /// rename and a rename cannot cross a filesystem. So trashing a 9.8 GiB cache changes the user's
+    /// free space by nothing at all.
+    ///
+    /// Counting that as "freed" is precisely the claim this project exists not to make, and it was
+    /// being made: `Report::freed` included trashed bytes, so nix reported 9.8 GiB reclaimed while
+    /// `measured_delta` — taken from `statvfs` either side — reported approximately zero.
+    ///
+    /// Reversibility is still the right default for a user's files. What was wrong was the wording,
+    /// not the method.
+    Trashed {
+        #[ts(type = "number")]
+        id: u64,
+        path: PathBuf,
+        /// Bytes now sitting in the trash, waiting to be emptied.
         #[ts(type = "number")]
         bytes: u64,
     },
@@ -151,12 +241,28 @@ pub enum ItemOutcome {
 }
 
 impl ItemOutcome {
+    /// Bytes genuinely returned to the filesystem. Trashed bytes are **not** counted.
     #[must_use]
     pub const fn bytes_freed(&self) -> u64 {
         match self {
             Self::Reclaimed { bytes, .. } => *bytes,
             _ => 0,
         }
+    }
+
+    /// Bytes moved to the trash and recoverable, which the filesystem has not given back.
+    #[must_use]
+    pub const fn bytes_trashed(&self) -> u64 {
+        match self {
+            Self::Trashed { bytes, .. } => *bytes,
+            _ => 0,
+        }
+    }
+
+    /// Whether the item was acted on at all, however it was accounted for.
+    #[must_use]
+    pub const fn acted(&self) -> bool {
+        matches!(self, Self::Reclaimed { .. } | Self::Trashed { .. })
     }
 }
 
@@ -165,9 +271,17 @@ impl ItemOutcome {
 #[ts(export)]
 pub struct Report {
     pub outcomes: Vec<ItemOutcome>,
-    /// Sum of what was reclaimed, as nix counted it.
+    /// Sum of what was actually removed. **Excludes anything moved to the trash**, which is still on
+    /// the filesystem and so has not been freed.
     #[ts(type = "number")]
     pub freed: u64,
+    /// Sum of what was moved to the trash: recoverable, and not yet freed.
+    ///
+    /// Reported separately rather than added to [`Report::freed`] because the trash is on the same
+    /// filesystem as its contents by necessity, so trashing changes free space by nothing. Emptying
+    /// the trash is what reclaims it, and the UI says so whenever this is non-zero.
+    #[ts(type = "number")]
+    pub trashed: u64,
     /// Change in the filesystem's used bytes, measured independently before and after.
     ///
     /// This is how the specification's "within 2%" criterion is *checked* rather than asserted: nix
@@ -195,8 +309,10 @@ impl Report {
     /// Build a report from what happened, deriving the counts once.
     fn new(outcomes: Vec<ItemOutcome>, measured_delta: Option<u64>, cancelled: bool) -> Self {
         let freed = outcomes.iter().map(ItemOutcome::bytes_freed).sum();
+        let trashed = outcomes.iter().map(ItemOutcome::bytes_trashed).sum();
         Self {
-            reclaimed_count: Self::count(&outcomes, |o| matches!(o, ItemOutcome::Reclaimed { .. })),
+            trashed,
+            reclaimed_count: Self::count(&outcomes, ItemOutcome::acted),
             skipped_count: Self::count(&outcomes, |o| matches!(o, ItemOutcome::Skipped { .. })),
             failed_count: Self::count(&outcomes, |o| matches!(o, ItemOutcome::Failed { .. })),
             measurement_agrees: measured_delta.map(|measured| agrees(freed, measured)),
@@ -246,6 +362,20 @@ impl Session {
         Self::default()
     }
 
+    /// The last preview's headline figures, if one has been computed this session.
+    ///
+    /// Exists so the dashboard can lead with "X reclaimable" **without running a preview on mount**,
+    /// which `MON-2` forbids: a dashboard that scans when you look at it is a dashboard you avoid
+    /// looking at. `None` until something has actually asked, and the caller says when.
+    #[must_use]
+    pub fn last_preview(&self) -> Option<(u64, u64)> {
+        self.outstanding
+            .lock()
+            .ok()?
+            .as_ref()
+            .map(|preview| (preview.total_bytes, preview.promisable_bytes))
+    }
+
     /// Compute what would happen, and hold it for execution.
     pub fn preview(
         &self,
@@ -257,16 +387,27 @@ impl Session {
         let mut refused = Vec::new();
         let mut next_id = 0u64;
 
+        // Built once per preview, not once per candidate: resolving a path's filesystem walks the
+        // whole mount table. On a machine with no copy-on-write filesystem the map answers `None`
+        // for everything and the qualification costs nothing.
+        let cow_map = CowMap::build();
+
         for candidate in registry.collect(token)? {
             token.check()?;
 
-            // The protection rules get the first word, before anything is offered.
-            match guard.verdict(&candidate.path) {
-                crate::protect::Verdict::Protected(r) => {
-                    refused.push(r);
-                    continue;
+            // The protection rules get the first word, before anything is offered — for anything
+            // that names a path. A logical entry's path is a description like
+            // `kernel 6.8.0-136-generic`, and asking the path rules about it produces a refusal
+            // about relative paths rather than a judgement about safety. What protects those is the
+            // helper re-deriving its own eligible set; see [`ReclaimMethod::acts_on_path`].
+            if candidate.method.acts_on_path() {
+                match guard.verdict(&candidate.path) {
+                    crate::protect::Verdict::Protected(r) => {
+                        refused.push(r);
+                        continue;
+                    }
+                    crate::protect::Verdict::Allowed => {}
                 }
-                crate::protect::Verdict::Allowed => {}
             }
 
             // Invariant 3 of the space model, enforced here rather than trusted: a `Never` rating
@@ -280,6 +421,16 @@ impl Session {
                 continue;
             }
 
+            // `STO-17`: on a copy-on-write filesystem the stated size may not be what comes back,
+            // so the estimate is qualified here rather than asserted. A category may already have
+            // qualified its own candidate — a snapshot-aware one knows more than this does — and
+            // that judgement wins over the filesystem-level guess.
+            let reclaimable = if candidate.reclaimable.is_exact() {
+                cow::reclaimable_for(&candidate.path, cow_map.kind_for(&candidate.path))
+            } else {
+                candidate.reclaimable
+            };
+
             items.push(PreviewItem {
                 id: next_id,
                 fingerprint: fingerprint(&candidate.path),
@@ -290,6 +441,7 @@ impl Session {
                 method: candidate.method,
                 cost: candidate.cost,
                 category: candidate.category,
+                reclaimable,
             });
             next_id += 1;
         }
@@ -297,16 +449,42 @@ impl Session {
         // Largest first: the decision a user is making is about where the space is.
         items.sort_by_key(|i| std::cmp::Reverse(i.bytes));
 
+        // One entry per category actually present in this preview. Built here, from the same pass, so
+        // an item can never appear with no explanation available for it.
+        let explanations: BTreeMap<String, String> = registry
+            .categories()
+            .filter(|category| items.iter().any(|item| item.category == category.label()))
+            .map(|category| {
+                (
+                    category.label().to_string(),
+                    category.explains().to_string(),
+                )
+            })
+            .collect();
+
         let preview = Preview {
             ticket: Ticket::mint(),
+            explanations,
             total_bytes: items.iter().map(|i| i.bytes).sum(),
+            // Only what can actually be promised: a qualified entry contributes its proven
+            // exclusive portion, or nothing when none is proven.
+            promisable_bytes: items
+                .iter()
+                .map(|i| i.reclaimable.promisable(i.bytes))
+                .sum(),
             safe_bytes: items
                 .iter()
                 .filter(|i| i.safety.pre_checkable())
-                .map(|i| i.bytes)
+                .map(|i| i.reclaimable.promisable(i.bytes))
+                .sum(),
+            trashable_bytes: items
+                .iter()
+                .filter(|i| matches!(i.method, ReclaimMethod::MoveToTrash { .. }))
+                .map(|i| i.reclaimable.promisable(i.bytes))
                 .sum(),
             items,
             refused,
+            advisories: registry.collect_advisories(),
         };
 
         if let Ok(mut outstanding) = self.outstanding.lock() {
@@ -367,6 +545,8 @@ impl Session {
         let mut outcomes = Vec::with_capacity(chosen.len());
         let total = chosen.len();
         let mut cancelled = false;
+        // One privileged session for the whole batch, opened only if something actually needs it.
+        let mut elevation = Elevation::production();
 
         for (index, item) in chosen.iter().enumerate() {
             if token.is_cancelled() {
@@ -374,7 +554,7 @@ impl Session {
                 break;
             }
             progress(index, total);
-            outcomes.push(reclaim_one(item, guard));
+            outcomes.push(reclaim_one(item, guard, &mut elevation));
         }
 
         let after = chosen.first().and_then(|item| filesystem_used(&item.path));
@@ -428,38 +608,203 @@ fn fingerprint(path: &std::path::Path) -> u64 {
         .unwrap_or(0)
 }
 
+/// Whether a batch may escalate at all.
+///
+/// # Why this is an explicit choice and not a default
+///
+/// `Elevation` used to derive `Default`, and `Elevation::default()` escalated through polkit on first
+/// need. That made the dangerous option the easy one, and it cost a real kernel: a unit test called
+/// `Elevation::default()` expecting elevation to fail because no helper was installed. Once the helper
+/// *was* installed for manual testing, `auth_admin_keep` had already cached the authorisation from an
+/// earlier prompt — so the test escalated silently, the helper agreed the package was a removable old
+/// kernel, and removed it.
+///
+/// Every safety rule held. The mistake was that reaching root took no deliberate act.
+///
+/// So there is no `Default`. A caller has to name which it wants, and the only places that name
+/// [`Elevate::WhenNeeded`] are the ones a person would look at when asking "what can run as root".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Elevate {
+    /// Escalate through polkit when something first needs it.
+    WhenNeeded,
+    /// Never escalate. Every privileged operation fails with a plain reason.
+    ///
+    /// What tests use, so no test can reach root whatever happens to be installed on the machine
+    /// running it.
+    Never,
+}
+
+/// A privileged session, opened lazily and kept for the whole execution.
+///
+/// **Opened once, not once per item.** Stacer re-ran every individual command under `pkexec`, so
+/// toggling five services meant five authentication dialogs; one session for a batch is the whole
+/// point of the helper's design.
+struct Elevation {
+    how: Elevate,
+    client: Option<helper::Client>,
+    /// The failure that prevented elevation, so every item can report the same honest reason
+    /// instead of each retrying and prompting again.
+    failure: Option<AppError>,
+}
+
+impl Elevation {
+    /// Escalate through polkit on first need. **This is the one that can run things as root.**
+    const fn production() -> Self {
+        Self {
+            how: Elevate::WhenNeeded,
+            client: None,
+            failure: None,
+        }
+    }
+
+    /// Refuse to escalate. Privileged operations fail; nothing runs as root.
+    ///
+    /// `cfg(test)` deliberately: in a release build this does not exist, so [`Elevation::production`]
+    /// is the only way to construct one at all and there is nothing to choose wrongly.
+    #[cfg(test)]
+    const fn never() -> Self {
+        Self {
+            how: Elevate::Never,
+            client: None,
+            failure: None,
+        }
+    }
+
+    /// The client, opening a session on first use.
+    fn client(&mut self) -> std::result::Result<&mut helper::Client, AppError> {
+        if self.how == Elevate::Never {
+            return Err(AppError::new(
+                ErrorCode::HelperUnavailable,
+                "This operation needs administrator rights, and elevation is disabled here.",
+            )
+            .with_remedy("Nothing was changed."));
+        }
+        if self.client.is_none() && self.failure.is_none() {
+            match helper::Transport::production().and_then(|t| helper::Client::connect(&t)) {
+                Ok(client) => self.client = Some(client),
+                Err(e) => self.failure = Some(e),
+            }
+        }
+        match (&mut self.client, &self.failure) {
+            (Some(client), _) => Ok(client),
+            (None, Some(e)) => Err(e.clone()),
+            (None, None) => Err(AppError::internal("Elevation reached an impossible state.")),
+        }
+    }
+}
+
+/// Attribute a directory to a space category from its path. `STO-16`.
+///
+/// # Why this exists separately from the reclaim categories
+///
+/// A scan leaves every entry as [`crate::space::Category::Unknown`], because the scanner's job is to
+/// measure and attribution is somebody else's. The reclaim categories know better, but they only run
+/// when a user asks to reclaim — so a growth *sample* taken from a scan had category totals consisting
+/// of one number called "unknown", which is not the "category totals" the specification asked for.
+///
+/// This reuses the signals the reclaim categories already establish, in the same order of confidence:
+/// a corroborated build-artifact marker first, then known locations. It is a *best effort* by design.
+/// Anything unrecognised stays `Unknown` rather than being guessed into a bucket, because a trend built
+/// on invented attribution is worse than an honest "unattributed" line.
+#[must_use]
+pub fn classify(path: &std::path::Path) -> crate::space::Category {
+    use crate::space::Category;
+
+    // Strongest signal: a marker file a build tool must have written.
+    if artifacts::corroborate(path).is_some() {
+        return Category::BuildArtifact;
+    }
+
+    let under = |root: Option<PathBuf>| -> bool {
+        root.is_some_and(|r| path.starts_with(&r) && path != r.as_path())
+    };
+    let home_relative = |relative: &str| -> bool {
+        crate::paths::home_dir().is_some_and(|h| path.starts_with(h.join(relative)))
+    };
+
+    if under(crate::paths::cache_dir().and_then(|c| c.parent().map(std::path::Path::to_path_buf))) {
+        return Category::AppCache;
+    }
+    if home_relative(".local/share/Trash") {
+        return Category::Trash;
+    }
+    // Package stores that live outside the cache directory, which `STO-14` enumerates.
+    for store in [
+        ".npm",
+        ".cargo",
+        ".m2",
+        ".gradle",
+        "go/pkg/mod",
+        ".local/share/pnpm",
+    ] {
+        if home_relative(store) {
+            return Category::PackageCache;
+        }
+    }
+    if path.starts_with("/var/log/journal") {
+        return Category::Journal;
+    }
+    if path.starts_with("/var/log") {
+        return Category::Log;
+    }
+    if path.starts_with("/var/cache") {
+        return Category::PackageCache;
+    }
+    if path.starts_with("/var/lib/docker") || path.starts_with("/var/lib/containers") {
+        return Category::ContainerImage;
+    }
+    if path.starts_with("/var/lib/snapd") || path.starts_with("/var/lib/flatpak") {
+        return Category::PackagePayload;
+    }
+    if crate::paths::home_dir().is_some_and(|h| path.starts_with(&h)) {
+        return Category::UserFile;
+    }
+
+    Category::Unknown
+}
+
 /// Reclaim one item, with both guards applied.
-fn reclaim_one(item: &PreviewItem, guard: &Guard) -> ItemOutcome {
+fn reclaim_one(item: &PreviewItem, guard: &Guard, elevation: &mut Elevation) -> ItemOutcome {
     // Re-checked at execution time, because the user's exclusions may have changed since preview.
-    if let Some(refusal) = guard.verdict(&item.path).refusal() {
-        return ItemOutcome::Skipped {
-            id: item.id,
-            path: item.path.clone(),
-            reason: refusal.reason.clone(),
-        };
+    // Path rules apply to paths; a logical entry is guarded by the helper instead.
+    if item.method.acts_on_path() {
+        if let Some(refusal) = guard.verdict(&item.path).refusal() {
+            return ItemOutcome::Skipped {
+                id: item.id,
+                path: item.path.clone(),
+                reason: refusal.reason.clone(),
+            };
+        }
     }
 
     // Time-of-check/time-of-use: a path that changed since the preview is not the thing the user
     // agreed to.
-    let current = fingerprint(&item.path);
-    if current == 0 {
-        return ItemOutcome::Skipped {
-            id: item.id,
-            path: item.path.clone(),
-            reason: "It is already gone.".to_string(),
-        };
-    }
-    if current != item.fingerprint {
-        return ItemOutcome::Skipped {
-            id: item.id,
-            path: item.path.clone(),
-            reason: "It changed since the preview, so it was left alone.".to_string(),
-        };
+    //
+    // Only meaningful when the path is the target. A logical entry — a kernel, a snap revision — has
+    // a descriptive path that was never on disk, and re-checking it would find nothing and skip
+    // every such item as "already gone". Those are guarded by the helper re-deriving its eligible
+    // set at the moment it acts, which is a stronger check than this one.
+    if item.method.acts_on_path() {
+        let current = fingerprint(&item.path);
+        if current == 0 {
+            return ItemOutcome::Skipped {
+                id: item.id,
+                path: item.path.clone(),
+                reason: "It is already gone.".to_string(),
+            };
+        }
+        if current != item.fingerprint {
+            return ItemOutcome::Skipped {
+                id: item.id,
+                path: item.path.clone(),
+                reason: "It changed since the preview, so it was left alone.".to_string(),
+            };
+        }
     }
 
     match &item.method {
         ReclaimMethod::MoveToTrash { path } => match trash::trash(path) {
-            Ok(trashed) => ItemOutcome::Reclaimed {
+            Ok(trashed) => ItemOutcome::Trashed {
                 id: item.id,
                 path: item.path.clone(),
                 // What the trash reports, not what the preview guessed.
@@ -486,8 +831,76 @@ fn reclaim_one(item: &PreviewItem, guard: &Guard) -> ItemOutcome {
                 },
             }
         }
-        // Every other method arrives with the category that needs it, each reviewed on its own.
-        // Refusing loudly is the correct behaviour for a method nothing has implemented yet.
+        // The three privileged methods. Each is a single typed helper operation — no path, name or
+        // limit assembled here becomes free-form text on a root command line.
+        ReclaimMethod::SystemFile { kind, path } => privileged(
+            item,
+            elevation,
+            helper::Op::ReclaimFile {
+                kind: *kind,
+                path: path.clone(),
+            },
+        ),
+        ReclaimMethod::Packages { kind, names } => privileged(
+            item,
+            elevation,
+            helper::Op::RemovePackages {
+                kind: *kind,
+                packages: names.clone(),
+            },
+        ),
+        ReclaimMethod::PackageManager { manager } => privileged(
+            item,
+            elevation,
+            helper::Op::PackageManagerClean { manager: *manager },
+        ),
+        ReclaimMethod::JournalVacuum { limit } => {
+            privileged(item, elevation, helper::Op::JournalVacuum { limit: *limit })
+        }
+        // `STO-12`. The helper re-derives snapd's disabled set and refuses anything outside it, so
+        // naming the active revision here achieves nothing.
+        ReclaimMethod::SnapRevision { package, revision } => privileged(
+            item,
+            elevation,
+            helper::Op::RemoveSnapRevision {
+                package: package.clone(),
+                revision: revision.clone(),
+            },
+        ),
+        // Carries nothing, because the command is fixed and the decision is flatpak's.
+        ReclaimMethod::FlatpakUnused => {
+            privileged(item, elevation, helper::Op::FlatpakUninstallUnused)
+        }
+        // `STO-13`. Unprivileged: nix talks to Docker as the user, and refuses to run privileged
+        // Docker commands it has no way to exercise. So these do not go through the helper.
+        ReclaimMethod::ContainerPrune { scope } => match containers::prune(*scope) {
+            Ok(bytes) => ItemOutcome::Reclaimed {
+                id: item.id,
+                path: item.path.clone(),
+                // What Docker reports it reclaimed, not what the preview estimated.
+                bytes,
+            },
+            Err(error) => ItemOutcome::Failed {
+                id: item.id,
+                path: item.path.clone(),
+                error,
+            },
+        },
+        ReclaimMethod::ContainerVolume { name } => match containers::remove_volume(name) {
+            Ok(bytes) => ItemOutcome::Reclaimed {
+                id: item.id,
+                path: item.path.clone(),
+                bytes,
+            },
+            Err(error) => ItemOutcome::Failed {
+                id: item.id,
+                path: item.path.clone(),
+                error,
+            },
+        },
+
+        // Methods that arrive with a later category. Refusing loudly is correct for something
+        // nothing has implemented yet.
         other => ItemOutcome::Failed {
             id: item.id,
             path: item.path.clone(),
@@ -500,10 +913,52 @@ fn reclaim_one(item: &PreviewItem, guard: &Guard) -> ItemOutcome {
     }
 }
 
+/// Run one privileged operation and turn its answer into an outcome.
+fn privileged(item: &PreviewItem, elevation: &mut Elevation, op: helper::Op) -> ItemOutcome {
+    let failed = |error: AppError| ItemOutcome::Failed {
+        id: item.id,
+        path: item.path.clone(),
+        error,
+    };
+
+    let client = match elevation.client() {
+        Ok(client) => client,
+        Err(e) => return failed(e),
+    };
+
+    match client.request(&op) {
+        Ok(helper::OpResult::Reclaimed { bytes }) => ItemOutcome::Reclaimed {
+            id: item.id,
+            path: item.path.clone(),
+            // What the helper measured, not what the preview estimated.
+            bytes,
+        },
+        Ok(other) => failed(AppError::internal(format!(
+            "The helper answered a reclaim with {other:?}"
+        ))),
+        Err(e) => failed(e),
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    /// A ticket travels as a bare number, for the same reason and with the same history as
+    /// [`crate::op::OperationId`]: `#[serde(transparent)]` was redundant and made ts-rs warn on every
+    /// build. Asserted rather than assumed, because the whole preview-to-execute handshake is carried
+    /// by this value.
+    #[test]
+    fn a_ticket_is_a_bare_number_on_the_wire() {
+        let ticket = Ticket::mint();
+        let encoded = serde_json::to_string(&ticket).unwrap();
+        assert!(
+            encoded.chars().all(|c| c.is_ascii_digit()),
+            "a ticket must be a bare number, got {encoded}"
+        );
+        assert_eq!(serde_json::from_str::<Ticket>(&encoded).unwrap(), ticket);
+    }
     use crate::trash::TrashDir;
 
     struct Sandbox {
@@ -640,6 +1095,10 @@ mod tests {
             fn label(&self) -> &'static str {
                 "Test"
             }
+
+            fn explains(&self) -> &'static str {
+                "A category used only by tests."
+            }
             fn space_category(&self) -> crate::space::Category {
                 crate::space::Category::Unknown
             }
@@ -654,6 +1113,7 @@ mod tests {
                     },
                     cost: None,
                     category: "test".into(),
+                    reclaimable: Reclaimable::Exact,
                 }])
             }
         }
@@ -684,6 +1144,10 @@ mod tests {
             fn label(&self) -> &'static str {
                 "Never"
             }
+
+            fn explains(&self) -> &'static str {
+                "A category used only by tests."
+            }
             fn space_category(&self) -> crate::space::Category {
                 crate::space::Category::Unknown
             }
@@ -698,6 +1162,7 @@ mod tests {
                     },
                     cost: None,
                     category: "never".into(),
+                    reclaimable: Reclaimable::Exact,
                 }])
             }
         }
@@ -750,6 +1215,10 @@ mod tests {
             fn label(&self) -> &'static str {
                 "File"
             }
+
+            fn explains(&self) -> &'static str {
+                "A category used only by tests."
+            }
             fn space_category(&self) -> crate::space::Category {
                 crate::space::Category::UserFile
             }
@@ -764,6 +1233,7 @@ mod tests {
                     },
                     cost: Some("It goes to the trash.".into()),
                     category: "file".into(),
+                    reclaimable: Reclaimable::Exact,
                 }])
             }
         }
@@ -806,6 +1276,10 @@ mod tests {
             fn label(&self) -> &'static str {
                 "File"
             }
+
+            fn explains(&self) -> &'static str {
+                "A category used only by tests."
+            }
             fn space_category(&self) -> crate::space::Category {
                 crate::space::Category::UserFile
             }
@@ -820,6 +1294,7 @@ mod tests {
                     },
                     cost: Some("It goes to the trash.".into()),
                     category: "file".into(),
+                    reclaimable: Reclaimable::Exact,
                 }])
             }
         }
@@ -1013,6 +1488,135 @@ mod tests {
 
     // ---------- ordering and presentation ----------
 
+    // ---------- STO-17: a qualified estimate is never presented as a promise ----------
+
+    /// The acceptance criterion. A candidate whose exclusivity cannot be proven must not contribute
+    /// to the promisable total, however large its stated size.
+    #[test]
+    fn an_unprovable_candidate_contributes_nothing_to_the_promise() {
+        struct Shared;
+        impl Category for Shared {
+            fn id(&self) -> &'static str {
+                "shared"
+            }
+            fn label(&self) -> &'static str {
+                "Shared"
+            }
+
+            fn explains(&self) -> &'static str {
+                "A category used only by tests."
+            }
+            fn space_category(&self) -> crate::space::Category {
+                crate::space::Category::UserFile
+            }
+            fn candidates(&self, _: &CancelToken) -> Result<Vec<Candidate>> {
+                let path = std::env::temp_dir().join("nix-shared-candidate");
+                std::fs::write(&path, vec![b'x'; 4096]).ok();
+                Ok(vec![Candidate {
+                    path: path.clone(),
+                    label: "On a snapshotted volume".into(),
+                    bytes: 8_589_934_592,
+                    safety: Safety::Review,
+                    method: ReclaimMethod::MoveToTrash { path },
+                    cost: Some("It goes to the trash.".into()),
+                    category: "shared".into(),
+                    // The category knows its own sharing, and that judgement wins over the
+                    // filesystem-level guess.
+                    reclaimable: Reclaimable::AtMost {
+                        exclusive: None,
+                        reason: "Shared with a snapshot.".into(),
+                    },
+                }])
+            }
+        }
+
+        let mut registry = Registry::new();
+        registry.register(Box::new(Shared));
+        let preview = Session::new()
+            .preview(&registry, &guard(), &CancelToken::new())
+            .unwrap();
+
+        assert_eq!(preview.items.len(), 1);
+        assert_eq!(
+            preview.total_bytes, 8_589_934_592,
+            "the stated size is still shown"
+        );
+        assert_eq!(
+            preview.promisable_bytes, 0,
+            "but nothing may be promised, because nothing was proven"
+        );
+        assert!(preview.total_is_upper_bound());
+        assert_eq!(preview.qualified().len(), 1);
+        assert!(preview.items[0].reclaimable.caveat().is_some());
+    }
+
+    #[test]
+    fn a_partly_shared_candidate_promises_only_its_exclusive_part() {
+        struct Partly;
+        impl Category for Partly {
+            fn id(&self) -> &'static str {
+                "partly"
+            }
+            fn label(&self) -> &'static str {
+                "Partly"
+            }
+
+            fn explains(&self) -> &'static str {
+                "A category used only by tests."
+            }
+            fn space_category(&self) -> crate::space::Category {
+                crate::space::Category::UserFile
+            }
+            fn candidates(&self, _: &CancelToken) -> Result<Vec<Candidate>> {
+                let path = std::env::temp_dir().join("nix-partly-candidate");
+                std::fs::write(&path, vec![b'x'; 4096]).ok();
+                Ok(vec![Candidate {
+                    path: path.clone(),
+                    label: "Mostly shared".into(),
+                    bytes: 10_000_000_000,
+                    safety: Safety::Safe,
+                    method: ReclaimMethod::MoveToTrash { path },
+                    cost: None,
+                    category: "partly".into(),
+                    reclaimable: Reclaimable::AtMost {
+                        exclusive: Some(2_000_000_000),
+                        reason: "Most of this is shared with a snapshot.".into(),
+                    },
+                }])
+            }
+        }
+
+        let mut registry = Registry::new();
+        registry.register(Box::new(Partly));
+        let preview = Session::new()
+            .preview(&registry, &guard(), &CancelToken::new())
+            .unwrap();
+
+        assert_eq!(preview.promisable_bytes, 2_000_000_000);
+        assert_eq!(
+            preview.safe_bytes, 2_000_000_000,
+            "a pre-checked total must also be a promise, not a stated size"
+        );
+        assert!(preview.total_is_upper_bound());
+    }
+
+    #[test]
+    fn an_ordinary_candidate_is_exact_and_the_two_totals_agree() {
+        let sandbox = Sandbox::new("exact");
+        let registry = sandbox.registry(sandbox.filled_trash(2));
+        let preview = Session::new()
+            .preview(&registry, &guard(), &CancelToken::new())
+            .unwrap();
+
+        assert!(preview.items[0].reclaimable.is_exact());
+        assert_eq!(
+            preview.promisable_bytes, preview.total_bytes,
+            "on an ordinary filesystem there is nothing to qualify"
+        );
+        assert!(!preview.total_is_upper_bound());
+        assert!(preview.qualified().is_empty());
+    }
+
     #[test]
     fn items_are_ordered_largest_first() {
         struct Multi;
@@ -1022,6 +1626,10 @@ mod tests {
             }
             fn label(&self) -> &'static str {
                 "Multi"
+            }
+
+            fn explains(&self) -> &'static str {
+                "A category used only by tests."
             }
             fn space_category(&self) -> crate::space::Category {
                 crate::space::Category::AppCache
@@ -1040,6 +1648,7 @@ mod tests {
                         },
                         cost: None,
                         category: "multi".into(),
+                        reclaimable: Reclaimable::Exact,
                     })
                     .collect())
             }
@@ -1071,6 +1680,10 @@ mod tests {
             }
             fn label(&self) -> &'static str {
                 "Broken"
+            }
+
+            fn explains(&self) -> &'static str {
+                "A category used only by tests."
             }
             fn space_category(&self) -> crate::space::Category {
                 crate::space::Category::Unknown
@@ -1104,6 +1717,10 @@ mod tests {
             fn label(&self) -> &'static str {
                 "Unavailable"
             }
+
+            fn explains(&self) -> &'static str {
+                "A category used only by tests."
+            }
             fn space_category(&self) -> crate::space::Category {
                 crate::space::Category::Unknown
             }
@@ -1124,13 +1741,305 @@ mod tests {
     }
 
     #[test]
-    fn the_default_registry_holds_only_trash_in_m3() {
+    fn the_default_registry_holds_every_implemented_category() {
         let registry = Registry::with_defaults();
         assert_eq!(
             registry.ids(),
-            vec!["trash"],
-            "the pipeline is proven against one recoverable category before anything irreversible"
+            vec![
+                "trash",
+                "app_cache",
+                "rotated_logs",
+                "journal",
+                "package_cache",
+                "old_kernels",
+                "residual_config",
+                "snap_revisions",
+                "flatpak_unused",
+                "build_artifacts",
+                "package_stores",
+                "containers"
+            ],
         );
+        // Trash stays first: it is the category the pipeline was proven against, and the one whose
+        // consequences a user has already accepted.
+        assert_eq!(registry.ids().first(), Some(&"trash"));
+    }
+
+    /// Every registered category must be able to describe itself, or the UI has nothing to show.
+    #[test]
+    fn every_registered_category_is_self_describing() {
+        let registry = Registry::with_defaults();
+        let mut ids = std::collections::HashSet::new();
+        for id in registry.ids() {
+            assert!(!id.is_empty());
+            assert!(ids.insert(id), "duplicate category id {id}");
+            assert!(
+                id.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{id} should be a stable snake_case identifier"
+            );
+        }
+        assert_eq!(registry.len(), ids.len());
+    }
+
+    /// The guard itself, tested directly on the type.
+    ///
+    /// Deliberately *not* verified by breaking the guard and watching a test fail, which is this
+    /// project's usual practice. Disabling an escalation guard on a machine with a helper actually
+    /// installed is how the kernel was lost in the first place, and repeating it to prove a point
+    /// would be indefensible. This asserts the behaviour where it lives instead.
+    #[test]
+    fn refusing_elevation_never_opens_a_session() {
+        let mut elevation = Elevation::never();
+        let error = elevation
+            .client()
+            .expect_err("elevation must be refused outright");
+        assert_eq!(error.code, ErrorCode::HelperUnavailable);
+        assert!(
+            elevation.client.is_none(),
+            "no privileged process may be started at all"
+        );
+
+        // Asking twice must not start one either — a caller retrying is the obvious way a guard that
+        // only checked once would be defeated.
+        assert!(elevation.client().is_err());
+        assert!(elevation.client.is_none());
+    }
+
+    /// # Regression
+    ///
+    /// A unit test removed a real kernel from a real machine.
+    ///
+    /// It called `Elevation::default()` — which escalated through polkit on first need — expecting
+    /// that to fail because no helper was installed. Then the helper *was* installed, for manual
+    /// testing of the `pkexec` path, and `auth_admin_keep` had already cached the authorisation from
+    /// an earlier prompt. So the test escalated **silently**, the helper's own derivation agreed the
+    /// package was a removable old kernel, and `apt-get remove --purge -y` ran.
+    ///
+    /// Every safety rule held: the helper refused nothing it should have allowed and allowed nothing
+    /// outside its derived set. The defect was that reaching root required no deliberate act, and a
+    /// test fixture happened to name a package that existed.
+    ///
+    /// `Elevation` no longer implements `Default`. This asserts the consequence: with
+    /// [`Elevation::never`], every operation that would need root fails at elevation and nothing runs.
+    #[test]
+    fn no_privileged_operation_can_execute_under_test_elevation() {
+        use crate::space::{Manager, PruneScope, RemovableKind, VacuumLimit};
+
+        let privileged_methods = [
+            ReclaimMethod::Packages {
+                kind: RemovableKind::OldKernel,
+                names: vec!["nix-test-not-a-real-kernel".into()],
+            },
+            ReclaimMethod::Packages {
+                kind: RemovableKind::ResidualConfig,
+                names: vec!["nix-test-not-a-real-package".into()],
+            },
+            ReclaimMethod::PackageManager {
+                manager: Manager::Apt,
+            },
+            ReclaimMethod::JournalVacuum {
+                limit: VacuumLimit::Size { mebibytes: 1 },
+            },
+            ReclaimMethod::SnapRevision {
+                package: "nix-test-not-a-real-snap".into(),
+                revision: "1".into(),
+            },
+            ReclaimMethod::FlatpakUnused,
+        ];
+
+        for method in privileged_methods {
+            let item = PreviewItem {
+                id: 0,
+                path: std::path::PathBuf::from("logical test entry"),
+                label: "test".into(),
+                bytes: 1024,
+                safety: Safety::Review,
+                method: method.clone(),
+                cost: Some("test".into()),
+                category: "test".into(),
+                reclaimable: Reclaimable::Exact,
+                fingerprint: 0,
+            };
+
+            match reclaim_one(&item, &guard(), &mut Elevation::never()) {
+                ItemOutcome::Failed { error, .. } => assert_eq!(
+                    error.code,
+                    ErrorCode::HelperUnavailable,
+                    "{method:?} must fail at elevation, not somewhere further along"
+                ),
+                other => {
+                    panic!("{method:?} must not be carried out under test elevation, got {other:?}")
+                }
+            }
+        }
+
+        // `ContainerPrune` and `ContainerVolume` are deliberately absent: they do not go through the
+        // helper, because nix talks to Docker as the user. They are covered by their own tests, which
+        // is exactly why this list is written out rather than derived — a new privileged method has to
+        // be added here consciously.
+        let _ = PruneScope::BuildCache;
+    }
+
+    /// # Regression
+    ///
+    /// Every category that removes a *logical* object — a kernel, a snap revision — carries a
+    /// descriptive path like `kernel 6.8.0-136-generic` that is not meant to exist on disk. The
+    /// execution stage re-checked that path and, finding nothing, skipped the item as "already
+    /// gone". So old-kernel removal silently did nothing, and nothing noticed because the path needs
+    /// root and had only ever been exercised as far as the preview.
+    ///
+    /// This asserts the classification directly, and the test below asserts the behaviour.
+    #[test]
+    fn a_logical_method_is_not_guarded_by_a_path_that_never_existed() {
+        use crate::space::{Manager, RemovableKind, VacuumLimit};
+
+        // Logical: the path is a description, and the helper's re-derivation is the real guard.
+        for method in [
+            ReclaimMethod::Packages {
+                kind: RemovableKind::OldKernel,
+                names: vec!["nix-test-not-a-real-kernel".into()],
+            },
+            ReclaimMethod::SnapRevision {
+                package: "chromium".into(),
+                revision: "3499".into(),
+            },
+            ReclaimMethod::FlatpakUnused,
+            ReclaimMethod::PackageManager {
+                manager: Manager::Apt,
+            },
+            ReclaimMethod::JournalVacuum {
+                limit: VacuumLimit::Size { mebibytes: 200 },
+            },
+            ReclaimMethod::ContainerPrune {
+                scope: crate::space::PruneScope::BuildCache,
+            },
+            ReclaimMethod::ContainerVolume {
+                name: "data".into(),
+            },
+        ] {
+            assert!(
+                !method.acts_on_path(),
+                "{method:?} acts on a logical object, so a path fingerprint would skip it"
+            );
+        }
+
+        // Path-based: the path *is* the target, so re-checking it is the whole point.
+        for method in [
+            ReclaimMethod::MoveToTrash {
+                path: "/home/u/x".into(),
+            },
+            ReclaimMethod::Unlink {
+                path: "/home/u/x".into(),
+            },
+            ReclaimMethod::SystemFile {
+                kind: crate::space::ReclaimKind::RotatedLog,
+                path: "/var/log/x.1".into(),
+            },
+            ReclaimMethod::TrashEmpty {
+                volume: "/home/u".into(),
+            },
+        ] {
+            assert!(
+                method.acts_on_path(),
+                "{method:?} names the thing being removed, so it must be re-checked"
+            );
+        }
+    }
+
+    /// # Regression
+    ///
+    /// The same root cause as the test below, one stage earlier and with a wider blast radius: the
+    /// preview asked the *path* protection rules about a logical entry, and they answered "only
+    /// absolute paths can be checked". So every kernel, every residual-config set and all eighteen
+    /// snap revisions on the development machine — 4.5 GiB — were refused before a user could see
+    /// them, with a reason about relative paths that means nothing to anyone.
+    ///
+    /// The refusal list did its job and showed them, which is how this was found. Guarded here so a
+    /// future logical category cannot reintroduce it.
+    #[test]
+    fn a_logical_candidate_is_not_refused_for_having_a_descriptive_path() {
+        let mut registry = Registry::new();
+        registry.register(Box::new(LogicalOnly));
+
+        let session = Session::new();
+        let preview = session
+            .preview(&registry, &guard(), &CancelToken::new())
+            .unwrap();
+
+        assert!(
+            preview.refused.is_empty(),
+            "a logical entry has no path for the path rules to judge: {:?}",
+            preview.refused
+        );
+        assert_eq!(preview.items.len(), 1, "the candidate must be offered");
+        assert_eq!(preview.total_bytes, 1024);
+    }
+
+    /// A category shaped exactly like `OldKernelCategory`: a logical entry whose path is a label.
+    struct LogicalOnly;
+
+    impl Category for LogicalOnly {
+        fn id(&self) -> &'static str {
+            "logical_only"
+        }
+        fn label(&self) -> &'static str {
+            "Logical only"
+        }
+
+        fn explains(&self) -> &'static str {
+            "A category used only by tests."
+        }
+        fn space_category(&self) -> crate::space::Category {
+            crate::space::Category::PackagePayload
+        }
+        fn candidates(&self, _token: &CancelToken) -> Result<Vec<Candidate>> {
+            Ok(vec![Candidate {
+                path: std::path::PathBuf::from("kernel nix-test-not-a-real-kernel"),
+                label: "Linux nix-test-not-a-real-kernel".into(),
+                bytes: 1024,
+                safety: Safety::Review,
+                method: ReclaimMethod::Packages {
+                    kind: crate::space::RemovableKind::OldKernel,
+                    names: vec!["nix-test-not-a-real-kernel".into()],
+                },
+                cost: Some("You could not boot into it.".into()),
+                category: self.id().to_string(),
+                reclaimable: Reclaimable::Exact,
+            }])
+        }
+    }
+
+    /// The behaviour, not just the classification: a logical item must reach its method.
+    #[test]
+    fn a_logical_item_reaches_its_method_rather_than_being_skipped_as_missing() {
+        let item = PreviewItem {
+            id: 0,
+            // Exactly what `OldKernelCategory` produces: a description, not a path.
+            path: std::path::PathBuf::from("kernel nix-test-not-a-real-kernel"),
+            label: "Linux nix-test-not-a-real-kernel".into(),
+            bytes: 634_600_000,
+            safety: Safety::Review,
+            method: ReclaimMethod::Packages {
+                kind: crate::space::RemovableKind::OldKernel,
+                names: vec!["nix-test-not-a-real-kernel".into()],
+            },
+            cost: Some("cost".into()),
+            category: "old_kernels".into(),
+            reclaimable: Reclaimable::Exact,
+            fingerprint: 0,
+        };
+
+        // No helper is available in a test, so the attempt must fail at *elevation* — proving it got
+        // as far as trying. A `Skipped { "It is already gone." }` here is the bug this guards.
+        match reclaim_one(&item, &guard(), &mut Elevation::never()) {
+            ItemOutcome::Failed { .. } => {}
+            ItemOutcome::Skipped { reason, .. } => panic!(
+                "a kernel removal must reach the helper, not be skipped because its label is not a file: {reason}"
+            ),
+            ItemOutcome::Reclaimed { .. } | ItemOutcome::Trashed { .. } => {
+                panic!("nothing should succeed without a helper")
+            }
+        }
     }
 
     #[test]
@@ -1145,15 +2054,15 @@ mod tests {
             label: "x".into(),
             bytes: 4,
             safety: Safety::Safe,
-            method: ReclaimMethod::JournalVacuum {
-                limit: "100M".into(),
-            },
+            // A method with no implementation: nothing emits `Unlink`, and the dispatch refuses it.
+            method: ReclaimMethod::Unlink { path: file.clone() },
             cost: None,
             category: "test".into(),
+            reclaimable: Reclaimable::Exact,
             fingerprint: fingerprint(&file),
         };
 
-        match reclaim_one(&item, &guard()) {
+        match reclaim_one(&item, &guard(), &mut Elevation::never()) {
             ItemOutcome::Failed { error, .. } => {
                 assert_eq!(error.code, ErrorCode::Unsupported);
             }

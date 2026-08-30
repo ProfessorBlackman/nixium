@@ -3,4 +3,4 @@
 /**
  * How nix concluded what an entry is. Shown in the UI, so a user can judge our reasoning.
  */
-export type Provenance = { "by": "walked" } | { "by": "known_path", rule: string, } | { "by": "package_manager", backend: string, } | { "by": "project_marker", marker: string, } | { "by": "filesystem_tool", tool: string, };
+export type Provenance = { "by": "walked" } | { "by": "known_path", rule: string, } | { "by": "package_manager", backend: string, } | { "by": "project_marker", marker: string, } | { "by": "filesystem_tool", tool: string, } | { "by": "aggregated", count: number, };

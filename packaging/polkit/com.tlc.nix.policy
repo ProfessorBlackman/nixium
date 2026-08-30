@@ -17,7 +17,14 @@
   <vendor_url>https://github.com/tlc/nix</vendor_url>
 
   <action id="com.tlc.nix.helper">
-    <description>Manage system storage and services</description>
+    <!--
+      Kept truthful about what the helper can currently do. `pkaction --verbose` shows this, and it
+      said "and services" while the helper had no service operation at all — Phase 4 has not been
+      built. A privilege statement that over-claims is worse than a vague one, and widening it later
+      should be a visible diff that forces a reinstall rather than something already granted in
+      advance.
+    -->
+    <description>Inspect and reclaim system storage</description>
     <message>Authentication is required to inspect and reclaim system storage.</message>
     <defaults>
       <allow_any>auth_admin</allow_any>

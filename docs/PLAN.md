@@ -3,7 +3,9 @@
 **Status:** v0.1 · **Companion to:** [SPEC.md](SPEC.md) (draft v0.2, all decisions resolved) ·
 **Last updated:** 2026-08-26
 
-The spec says *what* and *why*. This says *in what order, and how we know it works*.
+The spec says *what* and *why*. This says *in what order, and how we know it works*. What actually
+went wrong along the way — thirty-six defects and obstacles, with resolutions and the guards that
+followed — is in [issues/](issues/README.md).
 
 ## Progress
 
@@ -13,8 +15,12 @@ The spec says *what* and *why*. This says *in what order, and how we know it wor
 | **M1** Foundation complete (Phase 0, tasks 0.1–0.11) | **complete** |
 | **M2** "Where did my disk go?" (tasks 1.1–1.6, 1.15) | **complete** |
 | **M3** First safe reclaim (tasks 1.7–1.10) | **complete** |
-| M4 Storage core complete (tasks 1.11–1.14) | next |
-| M5 – M9 | not started |
+| **M4** Storage core complete (tasks 1.11–1.14) — **Phase 1 done** | **complete** |
+| **M5** Storage depth (Phase 2) — **Phase 2 done** | **complete** |
+| **M6** Monitoring (Phase 3) — **Phase 3 done** | **complete** |
+| **M7** Processes & services (Phase 4) — **Phase 4 done** | **complete** |
+| **M8** Software & system tools (Phase 5) — **Phase 5 done** | **complete** |
+| **M9** 1.0 (Phase 6) | **in progress** — PLT-2 to PLT-7 done; **PLT-1 partly** (89 strings still hardcoded, down from 361) |
 
 Phase 0 shipped all eleven tasks: the three-crate workspace and quality gates, the error taxonomy,
 the IPC contract with its progress/cancellation primitive, the app shell with lazily-mounted views,
@@ -56,6 +62,207 @@ consequences the user has already accepted before anything irreversible is wired
 The gate that matters is enforced by the type system rather than by convention: `execute` requires a
 `Ticket` that only `preview` can mint, tied to the exact item set it described. A caller cannot
 construct one, reuse a superseded one, or widen the selection afterwards.
+
+M4 completed Phase 1. Five categories are registered — trash, application caches, rotated logs, the
+journal and package caches — and three of them go through the privileged helper. 289 tests, and CI
+green on all four jobs including the bundle.
+
+Growing the privileged surface was the substantial part, and the design decision worth carrying
+forward is that **an operation carries its category, and the helper re-derives which roots that
+category owns**. A caller cannot claim `/etc/shadow` is a rotated log, because `/etc` is not a root
+of any category. That is specification invariant 4 enforced on the privileged side rather than
+trusted from the unprivileged one. The reclaim methods were retyped at the same time: a manager is
+an enum and a vacuum limit is a number, so no caller-supplied text can reach a root command line.
+
+Task 1.14's harness now checks the specification's fourth success criterion — reported bytes within
+2% of the measured delta — end to end, rather than the claim being asserted in a document and never
+tested.
+
+M5 is under way. §6 orders Phase 2 by reclaim value, and the first two are done — with one swap:
+**STO-10 landed before STO-11**, because deciding which kernels are removable needs a package-query
+layer underneath it. On this development machine the result is **1.2 GiB of removable kernels**,
+correctly excluding the running one.
+
+STO-17 followed, completing the P0 items. Its acceptance criterion — no reclaim estimate for extents
+nix cannot prove are exclusive — is enforced by `space::Reclaimable`, and a `Preview` now carries
+both a stated total and a *promisable* one. The parsers for btrfs, ZFS and LVM are the weak link and
+are labelled as such: the development machine has none of those filesystems, so they are tested
+against documented formats rather than captured output.
+
+**STO-12** followed, and produced the largest single figure the project has found: **3.3 GiB of
+superseded snap revisions** across eighteen blobs — more than every removable kernel put together,
+and completely invisible in Stacer, which listed snaps by name with neither revisions nor sizes.
+
+Two things came out of it that were not planned for.
+
+The first is that `space::Reclaimable`, built in STO-17 for copy-on-write filesystems, turns out not
+to be about copy-on-write at all. Fifteen of those eighteen snap blobs have a link count above one,
+because snapd hard-links every download into its own cache — so the sharing problem exists on plain
+ext4. It appears a third time in flatpak, whose ostree deployments are hard links into a repository
+that outlives them. One type covers all three.
+
+For snaps that qualification was then *eliminated* rather than merely reported: the helper removes
+snapd's cache link along with the blob, selected by inode so the only file it can touch is the one
+snapd was just told to drop. That turns "up to 3.3 GiB, we cannot say how much" into an exact figure.
+
+The second was a defect, found by running the whole pipeline against this machine rather than each
+category in isolation. Every **logical** entry — one whose path is a description like
+`kernel 6.8.0-136-generic` rather than a file — was being refused at preview by the *path* protection
+rules, with the reason "only absolute paths can be checked". Both kernels, the residual-config set
+and all eighteen snap revisions, about 4.5 GiB, never reached the user; and had they reached
+execution, the time-of-check guard would have skipped them all as "already gone". So STO-11's headline
+result was real as a measurement and inert as a feature.
+
+`ReclaimMethod::acts_on_path` now separates the two cases: path rules and fingerprints apply to
+paths, while a logical entry is guarded by the helper re-deriving its own eligible set at the moment
+it acts — a stronger check, not a weaker one. Regression tests cover the classification, the
+execution path and the preview stage. What surfaced this was the refusal list being *shown* rather
+than swallowed, which is the argument for that design in one sentence.
+
+STO-12 also added `space::Advisory`, for space nix can measure but should not act on. The case that
+forced it: **699 MiB of unreferenced objects** in this machine's flatpak ostree repository, with no
+`ostree` binary present to prune them. Hiding those bytes would be the failure this project exists
+to avoid; shipping an automated privileged prune never once executed would be worse. An advisory
+reports the size, the reason and the command, and is deliberately excluded from both preview totals.
+
+**STO-18 was superseded rather than built**, on the evidence of measuring it first.
+
+The plan called for an incremental rescan keyed by (path, mtime, size), accepting at "under 10% of
+the initial scan time". Probing before designing showed that criterion is unreachable for any
+*correct* rescan: a directory's mtime does not move when a file inside it grows in place, so nothing
+stat-based can prove a subtree unchanged without walking it; `readdir` alone is 47% of a full scan;
+and complete inotify coverage of this machine's home directory would need 782,060 watches against a
+kernel ceiling of 524,228.
+
+The same probes found something better. On `/usr` — 422,330 files, 45,488 directories, eight cores —
+the parallel syscall floor is **344 ms** while the scan took **1.5 s**. The scan was never
+filesystem-bound; it was spending two thirds of its time building 454,129 tree nodes, one mutex
+acquisition at a time. Fixing that helps the *first* scan as much as the tenth, and needs no cache,
+no staleness tracking and no second code path to keep correct.
+
+Two wrong turns on the way, both measured rather than assumed — the first "fix" moved nodes up the
+recursion and copied 200 bytes per node per level (1.5 s → 1.3 s only); a later attempt wrote
+straight into the map under the lock and made it *worse* than the original at 2.3 s, because the
+map's rehashing then blocked every thread. The version that landed batches one append per directory
+and builds the map once, pre-sized:
+
+| | before | after |
+| --- | --- | --- |
+| `/usr` scan | 1.5 s | **759 ms** |
+| throughput | 447,687 files/sec | **628,637 files/sec** |
+| per file | 3.55 µs | **1.59 µs** |
+| tree nodes | 454,129 | 454,129 (identical, 0 invariant violations) |
+
+`budget::SCAN_PER_FILE` was tightened from 30 µs to 10 µs so the gain cannot silently regress. The
+30 µs figure came from the throughput requirement in SPEC §8 and had three orders of magnitude of
+slack, which guards nothing.
+
+**STO-19 was added at P0 as a result.** Scanning a real home directory — 5,406,062 files, 782,107
+directories — takes 34.7 s and peaks at **4.2 GiB resident**, because it materialises 5,454,451 nodes
+of 200 bytes each. The depth cap was supposed to bound this and does not, since depth 12 still reaches
+almost every file. Its byte accounting is *correct* (307.2 GiB against `du`'s 310.4 GiB, the gap being
+427 permission errors and not crossing filesystems) — the problem is purely that the model holds a
+node per file. That has to be bounded by significance before the explorer can be pointed at a home
+directory.
+
+**STO-19 is done.** Scan memory no longer scales with file count. On the same home directory —
+5,409,614 files, 782,119 directories:
+
+| | before | after |
+| --- | --- | --- |
+| peak resident memory | 4,211.8 MiB | **94.9 MiB** |
+| tree nodes | 5,454,451 | **48,848** |
+| time | 34.7 s | **28.0 s** |
+
+Children too small to list fold into one aggregate node per directory, holding exactly the bytes they
+replaced. Totals are untouched: the root still reports 307.3 GiB against `du`'s 310.4 GiB, and every
+directory still equals the sum of its children including its aggregate.
+
+Three things went wrong on the way, and all three were found by measuring rather than reasoning:
+
+1. **Counting first, then building** — the obvious way to learn the total before choosing a threshold —
+   took the home-directory scan from 34.7 s to **61.2 s**. That tree is syscall-bound, so a second
+   traversal simply doubles the dominant cost; `/usr` had hidden this by being page-cache hot. The
+   threshold is now estimated from the filesystem's used bytes and corrected only when badly wrong.
+2. **Correcting on any overshoot retried essentially every scan**, since a scanned tree is almost
+   always smaller than its filesystem. `/usr` went 759 ms → 2.4 s. Now it corrects only past 8x.
+3. **The aggregate node was built by the directory it summarised**, but whether that directory
+   survives is its parent's decision, made later — so 633,035 of 674,065 nodes were orphans,
+   unreachable from the root yet still holding bytes counted in an ancestor. `check_invariants` did not
+   catch it because it only walks what it can reach. Aggregates are now built by the parent. A
+   reachability test guards it, verified by reintroducing the bug.
+
+**STO-14 is done**, and it is the largest category in the tool: **71.1 GiB** across 805 project
+artifact directories and **48.1 GiB** of package-manager stores outside `~/.cache`. The whole preview
+went from 43.9 GiB to **161.0 GiB**.
+
+Detection is by marker, never by name — the specification's criterion, and not a formality, since
+`build`, `dist`, `venv` and `target` are ordinary words. Candidates come from the cached scan rather
+than a walk, because traversal costs 33 s here even while pruning; `STO-19`'s bounded tree already
+holds every directory big enough to be worth reclaiming.
+
+Designing it turned up **two accounting defects in shipped code**, both about the same thing:
+
+1. **Trashing was reported as freeing.** The trash must sit on the same filesystem as its contents,
+   because the move is a rename — so trashing frees nothing until the trash is emptied. `Report::freed`
+   counted trashed bytes anyway, so clearing 9.8 GiB of cache reported "Freed 9.8 GiB" with the user's
+   free space unmoved. Five accuracy tests missed it because they compared against a *directory-tree*
+   measurement, which trashing satisfies. Fixed separately in `c051a69`.
+2. **A trashed directory reported the size of its own inode**, about four kilobytes, rather than its
+   contents — and `AppCacheCategory`, the only category that trashed anything, trashes directories
+   exclusively. Every accuracy test trashed plain files.
+
+Both are in [issues §03](issues/03-reclaim-pipeline.md). The second is the more embarrassing: it means
+the reported figure for the one production path that existed was wrong by three orders of magnitude,
+and had been since M3.
+
+The preview also got 20x faster along the way — **27.8 s to 1.4 s** — by taking directory sizes from
+the cached scan instead of walking `~/.cache` and the package stores, which are 85 GiB between them.
+The first attempt at that made it *slower* (7.5 s to 11 s) by reloading and deserialising the whole
+cached tree once per candidate instead of once per category.
+
+**STO-13 is done.** 17.5 GB of reclaimable images, 3.04 GB of build cache and 1.49 GB of unused
+volumes on the development machine. Volumes are the one `Risky` rating in the storage half of nix and
+get one candidate each — a volume holds the only copy of what is in it, so there is no "prune volumes"
+button to press by accident.
+
+Docker's sizes are powers of ten, verified against `docker image inspect` rather than assumed. That is
+the second tool to do this after APT, which suggests treating any human-formatted size from an external
+tool as decimal-until-proven.
+
+**STO-15 is done.** A `Find` view answers two questions without a form: what are the biggest files,
+and what is here twice.
+
+The interesting constraint was "never a false positive", which rules out finishing on a hash. Detection
+stages size, then the first 4 KiB, then whole content, then a **byte-for-byte comparison** — the hash is
+a filter and never the verdict, so it needs no cryptographic strength and no new dependency. Hard links
+are excluded because two names for one inode share their blocks; verified by removing the guard, which
+made the tool claim 2 MiB recoverable from a link that frees nothing.
+
+**STO-16 is done, and Phase 2 with it.** A `Trends` view answers "what grew" rather than "what is
+big", collected by an opt-in systemd user timer that is off by default.
+
+Two things the specification did not anticipate:
+
+1. **The job is a full scan, not an incremental refresh.** That requirement came from STO-18, which
+   measurement retired. A full walk of this machine's home directory takes 28 s, and at `Nice=19` with
+   idle I/O once a day that buys a correct answer for less than a second code path and a staleness
+   model would cost. The criterion "completes in seconds" is met literally — 33 s — but not in the
+   spirit the incremental design implied, and PLAN says so rather than rounding it favourably.
+2. **Category totals needed attribution that did not exist.** A scan leaves everything
+   `Category::Unknown`, so the first samples had a single category. `history::attribute` walks the tree
+   top-down using the reclaim categories' own signals; its output sums exactly to the scan total and
+   independently matches what those categories find, which is a useful cross-check on both.
+
+Two of my own attempts at that attribution were wrong and measured wrong: classifying leaves reported
+**0.14 GiB** of build artifacts on a machine holding 71 (a file inside `node_modules` has an ordinary
+name), and aggregates having no path put **31 GiB** into "unattributed" that was really small files in
+known places. The test for the second passed with the bug reintroduced, because its fixture put the
+aggregate inside a directory whose whole subtree was already claimed — so the aggregate was never
+reached. Fixed, and verified to fire.
+
+**M5 complete. Phase 2 (Storage depth) is finished**: STO-10 through STO-19, one superseded, one added
+at P0 mid-phase.
 
 Note also that §4's parallelisation advice no longer applies: this is a solo project, which is why
 **task 0.9 was completed within Phase 0 rather than deferred** — see §5.2 for why M2 is nonetheless
@@ -239,7 +446,8 @@ Ordered by reclaim value per unit of effort, which is roughly the reverse of the
 2. **STO-10 package storage attribution** — feeds STO-11 and PKG-1, and turns directories into
    named owners.
 3. **STO-17 btrfs, LVM, ZFS** (remainder) — P0. Without it the numbers are wrong on Fedora.
-4. **STO-12 snap and flatpak revisions** — second-largest Ubuntu win, small effort.
+4. **STO-12 snap and flatpak revisions** — done. Turned out to be the *largest* Ubuntu win, not
+   the second: 3.3 GiB of snap revisions on the development machine.
 5. **STO-18 incremental rescan** — unlocks STO-16's daily job being cheap enough to exist.
 6. **STO-14 developer build artifacts** — large wins on developer machines specifically.
 7. **STO-13 container storage** — large wins, narrower audience.
@@ -263,9 +471,24 @@ worst behaviour.
 **M7 Processes & services.** Two independent tracks. The systemd D-Bus work (SVC-1) is the
 unfamiliar part; spike it early. Nothing here blocks anything else.
 
+*Done.* The unfamiliarity risk did not materialise — the D-Bus work cost less than the process table,
+and §D10 records why the choice held up. Two things were not on the plan. The inventory had to be split
+because `ListUnitFiles` costs 2.2 s where `ListUnits` costs 11.7 ms, so unit files became a separate
+lazily-invoked command (§P9 again, arrived at by measurement rather than by design). And the process
+tree needed a second pass: building only from roots silently dropped processes whose parent had exited,
+so `tree()` now adopts stranded processes, and the cycle guard that had been dead code is exercised.
+
 **M8 Software & system tools.** PKG-1/2/3 depend on Phase 2's package work being done, so this
 sequencing is already implied. SYS-2 is cheap because it is a projection of STO-2 (D7); do not let
 it grow into a separate search subsystem.
+
+*Done.* Six of seven features were verifiable against this machine; `PKG-3` is the exception and the
+spec says so per backend. dnf and zypper have a real query-format check (`rpm` is installed here, with
+an empty database) and pacman has none at all — both join `STO-17` on the §9.1 list.
+
+SYS-2 did not turn out to be a projection of STO-2. The scan builds a tree and search wants a filtered
+*stream* with cancellation, so it is its own walk sharing the conventions rather than the code. Cheap
+either way, and it stayed one module.
 
 **M9 Release.** PLT-1 (i18n) and PLT-2 (a11y) must not start here — see §8. What genuinely belongs
 in M9 is packaging polish, the security sign-off (§7.4), first-run (PLT-4) and docs (PLT-7).
@@ -275,7 +498,16 @@ in M9 is packaging polish, the security sign-off (§7.4), first-run (PLT-4) and 
 ## 8. Continuous workstreams
 
 Four things must run from the first week, because each is dramatically more expensive to retrofit
-than to maintain:
+than to maintain.
+
+**How that actually went, recorded at the start of M9 rather than glossed over.** Two of the four held
+and two did not. Perf budgets were asserted from task 0.11 as intended, and every phase since has added
+its own; the security review ran as a diff per helper operation, and `docs/issues/01-privilege-and-security.md`
+is the record. **i18n did not happen at all** — there is no translation layer and every user-facing
+string in thirteen views is hardcoded. **Accessibility was partial**: twelve `aria-*` attributes across
+thirteen views, added where a control was obviously unlabelled rather than as a discipline per component.
+So PLT-1 and PLT-2 are now exactly the retrofit this table warned about, and the cost is being paid in
+M9 as predicted.
 
 | Workstream | Discipline from day one | Retrofit cost if skipped |
 | --- | --- | --- |
@@ -301,6 +533,34 @@ than to maintain:
 
 The reclaim harness (row 4) is the one that makes the whole product credible. Build it at 1.14, not
 at M9.
+
+### 9.1 The isolated pass, before 1.0 ships
+
+Everything in that table runs on the developer's own machine, and a growing set of paths cannot be
+verified there at all. The destructive privileged operations, the `cow` parsers for filesystems this
+machine does not have, the systemd timer install, `apt-get remove` against a real dpkg database, an
+edit to the real `/etc/hosts` — each is either unexercised or exercised only against a
+directly-spawned helper in tests.
+
+**Decision: they are validated in a throwaway VM once the first version is feature-complete, not
+before, and not on the developer's machine.** The `docs/issues/README.md` open-items table is the
+list; every row there marked unexercised is an item on that pass.
+
+The reasoning is not caution for its own sake. There is already one entry in the defect log —
+[`01-privilege-and-security.md §5`](issues/01-privilege-and-security.md) — where a unit test escalated
+through a cached polkit authorisation and removed a kernel package from this machine. The guards added
+after it are structural and hold, but they hold against the mistake that was already made. A
+destructive path that has never run as root will fail in some way nobody predicted, and the only
+question is what it takes down with it.
+
+What the isolated pass gives that no guard does: **a machine whose loss costs nothing**, so the
+verification can be the real thing — actually reclaim, actually remove, actually write — rather than a
+test that stops one step short of the part that matters. A snapshot before each operation makes each
+one repeatable, which is the other thing this machine cannot offer.
+
+Until that pass runs, the rule from `ARCHITECTURE.md` stands unchanged: **no destructive privileged
+path ships having never been exercised.** Anything still unexercised at the end of Phase 5 either gets
+the isolated pass or ships as an advisory, the way the ostree prune did.
 
 ---
 

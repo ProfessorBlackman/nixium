@@ -2,6 +2,9 @@
   "name": "nix",
   "private": true,
   "version": "0.1.0",
+  "description": "Linux storage insight and system utility",
+  "license": "GPL-3.0-or-later",
+  "author": "Methuselah Nwodobeh",
   "type": "module",
   "scripts": {
     "dev": "vite",

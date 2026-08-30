@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! The category registry. Task 1.9 (`STO-3`).
 //!
 //! This module is the difference between nine categories and nine special cases. Each category
@@ -13,7 +16,7 @@ use std::path::PathBuf;
 
 use crate::error::Result;
 use crate::op::CancelToken;
-use crate::space::{Category as SpaceCategory, ReclaimMethod, Safety};
+use crate::space::{Advisory, Category as SpaceCategory, ReclaimMethod, Reclaimable, Safety};
 
 /// Something a category proposes reclaiming.
 ///
@@ -34,6 +37,13 @@ pub struct Candidate {
     pub cost: Option<String>,
     /// Which category proposed this.
     pub category: String,
+    /// How much of `bytes` will actually come back, when the category knows better than the
+    /// filesystem-level guess the preview would otherwise make.
+    ///
+    /// Defaults to [`Reclaimable::Exact`]; the preview downgrades it on a copy-on-write filesystem.
+    /// A category that understands its own sharing — a snapshot-aware one — sets it here and its
+    /// judgement wins.
+    pub reclaimable: Reclaimable,
 }
 
 /// One kind of reclaimable space.
@@ -47,10 +57,33 @@ pub trait Category: Send + Sync {
     /// Which space-model category these belong to.
     fn space_category(&self) -> SpaceCategory;
 
+    /// What reclaiming this actually does, in the user's terms. `PLT-7`.
+    ///
+    /// # Required, deliberately
+    ///
+    /// There is no default. A category that cannot say what it deletes has no business offering to
+    /// delete it, and a default of `""` would let one ship silent — which is precisely the state
+    /// `PLT-7` exists to end. Adding a category now means writing this sentence, and the compiler
+    /// insists.
+    ///
+    /// Written as: what goes, what happens next time it is needed, and what the user would notice.
+    /// Not a definition of the term — "removes cached package files" tells a user nothing they could
+    /// not guess from the label. What they cannot guess is whether it comes back.
+    fn explains(&self) -> &'static str;
+
     /// Whether this category can run on this system. A category whose backing tool is absent
     /// reports `false` rather than producing an empty list, so the UI can say why.
     fn available(&self) -> bool {
         true
+    }
+
+    /// Space this category can see but will not act on itself.
+    ///
+    /// Defaults to none. A category overrides it when it can measure something real whose remedy is
+    /// a tool nix does not have, or has not exercised — see [`Advisory`] for why that is reported
+    /// rather than hidden.
+    fn advisories(&self) -> Vec<Advisory> {
+        Vec::new()
     }
 
     /// Find what could be reclaimed. Must honour cancellation.
@@ -79,17 +112,43 @@ impl Registry {
 
     /// The categories implemented so far.
     ///
-    /// M3 registers **trash alone**, deliberately: the pipeline is proven against the one category
-    /// where a mistake is recoverable before anything irreversible is wired in.
+    /// M3 registered trash alone, so the pipeline was proven against the one category where a
+    /// mistake is recoverable. M4 adds the categories that actually hold space, three of which go
+    /// through the privileged helper.
     #[must_use]
     pub fn with_defaults() -> Self {
         let mut registry = Self::new();
         registry.register(Box::new(TrashCategory::new()));
+        registry.register(Box::new(super::AppCacheCategory::new()));
+        registry.register(Box::new(super::LogCategory::new()));
+        registry.register(Box::new(super::JournalCategory::new()));
+        registry.register(Box::new(super::PackageCacheCategory::new()));
+        // Phase 2 opens with the largest real-world win: old kernels.
+        registry.register(Box::new(super::OldKernelCategory::new()));
+        registry.register(Box::new(super::ResidualConfigCategory::new()));
+        // `STO-12`: the largest single figure found so far on this machine — 3.3 GiB of superseded
+        // snap revisions.
+        registry.register(Box::new(super::SnapRevisionCategory::new()));
+        registry.register(Box::new(super::FlatpakUnusedCategory::new()));
+        // `STO-14`: the largest category in the tool — 71 GiB of project artifacts and 52 GiB of
+        // package stores on the development machine.
+        registry.register(Box::new(super::BuildArtifactCategory::new()));
+        registry.register(Box::new(super::PackageStoreCategory::new()));
+        // `STO-13`: 17.5 GB of images and 3 GB of build cache on the development machine.
+        registry.register(Box::new(super::ContainerCategory::new()));
         registry
     }
 
     pub fn register(&mut self, category: Box<dyn Category>) {
         self.categories.push(category);
+    }
+
+    /// Every registered category.
+    ///
+    /// Borrowed rather than cloned: a category is a behaviour, not data, and the caller only ever
+    /// wants to ask it questions.
+    pub fn categories(&self) -> impl Iterator<Item = &dyn Category> {
+        self.categories.iter().map(std::convert::AsRef::as_ref)
     }
 
     #[must_use]
@@ -131,6 +190,19 @@ impl Registry {
             }
         }
         Ok(all)
+    }
+
+    /// Every category's advisories.
+    ///
+    /// Unlike [`Registry::collect`] this does not take a cancellation token: an advisory is derived
+    /// from figures a category already has, so there is nothing long-running to cancel.
+    #[must_use]
+    pub fn collect_advisories(&self) -> Vec<Advisory> {
+        self.categories
+            .iter()
+            .filter(|c| c.available())
+            .flat_map(|c| c.advisories())
+            .collect()
     }
 }
 
@@ -178,6 +250,10 @@ impl Category for TrashCategory {
         "Trash"
     }
 
+    fn explains(&self) -> &'static str {
+        "Empties the desktop trash. The one item here where the files are already meant to be gone, and the only one that cannot be undone by any means."
+    }
+
     fn space_category(&self) -> SpaceCategory {
         SpaceCategory::Trash
     }
@@ -210,6 +286,60 @@ impl Category for TrashCategory {
                 if count == 1 { "" } else { "s" }
             )),
             category: self.id().to_string(),
+            reclaimable: Reclaimable::Exact,
         }])
+    }
+}
+
+#[cfg(test)]
+mod explanation_tests {
+    use super::*;
+
+    /// `PLT-7`: every category the user can actually be offered says what reclaiming it does.
+    ///
+    /// The trait makes it impossible to omit; this makes it hard to fob off. A category that deletes
+    /// files and describes itself in four words has satisfied the compiler and not the requirement.
+    #[test]
+    fn every_real_category_explains_itself_in_terms_a_user_could_act_on() {
+        let registry = Registry::with_defaults();
+        let mut checked = 0;
+
+        for category in registry.categories() {
+            let text = category.explains();
+            let label = category.label();
+
+            assert!(
+                text.len() >= 80,
+                "{label}: {text:?} is too short to tell anyone what they would lose"
+            );
+            assert!(
+                !text.to_lowercase().starts_with(&label.to_lowercase()),
+                "{label}: the explanation restates the label instead of explaining it"
+            );
+            assert!(
+                text.ends_with('.'),
+                "{label}: the explanation is not a sentence"
+            );
+            checked += 1;
+        }
+
+        assert!(
+            checked >= 10,
+            "only {checked} categories were checked, which cannot be the whole registry"
+        );
+    }
+
+    /// And no two categories share an explanation — copy-paste is the obvious way to satisfy the
+    /// compiler without saying anything.
+    #[test]
+    fn no_two_categories_share_an_explanation() {
+        let registry = Registry::with_defaults();
+        let mut seen: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+
+        for category in registry.categories() {
+            if let Some(other) = seen.insert(category.explains(), category.label()) {
+                panic!("{} and {} share an explanation", category.label(), other);
+            }
+        }
     }
 }

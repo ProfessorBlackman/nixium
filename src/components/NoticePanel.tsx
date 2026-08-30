@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 /**
  * The notification centre. Task 0.5 (FND-3).
  *
@@ -6,6 +9,7 @@
  */
 import { useState } from "react";
 
+import { t } from "../lib/i18n";
 import { clearNotices, markAllRead, useNotices, type Notice } from "../lib/notices";
 
 const LEVEL_LABEL: Record<Notice["level"], string> = {
@@ -21,7 +25,7 @@ function NoticeRow({ notice }: { notice: Notice }) {
   return (
     <li className={`notice notice-${notice.level}`}>
       <div className="notice-head">
-        <span className="notice-level">{LEVEL_LABEL[notice.level]}</span>
+        <span className="notice-level">{t(LEVEL_LABEL[notice.level])}</span>
         <time dateTime={notice.at.toISOString()}>
           {notice.at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
         </time>
@@ -49,28 +53,28 @@ export function NoticePanel({ onClose }: { onClose: () => void }) {
   const notices = useNotices();
 
   return (
-    <aside className="panel" aria-label="Notifications">
+    <aside className="panel" aria-label={t("Notifications")}>
       <header className="panel-head">
-        <h2>Notifications</h2>
+        <h2>{t("Notifications")}</h2>
         <div className="panel-actions">
           {notices.length > 0 && (
             <>
               <button type="button" className="link" onClick={markAllRead}>
-                Mark all read
+                {t("Mark all read")}
               </button>
               <button type="button" className="link" onClick={clearNotices}>
-                Clear
+                {t("Clear")}
               </button>
             </>
           )}
-          <button type="button" className="icon-button" onClick={onClose} aria-label="Close notifications">
+          <button type="button" className="icon-button" onClick={onClose} aria-label={t("Close notifications")}>
             ✕
           </button>
         </div>
       </header>
 
       {notices.length === 0 ? (
-        <p className="empty">Nothing to report.</p>
+        <p className="empty">{t("Nothing to report.")}</p>
       ) : (
         <ul className="notice-list">
           {notices.map((n) => (

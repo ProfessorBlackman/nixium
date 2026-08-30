@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Methuselah Nwodobeh
+
 //! The error taxonomy. Task 0.2 (`FND-3`).
 //!
 //! Written before the second command exists, deliberately: retrofitting an error type across

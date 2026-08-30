@@ -9,6 +9,28 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  licence:
+    name: Licence headers
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      # Enforced in CI as well as in the pre-commit hook, because a hook can be bypassed.
+      # Generated bindings are excluded: ts-rs rewrites them on each build, so a header there
+      # would not survive — they are covered by the repository LICENSE.
+      - name: Every source file carries its SPDX header
+        run: |
+          missing=$(git ls-files '*.rs' '*.ts' '*.tsx' '*.css' \
+            | grep -v '^src/bindings/' \
+            | while read -r f; do
+                head -c 400 "$f" | grep -q 'SPDX-License-Identifier: GPL-3.0-or-later' || echo "$f"
+              done)
+          if [ -n "$missing" ]; then
+            echo "::error::missing SPDX licence header:"
+            echo "$missing"
+            exit 1
+          fi
+          echo "all source files carry the licence header"
+
   rust:
     name: Rust — fmt, clippy, test
     runs-on: ubuntu-24.04
@@ -50,6 +72,14 @@ jobs:
         working-directory: src-tauri
         run: cargo test --workspace
 
+      # nix-core alone, without `dbus` — the configuration the privileged helper links. The run above
+      # builds nix-app, which enables the feature, and the resolver unifies it into every copy of
+      # nix-core; so feature-off is otherwise never tested, and zbus code that escapes its
+      # `#[cfg(feature = "dbus")]` gate would pass here and break the helper (D10).
+      - name: nix-core without D-Bus (the helper's configuration)
+        working-directory: src-tauri
+        run: cargo test -p nix-core
+
       # The generated TypeScript is committed so the frontend can be type-checked on its own. If a
       # Rust type changed without regenerating, the working tree is now dirty — fail rather than
       # let the two sides drift.
@@ -76,6 +106,14 @@ jobs:
           NIX_PERF: "1"
         run: "cargo test -p nix-core --release --lib -- budget:: --nocapture"
 
+      # The idle-CPU budget is its own binary: the measurement is process-wide CPU time, and inside the
+      # parallel test harness that measures the harness. It read 196% of one core before it was moved.
+      - name: Idle CPU
+        working-directory: src-tauri
+        env:
+          NIX_PERF: "1"
+        run: "cargo test -p nix-core --release --test idle_cpu -- --nocapture"
+
   frontend:
     name: Frontend — typecheck, build
     runs-on: ubuntu-24.04
@@ -88,6 +126,24 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm tsc --noEmit
+
+      # Contrast cannot be eyeballed: a palette can look fine to whoever chose it and be unreadable to
+      # someone else. Both themes, computed against WCAG 2.1 AA. `PLT-2`.
+      - name: Contrast (WCAG AA)
+        run: node scripts/check-contrast.mjs
+
+      - name: Every control has an accessible name
+        run: node scripts/check-labels.mjs
+
+      # A ratchet, not a gate: the i18n retrofit is unfinished, so this stops the debt growing rather
+      # than pretending it is paid. New user-facing text must go through t(). `PLT-1`.
+      - name: Translatable strings (ratchet)
+        run: node scripts/check-i18n.mjs
+
+      # A disagreement here does not fail a build — it ships a release whose tag says one version and
+      # whose contents say another. Checked on every branch so it cannot first surface at release time.
+      - name: The version agrees across all three files
+        run: node scripts/check-version.mjs
       - run: pnpm build
 
   bundle:
@@ -127,3 +183,20 @@ jobs:
             src-tauri/target/release/bundle/rpm/*.rpm
             src-tauri/target/release/bundle/appimage/*.AppImage
           if-no-files-found: error
+
+      # `PLT-5`'s acceptance criterion. Until now CI built the bundles and uploaded them without ever
+      # opening one — a build that produces a package missing its polkit policy is still a build that
+      # succeeded.
+      - name: Inspect the deb
+        run: ./scripts/check-bundle.sh src-tauri/target/release/bundle/deb/*.deb
+
+      # And that it installs and runs, which is what the criterion actually says. `--version` exists
+      # for this: before it did, the binary opened a window, and there is no display here to open one
+      # on.
+      - name: Install it and run it
+        run: |
+          sudo apt-get install -y ./src-tauri/target/release/bundle/deb/*.deb
+          nix --version
+          test -x /usr/libexec/nix/nix-helper
+          test -f /usr/share/polkit-1/actions/com.tlc.nix.policy
+          desktop-file-validate /usr/share/applications/com.tlc.nix.desktop
