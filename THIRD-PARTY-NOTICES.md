@@ -13,7 +13,7 @@ Generated from `src-tauri/Cargo.lock`: **504 third-party crates**.
 
 ## Licences
 
-397 crates ship their licence text in-tree. The licences themselves are the standard MIT, Apache-2.0, BSD and Unicode texts; the copyright lines they carry are the part that varies, and are preserved in each crate's own source as distributed.
+419 crates ship their licence text in-tree. The licences themselves are the standard MIT, Apache-2.0, BSD and Unicode texts; the copyright lines they carry are the part that varies, and are preserved in each crate's own source as distributed.
 
 - `adler2`: LICENSE-0BSD, LICENSE-APACHE, LICENSE-MIT
 - `aho-corasick`: COPYING, LICENSE-MIT
@@ -388,6 +388,28 @@ Generated from `src-tauri/Cargo.lock`: **504 third-party crates**.
 - `winapi`: LICENSE-APACHE, LICENSE-MIT
 - `winapi-util`: COPYING, LICENSE-MIT
 - `window-vibrancy`: LICENSE-APACHE, LICENSE-MIT, LICENSE.spdx
+- `windows`: license-apache-2.0, license-mit
+- `windows-collections`: license-apache-2.0, license-mit
+- `windows-core`: license-apache-2.0, license-mit
+- `windows-future`: license-apache-2.0, license-mit
+- `windows-implement`: license-apache-2.0, license-mit
+- `windows-interface`: license-apache-2.0, license-mit
+- `windows-link`: license-apache-2.0, license-mit
+- `windows-numerics`: license-apache-2.0, license-mit
+- `windows-result`: license-apache-2.0, license-mit
+- `windows-strings`: license-apache-2.0, license-mit
+- `windows-sys`: license-apache-2.0, license-mit
+- `windows-targets`: license-apache-2.0, license-mit
+- `windows-threading`: license-apache-2.0, license-mit
+- `windows-version`: license-apache-2.0, license-mit
+- `windows_aarch64_gnullvm`: license-apache-2.0, license-mit
+- `windows_aarch64_msvc`: license-apache-2.0, license-mit
+- `windows_i686_gnu`: license-apache-2.0, license-mit
+- `windows_i686_gnullvm`: license-apache-2.0, license-mit
+- `windows_i686_msvc`: license-apache-2.0, license-mit
+- `windows_x86_64_gnu`: license-apache-2.0, license-mit
+- `windows_x86_64_gnullvm`: license-apache-2.0, license-mit
+- `windows_x86_64_msvc`: license-apache-2.0, license-mit
 - `winnow`: LICENSE-MIT
 - `winreg`: LICENSE
 - `wit-bindgen`: LICENSE-APACHE, LICENSE-Apache-2.0_WITH_LLVM-exception, LICENSE-MIT

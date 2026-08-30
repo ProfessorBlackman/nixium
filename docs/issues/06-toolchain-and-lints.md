@@ -249,3 +249,60 @@ configuration — which is the shape of every defect in this file that took hour
 verified in the direction that would have caught the original mistake, by asking for one gated test
 **by name** and by reading the build's own feature list, rather than by re-reading a total. A test count
 that does not change is not evidence about which tests ran.
+
+---
+
+## 10. A generated file that depended on what had been built
+
+**Phase 6** · **Moderate** · **Found by** the release workflow refusing to publish
+
+`THIRD-PARTY-NOTICES.md` is generated from `Cargo.lock`, and the release workflow regenerates it and
+refuses to publish if the result differs from what is committed — a release must ship attribution
+built from the lockfile it was built with. On the first run it refused:
+
+```
+Error: THIRD-PARTY-NOTICES.md is out of date.
++> Some crates were not present in the local registry when this was generated…
++> - block2 0.6.2
++> - core-graphics 0.25.0
++> - embed_plist 1.2.2
+-397 crates ship their licence text in-tree.
++334 crates ship their licence text in-tree.
+```
+
+The collector read `~/.cargo/registry/src`, which is where cargo **unpacks** a crate — and it unpacks
+lazily, only what a build actually compiled. So the output was a function of what had been built on
+that machine, not of the lockfile. This machine had all 504 crates extracted from months of building;
+a clean CI runner had 371, the missing 133 being macOS and Android crates a Linux build never touches.
+
+**What made it worse is that I had "verified" determinism.** The check I ran was:
+
+```
+$ python3 scripts/collect-notices.py > n1.md
+$ python3 scripts/collect-notices.py > n2.md
+$ diff -q n1.md n2.md && echo "notices: deterministic"
+```
+
+That proves the script is *repeatable on one machine with a warm cache*. It says nothing about
+*reproducible across machines*, which is the property a committed generated file actually needs, and
+the two are easy to conflate because the first sounds like it implies the second.
+
+**Resolved** by reading the published `.crate` archives in `~/.cargo/registry/cache` instead. Those
+exist for every entry in the lockfile, are populated by `cargo fetch` regardless of target, and are
+content-addressed — so the output depends on the lockfile and nothing else. It also found **419**
+crates carrying licence files rather than 397: the archive is the canonical published content, and the
+extracted tree was missing files the glob had been looking for.
+
+A crate in neither place is now a **hard error that writes nothing**. The previous version noted it and
+carried on, producing a plausible-looking file quietly missing attribution — the worst of the three
+available behaviours, and the one that would have shipped.
+
+**Guard.** Verified the way the original should have been: by simulating the other machine rather than
+re-running on this one. A `CARGO_HOME` pointing at a directory with the real cache symlinked in and an
+**empty** `src` — exactly the CI runner's shape — produces byte-identical output. An empty cache exits
+1 and writes zero bytes.
+
+Worth putting beside [09-patterns.md §12](09-patterns.md). "Verify the guard fires" is not enough on
+its own; the question is *which* property the verification establishes. Running a thing twice in the
+same place tests repeatability. Reproducibility needs a different place, and constructing a fake one
+took two commands.

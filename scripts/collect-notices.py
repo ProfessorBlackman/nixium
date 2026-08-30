@@ -8,14 +8,32 @@ Apache-2.0 §4(d) requires that any NOTICE file a dependency ships be reproduced
 Most Rust crates carry none, so the honest way to find out is to look rather than to assume — which
 is the whole point of this script existing instead of a sentence saying "probably empty".
 
-Reads `Cargo.lock`, finds each package in the local registry, and collects its NOTICE and licence
-files. Emits Markdown on stdout.
+Reads `Cargo.lock` and inspects each crate's **published `.crate` archive** in the registry cache,
+collecting its NOTICE and licence files. Emits Markdown on stdout.
 
-Run: `python3 scripts/collect-notices.py > THIRD-PARTY-NOTICES.md`
+# Why the archives and not the extracted sources
+
+The first version read `~/.cargo/registry/src`, which is where cargo *unpacks* a crate — and it
+unpacks lazily, only what a build actually compiled. The output was therefore a function of what had
+been built on that machine rather than of the lockfile. On a warm development machine all 504 crates
+were present; on a clean CI runner 133 were not, most of them platform-specific crates for macOS and
+Android that a Linux build never touches. The release refused to publish over the difference, which is
+the check working — but the file it compares against should never have been machine-dependent.
+
+`~/.cargo/registry/cache` holds the `.crate` archive for every entry in the lockfile, is populated by
+`cargo fetch` regardless of target, and is content-addressed — so it is identical everywhere.
+
+A crate found in neither place is now a **hard error**. The previous version noted it and carried on,
+producing a plausible-looking file that was quietly missing attribution, which is the worst of the
+three available behaviours.
+
+Run: `make notices` (which fetches first), or:
+`cd src-tauri && cargo fetch && cd .. && python3 scripts/collect-notices.py > THIRD-PARTY-NOTICES.md`
 """
 import os
 import re
 import sys
+import tarfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -27,10 +45,10 @@ OURS = {"nix-app", "nix-core", "nix-helper"}
 NOTICE_NAMES = ("NOTICE", "NOTICE.md", "NOTICE.txt", "NOTICE-APACHE")
 
 
-def registry_dirs():
+def cache_dirs():
     home = Path(os.environ.get("CARGO_HOME", Path.home() / ".cargo"))
-    src = home / "registry" / "src"
-    return sorted(src.glob("*")) if src.exists() else []
+    cache = home / "registry" / "cache"
+    return sorted(cache.glob("*")) if cache.exists() else []
 
 
 def packages():
@@ -46,10 +64,10 @@ def packages():
     return [(n, v, s) for (n, v, s) in found if n not in OURS]
 
 
-def find_source(name, version):
-    for base in registry_dirs():
-        candidate = base / f"{name}-{version}"
-        if candidate.is_dir():
+def find_archive(name, version):
+    for base in cache_dirs():
+        candidate = base / f"{name}-{version}.crate"
+        if candidate.is_file():
             return candidate
     return None
 
@@ -65,21 +83,49 @@ def main():
         if not source:
             # A path dependency that is not ours would be a vendored crate; there are none.
             continue
-        directory = find_source(name, version)
-        if directory is None:
+        archive = find_archive(name, version)
+        if archive is None:
             missing_source.append(f"{name} {version}")
             continue
 
-        for notice_name in NOTICE_NAMES:
-            path = directory / notice_name
-            if path.is_file():
-                body = path.read_text(errors="replace").strip()
-                if body:
-                    found_notices.append((name, version, notice_name, body))
+        # A `.crate` is a gzipped tar whose single top-level directory is `<name>-<version>`, so an
+        # attribution file at the crate root is exactly two path components deep. Anything deeper is
+        # source, not attribution.
+        with tarfile.open(archive, "r:gz") as tar:
+            for member in tar.getmembers():
+                if not member.isfile():
+                    continue
+                parts = member.name.split("/")
+                if len(parts) != 2:
+                    continue
+                filename = parts[1]
 
-        for licence in sorted(directory.glob("LICEN[SC]E*")) + sorted(directory.glob("COPYING*")):
-            if licence.is_file():
-                licences.setdefault(name, []).append(licence.name)
+                if filename in NOTICE_NAMES:
+                    handle = tar.extractfile(member)
+                    if handle is None:
+                        continue
+                    body = handle.read().decode("utf-8", errors="replace").strip()
+                    if body:
+                        found_notices.append((name, version, filename, body))
+
+                upper = filename.upper()
+                if upper.startswith(("LICENSE", "LICENCE", "COPYING")):
+                    licences.setdefault(name, []).append(filename)
+
+    if missing_source:
+        # Refused rather than noted. A file that silently omits a crate's attribution is worse than no
+        # file, because it looks like the question was asked and answered.
+        print(
+            f"{len(missing_source)} crates are not in the registry cache, so their notices could not "
+            "be checked:",
+            file=sys.stderr,
+        )
+        for entry in missing_source[:20]:
+            print(f"  {entry}", file=sys.stderr)
+        if len(missing_source) > 20:
+            print(f"  …and {len(missing_source) - 20} more", file=sys.stderr)
+        print("\nRun `cargo fetch` in src-tauri/ and try again.", file=sys.stderr)
+        sys.exit(1)
 
     out = []
     out.append("<!-- SPDX-License-Identifier: GPL-3.0-or-later -->")
@@ -97,17 +143,6 @@ def main():
     out.append(f"Generated from `src-tauri/Cargo.lock`: **{total} third-party crates**.")
     out.append("")
 
-    if missing_source:
-        out.append(
-            "> Some crates were not present in the local registry when this was generated, so their "
-            "notices could not be checked. Run `cargo fetch` and regenerate before a release."
-        )
-        out.append("")
-        for entry in missing_source[:20]:
-            out.append(f"> - {entry}")
-        if len(missing_source) > 20:
-            out.append(f"> - …and {len(missing_source) - 20} more")
-        out.append("")
 
     out.append("## NOTICE files")
     out.append("")

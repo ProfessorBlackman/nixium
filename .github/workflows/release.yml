@@ -114,6 +114,10 @@ jobs:
       - name: Third-party notices are current
         run: |
           set -euo pipefail
+          # Every crate in the lockfile, including ones this platform never builds — the collector
+          # reads published archives, so its result depends on the lockfile rather than on what
+          # happened to be compiled here.
+          cd src-tauri && cargo fetch && cd ..
           python3 scripts/collect-notices.py > /tmp/notices.md
           if ! diff -q /tmp/notices.md THIRD-PARTY-NOTICES.md >/dev/null; then
             echo "::error::THIRD-PARTY-NOTICES.md is out of date. Run 'make notices' and commit the result."
