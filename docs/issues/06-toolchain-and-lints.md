@@ -306,3 +306,46 @@ Worth putting beside [09-patterns.md §12](09-patterns.md). "Verify the guard fi
 its own; the question is *which* property the verification establishes. Running a thing twice in the
 same place tests repeatability. Reproducibility needs a different place, and constructing a fake one
 took two commands.
+
+---
+
+## 11. A package check that reported `ok` without running
+
+**Phase 6** · **Serious** · **Found by** a *different* step failing on the same runner
+
+CI's bundle job died at `desktop-file-validate: command not found`. The immediate cause was trivial:
+the release workflow installs `desktop-file-utils` and the CI bundle job did not, while both call the
+validator. One missing package name.
+
+The interesting part is what that revealed about the step *above* it, which had passed:
+
+```bash
+if [[ -e "$desktop" ]] && command -v desktop-file-validate >/dev/null; then
+  if desktop-file-validate "$desktop"; then
+    echo "  ok   desktop entry validates"
+```
+
+`scripts/check-bundle.sh` guards the validator with `command -v` and **skips when it is absent**. So on
+that job it printed its other eight lines as `ok`, said nothing at all about the desktop entry, and
+exited zero. The package inspection reported success having never performed one of its checks — and it
+had been doing that since the check was written. It was only noticed because a *later* step called the
+same tool without a guard and fell over.
+
+That guard was written to make the script usable on a machine without the package. The effect is that
+the one machine where it matters — a clean runner, where the check is the only thing standing between a
+broken desktop entry and a release — is exactly the machine where it silently did nothing.
+
+**Resolved** by making a missing validator a failure with an instruction, not a skip. A check that
+reports success when it did not run is worse than one that is absent: the absent one does not tell you
+the entry is fine.
+
+**Guard.** Verified by running the script with a `PATH` containing symlinks to every binary it needs
+*except* `desktop-file-validate` — it now exits 1 with "desktop-file-validate is not installed, so the
+entry cannot be checked". Worth noting that the first attempt at that verification kept `/usr/bin` on
+the `PATH` and therefore proved nothing; the sandbox had to be built properly before the test meant
+anything.
+
+This is the fourth entry in this log where the defect is *a check that quietly does nothing* —
+alongside the guard that could not recognise its own remedy, the ratchet that counted its own
+documentation, and the field whose comparison could never fail. The shape recurs because a check that
+skips looks identical, in a passing build, to a check that ran.

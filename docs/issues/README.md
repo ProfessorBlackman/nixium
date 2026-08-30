@@ -46,18 +46,18 @@ says so plainly rather than implying one.
 | [03-reclaim-pipeline.md](03-reclaim-pipeline.md) | preview, guards and execution | 6 |
 | [04-measurement-accuracy.md](04-measurement-accuracy.md) | sizes, and not overstating them | 10 |
 | [05-concurrency-and-performance.md](05-concurrency-and-performance.md) | rayon, cancellation, scan cost, memory, sampling | 16 |
-| [06-toolchain-and-lints.md](06-toolchain-and-lints.md) | the gates, and being caught by them | 10 |
+| [06-toolchain-and-lints.md](06-toolchain-and-lints.md) | the gates, and being caught by them | 11 |
 | [07-tests-that-were-wrong.md](07-tests-that-were-wrong.md) | tests that passed for the wrong reason | 5 |
 | [08-documentation-accuracy.md](08-documentation-accuracy.md) | claims about Stacer that were not true | 5 |
 | [09-patterns.md](09-patterns.md) | what generalises, and what to do about it | — |
 
-Sixty-seven entries: **8 critical, 18 serious, 26 moderate, 15 friction**.
+Sixty-eight entries: **8 critical, 19 serious, 26 moderate, 15 friction**.
 
 ## The tally by finding mechanism
 
 | Found by | Count | Note |
 | --- | --- | --- |
-| A gate in the toolchain (lint, clippy, budget, CI, a hook) | 15 | Cheapest possible — catches before any reasoning is needed |
+| A gate in the toolchain (lint, clippy, budget, CI, a hook) | 16 | Cheapest possible — catches before any reasoning is needed |
 | Running against this machine rather than a fixture | 17 | Wrong numbers, and 4.2 GiB of memory nobody had measured |
 | Reasoning about the code while changing something nearby | 10 | Includes the helper's read hole and one near-miss never shipped |
 | Reading generated output rather than trusting it compiled | 7 | The Rust↔TypeScript cluster, and a test count I misread |

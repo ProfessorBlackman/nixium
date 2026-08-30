@@ -69,9 +69,19 @@ if [[ -e "$helper" ]]; then
 fi
 
 # The desktop entry must be valid, or the launcher silently does not appear.
+#
+# A missing validator is a **failure**, not a skip. It used to be `if command -v … ; then`, which meant
+# this check quietly did nothing on any machine without `desktop-file-utils` — including the CI job
+# that lacked it, where the script printed every other line as `ok` and validated nothing. A check that
+# reports success when it did not run is worse than one that is absent, because the absent one does not
+# tell you the entry is fine.
 desktop="$work/usr/share/applications/com.tlc.nix.desktop"
-if [[ -e "$desktop" ]] && command -v desktop-file-validate >/dev/null; then
-  if desktop-file-validate "$desktop"; then
+if [[ -e "$desktop" ]]; then
+  if ! command -v desktop-file-validate >/dev/null; then
+    echo "  FAIL desktop-file-validate is not installed, so the entry cannot be checked" >&2
+    echo "       install desktop-file-utils" >&2
+    fail=1
+  elif desktop-file-validate "$desktop"; then
     echo "  ok   desktop entry validates"
   else
     echo "  FAIL desktop entry does not validate" >&2
