@@ -105,6 +105,9 @@ version: ## The version must be the same in all three files that carry it
 	node scripts/check-version.mjs
 
 notices: ## Regenerate third-party attribution from the lockfile (PLT-5)
+	# Fetch first: the collector reads the `.crate` archives, and a crate the cache has never seen is a
+	# crate whose notice cannot be checked — which it treats as an error rather than an omission.
+	cd $(CARGO_DIR) && cargo fetch
 	python3 scripts/collect-notices.py > THIRD-PARTY-NOTICES.md
 	@echo "THIRD-PARTY-NOTICES.md regenerated — commit it if it changed."
 
