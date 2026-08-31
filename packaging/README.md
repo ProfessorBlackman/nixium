@@ -78,6 +78,39 @@ registry, since an unfetched crate is one whose notice was not checked.
 The helper is under `libexec` rather than `bin` because it is not meant to be run by hand; its
 `--serve` mode is the only useful entry point and it says so when invoked without it.
 
+## Which base the packages are built on, and why it matters
+
+**The `.deb` and `.rpm` are built on Ubuntu 22.04, deliberately, and that is not an accident of
+whichever runner was handy.**
+
+glibc is forward-compatible only. A binary linked against 24.04's glibc 2.39 runs on 2.39 and newer and
+on nothing older — and `SPEC.md` §7.1 makes **Ubuntu 22.04+** a Tier-1 target. A package built on 24.04
+therefore installs cleanly on 22.04 and then fails at every launch:
+
+```
+nix: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.39' not found (required by nix)
+```
+
+Which is exactly what happened once. Building on the oldest supported target is the only arrangement
+that works for all of them.
+
+`libwebkit2gtk-4.1-dev` is available on jammy (2.50.4), so nothing is given up.
+
+## Why the deb's dependencies are computed after bundling
+
+Tauri's bundler writes whatever `bundle.linux.deb.depends` says, plus the GTK and webkit packages it
+knows it linked. It does **not** run `dpkg-shlibdeps` — so the package declares **no `libc6`
+dependency at all**, which is why apt had no reason to refuse the broken package above.
+
+`scripts/add-deb-depends.sh` runs after `tauri build`: it unpacks the deb, runs `dpkg-shlibdeps` over
+every ELF binary it installs — the app *and* the helper, since a helper that cannot start is a set of
+features that fail with no explanation — merges the result with the hand-declared `policykit-1 |
+polkit`, and repacks. Versioned entries win over unversioned ones on the same package name, and nothing
+already declared is dropped.
+
+`check-bundle.sh` then asserts the result contains a versioned `libc6`, so a package built without that
+step cannot be published. The rpm side needs no equivalent: rpmbuild generates ELF dependencies itself.
+
 ## Releasing
 
 `.github/workflows/release.yml`, on every push to `master`. A release is only *published* when the

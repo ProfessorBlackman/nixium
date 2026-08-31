@@ -41,7 +41,7 @@ says so plainly rather than implying one.
 
 | File | Covers | Entries |
 | --- | --- | --- |
-| [01-privilege-and-security.md](01-privilege-and-security.md) | the privileged helper's boundary | 7 |
+| [01-privilege-and-security.md](01-privilege-and-security.md) | the privileged helper's boundary | 8 |
 | [02-rust-typescript-boundary.md](02-rust-typescript-boundary.md) | generated bindings and type drift | 8 |
 | [03-reclaim-pipeline.md](03-reclaim-pipeline.md) | preview, guards and execution | 6 |
 | [04-measurement-accuracy.md](04-measurement-accuracy.md) | sizes, and not overstating them | 10 |
@@ -51,7 +51,7 @@ says so plainly rather than implying one.
 | [08-documentation-accuracy.md](08-documentation-accuracy.md) | claims about Stacer that were not true | 5 |
 | [09-patterns.md](09-patterns.md) | what generalises, and what to do about it | — |
 
-Sixty-eight entries: **8 critical, 19 serious, 26 moderate, 15 friction**.
+Sixty-nine entries: **8 critical, 20 serious, 26 moderate, 15 friction**.
 
 ## The tally by finding mechanism
 
@@ -67,6 +67,7 @@ Sixty-eight entries: **8 critical, 19 serious, 26 moderate, 15 friction**.
 | An external tool refusing what was written | 1 | The artifact skill's CSS rule |
 | The user reading output I had been filtering | 1 | A build warning on every compile for months |
 | The machine doing the thing | 1 | A test escalated silently and removed a kernel |
+| A user installing it and it not working | 1 | A package that could not run on a Tier-1 target, past a check written to catch that |
 
 Two rows are worth dwelling on.
 

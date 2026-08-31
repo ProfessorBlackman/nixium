@@ -98,6 +98,24 @@ else
   fail=1
 fi
 
+# The dependency whose absence is unrecoverable after installation.
+#
+# Tauri's bundler does not run `dpkg-shlibdeps`, so a package built by it declares no libc6 dependency
+# at all — and glibc is forward-compatible only. A binary built against a newer glibc than the target
+# installs cleanly, then fails at every launch with
+#
+#     nix: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.39' not found
+#
+# which is what happened: a package built on Ubuntu 24.04 installed happily on 22.04, a Tier-1 target.
+# `scripts/add-deb-depends.sh` computes the real dependencies; this asserts it ran.
+if grep -qiE '^ Depends:.*libc6 \(>=' "$work/.control"; then
+  echo "  ok   declares a versioned libc6 dependency"
+else
+  echo "  FAIL no versioned libc6 dependency — this package would install on a system it cannot run on" >&2
+  echo "       run scripts/add-deb-depends.sh on it after building" >&2
+  fail=1
+fi
+
 # The one that would otherwise fail only at run time, on a user's machine.
 policy="$work/usr/share/polkit-1/actions/com.tlc.nix.policy"
 if [[ -e "$policy" ]]; then

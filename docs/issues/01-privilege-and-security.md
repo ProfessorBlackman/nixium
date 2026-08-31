@@ -295,3 +295,58 @@ That split is itself the point worth keeping: **the function that does the dange
 parameter, and the function that names the dangerous target takes none.** It is what made the mechanics
 testable on a machine I intend to keep, and it is the pattern to reach for the next time something
 privileged needs verifying.
+
+---
+
+## 8. A package that installed on a system it could not run on
+
+**Phase 6** · **Serious** · **Found by** the user installing it
+
+```
+$ nix
+nix: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.39' not found (required by nix)
+```
+
+The `.deb` installed without complaint, the launcher did nothing, and no log was written — because the
+process never started far enough to open one.
+
+Two causes, and the second is the one that let the first through.
+
+**The build base was newer than the target.** CI built on `ubuntu-24.04`, whose glibc is 2.39. The
+machine is 22.04 with glibc 2.35, and `SPEC.md` §7.1 lists **Ubuntu 22.04+** as Tier 1 — so this was a
+spec violation, not merely an unlucky combination. glibc is forward-compatible only: building on the
+newest available base produces a binary that runs on nothing older, which is the opposite of what a
+release wants.
+
+**The package declared no `libc6` dependency at all**, so apt had no reason to refuse:
+
+```
+Depends: policykit-1 | polkit, libayatana-appindicator3-1, libwebkit2gtk-4.1-0, libgtk-3-0
+```
+
+Tauri's bundler writes `bundle.linux.deb.depends` from `tauri.conf.json` plus the toolkit packages it
+knows it linked. It does not run `dpkg-shlibdeps`, and nothing here noticed — including
+`scripts/check-bundle.sh`, which was written for exactly this purpose and checked that a *polkit*
+dependency was declared while never asking about the one whose absence cannot be recovered from after
+installation.
+
+**Resolved** in three parts, because any one alone leaves a hole:
+
+| | |
+| --- | --- |
+| Build on `ubuntu-22.04` | the oldest Tier-1 target, so the binary runs on all of them |
+| `scripts/add-deb-depends.sh` | runs `dpkg-shlibdeps` over every ELF the package installs and rewrites the control file, adding eight dependencies including `libc6 (>= …)` |
+| `check-bundle.sh` asserts a versioned `libc6` | so a package built without that step cannot be published |
+
+The dependency computation covers the **helper** as well as the app. A helper that cannot start is not
+a crash — it is every privileged feature failing with no explanation, which is harder to diagnose than
+a binary that refuses to launch.
+
+**Guard.** The new assertion, verified in both directions: it passes on the rewritten package and fails
+on the original with "this package would install on a system it cannot run on". The rewrite was also
+checked for what it *removes* — nothing; eight dependencies gained, none lost — because a merge that
+silently dropped `policykit-1` would have traded this failure for a subtler one.
+
+The lesson is not about glibc. `check-bundle.sh` existed, ran, and passed on a package that could not
+start, because it checked the things I had thought of. The reason it now checks `libc6` is that a user
+installed the package and it did not run — which is the one test none of this replaces.
