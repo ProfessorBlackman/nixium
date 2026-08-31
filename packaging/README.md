@@ -96,6 +96,11 @@ that works for all of them.
 
 `libwebkit2gtk-4.1-dev` is available on jammy (2.50.4), so nothing is given up.
 
+**The Rust cache is keyed to the distro release**, and has to be. `Swatinem/rust-cache` keys on
+`runner.os`, which is `Linux` for both 22.04 and 24.04 — so without this the 24.04 jobs' cache restores
+into the 22.04 one, and `target/` holds *executables*: a dependency's build script linked against glibc
+2.39 then fails to run, producing the same error one layer down from where it was fixed.
+
 ## Why the deb's dependencies are computed after bundling
 
 Tauri's bundler writes whatever `bundle.linux.deb.depends` says, plus the GTK and webkit packages it
