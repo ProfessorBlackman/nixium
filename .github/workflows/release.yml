@@ -68,7 +68,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
-            libayatana-appindicator3-dev libssl-dev patchelf rpm desktop-file-utils
+            libayatana-appindicator3-dev libssl-dev patchelf rpm desktop-file-utils dpkg-dev
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -128,7 +128,15 @@ jobs:
   build:
     name: Build the packages
     needs: [decide, verify]
-    runs-on: ubuntu-24.04
+    # Ubuntu 22.04, not 24.04. `SPEC.md` §7.1 makes **Ubuntu 22.04+** a Tier-1 target, and glibc is
+    # forward-compatible only: a binary built against 24.04's glibc 2.39 installs cleanly on 22.04 and
+    # then fails at every launch with `version GLIBC_2.39 not found`. Building on the oldest supported
+    # target is the only arrangement that works for all of them.
+    #
+    # `libwebkit2gtk-4.1-dev` is available on jammy (2.50.4), so nothing is given up by building here.
+    # If this runner label is ever retired, the replacement must be the oldest Tier-1 base rather than
+    # the newest available one.
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
@@ -137,7 +145,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
-            libayatana-appindicator3-dev libssl-dev patchelf rpm desktop-file-utils
+            libayatana-appindicator3-dev libssl-dev patchelf rpm desktop-file-utils dpkg-dev
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -157,6 +165,12 @@ jobs:
         run: cargo build -p nix-helper --release
 
       - run: pnpm tauri build
+
+      # Tauri's bundler declares no libc6 dependency, so a package that cannot run installs anyway.
+      # This computes the real shared-library dependencies from the binaries and rewrites the control
+      # file, which is what makes apt refuse rather than the launcher silently doing nothing.
+      - name: Declare the real shared-library dependencies
+        run: ./scripts/add-deb-depends.sh src-tauri/target/release/bundle/deb/*.deb
 
       # Opening the package is the difference between "a build succeeded" and "a package that works".
       # Among other things this asserts the path the polkit policy annotates is a path the package

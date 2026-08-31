@@ -69,9 +69,19 @@ if [[ -e "$helper" ]]; then
 fi
 
 # The desktop entry must be valid, or the launcher silently does not appear.
+#
+# A missing validator is a **failure**, not a skip. It used to be `if command -v … ; then`, which meant
+# this check quietly did nothing on any machine without `desktop-file-utils` — including the CI job
+# that lacked it, where the script printed every other line as `ok` and validated nothing. A check that
+# reports success when it did not run is worse than one that is absent, because the absent one does not
+# tell you the entry is fine.
 desktop="$work/usr/share/applications/com.tlc.nix.desktop"
-if [[ -e "$desktop" ]] && command -v desktop-file-validate >/dev/null; then
-  if desktop-file-validate "$desktop"; then
+if [[ -e "$desktop" ]]; then
+  if ! command -v desktop-file-validate >/dev/null; then
+    echo "  FAIL desktop-file-validate is not installed, so the entry cannot be checked" >&2
+    echo "       install desktop-file-utils" >&2
+    fail=1
+  elif desktop-file-validate "$desktop"; then
     echo "  ok   desktop entry validates"
   else
     echo "  FAIL desktop entry does not validate" >&2
@@ -85,6 +95,24 @@ if grep -qiE '^ Depends:.*polkit' "$work/.control"; then
   echo "  ok   declares a polkit dependency"
 else
   echo "  FAIL no polkit dependency declared" >&2
+  fail=1
+fi
+
+# The dependency whose absence is unrecoverable after installation.
+#
+# Tauri's bundler does not run `dpkg-shlibdeps`, so a package built by it declares no libc6 dependency
+# at all — and glibc is forward-compatible only. A binary built against a newer glibc than the target
+# installs cleanly, then fails at every launch with
+#
+#     nix: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.39' not found
+#
+# which is what happened: a package built on Ubuntu 24.04 installed happily on 22.04, a Tier-1 target.
+# `scripts/add-deb-depends.sh` computes the real dependencies; this asserts it ran.
+if grep -qiE '^ Depends:.*libc6 \(>=' "$work/.control"; then
+  echo "  ok   declares a versioned libc6 dependency"
+else
+  echo "  FAIL no versioned libc6 dependency — this package would install on a system it cannot run on" >&2
+  echo "       run scripts/add-deb-depends.sh on it after building" >&2
   fail=1
 fi
 
