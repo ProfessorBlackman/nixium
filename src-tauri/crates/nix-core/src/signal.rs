@@ -364,38 +364,93 @@ mod tests {
         );
     }
 
-    /// Raising a process's priority is privileged even for your own, and the message says so rather
-    /// than reporting a bare permission error.
+    /// A child process to renice, so no niceness test can affect another.
+    ///
+    /// # Regression
+    ///
+    /// These tests used to renice `std::process::id()` — the test process itself. A nice value set
+    /// through `setpriority(PRIO_PROCESS)` belongs to the process, not to the test that set it, and
+    /// `cargo test` runs a crate's tests in parallel threads of one process. So two tests were
+    /// mutating one value and reading each other's writes: `raising_niceness_on_our_own_process_works`
+    /// failed with `AuthDenied` on setting niceness to 1, which only happens when something had
+    /// already moved it. Neither test restored it, and one of them "checked" its cleanup with
+    /// `assert!(x.is_err() || x.is_ok())` — a tautology.
+    ///
+    /// A child each is state no other test can reach. It also tests the more relevant thing: renicing
+    /// *another* process is what the process table actually does.
+    struct Owned(std::process::Child);
+
+    impl Owned {
+        /// `None` when a child cannot be spawned, so the test skips rather than fails for the wrong
+        /// reason.
+        fn spawn() -> Option<Self> {
+            std::process::Command::new("sleep")
+                .arg("30")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .ok()
+                .map(Self)
+        }
+
+        fn pid(&self) -> u32 {
+            self.0.id()
+        }
+    }
+
+    impl Drop for Owned {
+        fn drop(&mut self) {
+            // Reaped as well as killed: a zombie left behind would be picked up by the process-table
+            // tests, which do read the real `/proc`.
+            self.0.kill().ok();
+            self.0.wait().ok();
+        }
+    }
+
+    /// Raising a process's priority is privileged even for a process you own, and the message says so
+    /// rather than reporting a bare permission error.
     #[test]
-    fn lowering_niceness_on_our_own_process_reports_the_real_reason() {
-        let me = std::process::id();
-        // Our own niceness is 0 by default; -5 is more favourable, which needs privilege.
-        match renice(me, -5) {
-            Err(error) => {
-                assert_eq!(error.code, ErrorCode::AuthDenied);
-                assert!(
-                    error
-                        .remedy
-                        .as_deref()
-                        .is_some_and(|r| r.contains("even their own")),
-                    "the surprise is worth explaining: {:?}",
-                    error.remedy
-                );
-            }
-            // Running as root, or with CAP_SYS_NICE. Put it back rather than leaving the test
-            // process favoured.
-            Ok(()) => {
-                renice(me, 0).ok();
-            }
+    fn lowering_niceness_reports_the_real_reason() {
+        let Some(child) = Owned::spawn() else {
+            return;
+        };
+
+        // A child starts at the parent's niceness; -5 is more favourable, which needs privilege.
+        //
+        // `if let Err` rather than a match: success means root or `CAP_SYS_NICE`, where the asymmetry
+        // does not apply and there is nothing to assert. Nothing to undo either — the child is about
+        // to be killed, which is the other reason to use one.
+        if let Err(error) = renice(child.pid(), -5) {
+            assert_eq!(error.code, ErrorCode::AuthDenied);
+            assert!(
+                error
+                    .remedy
+                    .as_deref()
+                    .is_some_and(|r| r.contains("even their own")),
+                "the surprise is worth explaining: {:?}",
+                error.remedy
+            );
         }
     }
 
     /// Being *politer* is always allowed, so this is the one renice that can be verified end to end.
     #[test]
-    fn raising_niceness_on_our_own_process_works() {
-        let me = std::process::id();
-        renice(me, 1).expect("anyone may lower their own priority");
-        // And it cannot be undone without privilege, which is precisely the asymmetry above.
-        assert!(renice(me, 0).is_err() || renice(me, 0).is_ok());
+    fn raising_niceness_works_on_a_process_we_own() {
+        let Some(child) = Owned::spawn() else {
+            return;
+        };
+
+        renice(child.pid(), 5).expect("anyone may make a process they own politer");
+
+        // And it cannot be undone without privilege, which is precisely the asymmetry above. Asserted
+        // on the *code* rather than with `is_err() || is_ok()`, which is true of every result there is.
+        // Success means root or `CAP_SYS_NICE`, where there is nothing to prove.
+        if let Err(error) = renice(child.pid(), 0) {
+            assert_eq!(
+                error.code,
+                ErrorCode::AuthDenied,
+                "lowering it again should be refused for lack of privilege, not for another reason"
+            );
+        }
     }
 }

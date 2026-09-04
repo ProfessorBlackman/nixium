@@ -2,7 +2,7 @@
 SHELL := /bin/bash
 CARGO_DIR := src-tauri
 
-.PHONY: help check fmt fmt-check clippy test typecheck a11y i18n version notices bindings perf helper dev build hooks \
+.PHONY: help check fmt fmt-check clippy test typecheck a11y i18n version bump notices bindings perf helper dev build hooks \
 	install-helper uninstall-helper helper-smoke timer-status timer-run
 
 help:
@@ -103,6 +103,10 @@ i18n: ## Translatable-string ratchet: the count must not go up (PLT-1)
 
 version: ## The version must be the same in all three files that carry it
 	node scripts/check-version.mjs
+
+bump: ## Bump the version everywhere: make bump BUMP=patch|minor|major, or BUMP=1.2.3
+	@test -n "$(BUMP)" || { echo "usage: make bump BUMP=patch|minor|major|x.y.z"; exit 2; }
+	node scripts/bump-version.mjs $(BUMP)
 
 notices: ## Regenerate third-party attribution from the lockfile (PLT-5)
 	# Fetch first: the collector reads the `.crate` archives, and a crate the cache has never seen is a
