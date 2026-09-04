@@ -349,3 +349,52 @@ This is the fourth entry in this log where the defect is *a check that quietly d
 alongside the guard that could not recognise its own remedy, the ratchet that counted its own
 documentation, and the field whose comparison could never fail. The shape recurs because a check that
 skips looks identical, in a passing build, to a check that ran.
+
+---
+
+## 12. A build cache that carried binaries across glibc versions
+
+**Phase 6** · **Serious** · **Found by** the fix for the previous defect failing
+
+Moving the bundle job to `ubuntu-22.04` — so the packaged binary would run on the oldest Tier-1 target
+— made the build fail with the *same error it was meant to fix*, one layer down:
+
+```
+error: failed to run custom build command for `crc32fast v1.5.1`
+  target/release/build/crc32fast-…/build-script-build:
+    /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.39' not found
+```
+
+Not the app this time: a **dependency's build script**, which cargo compiles and then *executes*.
+
+`Swatinem/rust-cache` keys on `runner.os`, and `runner.os` is `Linux` for both 22.04 and 24.04. So the
+cache saved by the 24.04 jobs restored straight into the 22.04 one — and `target/` contains executables,
+not just object files. A build script linked against glibc 2.39 cannot run on 2.35, so the build died
+inside a crate that has nothing to do with any of this.
+
+The shape is worth naming: **a cache key that is coarser than the thing it caches**. Nothing was wrong
+with either job in isolation; the defect only existed in the space between them, and only after one of
+them moved.
+
+**Resolved** by keying every Rust cache on the distro release:
+
+```yaml
+- name: Key the Rust cache to this Ubuntu release
+  run: . /etc/os-release && echo "CACHE_OS=$ID-$VERSION_ID" >> "$GITHUB_ENV"
+
+- uses: Swatinem/rust-cache@v2
+  with:
+    prefix-key: v0-rust-${{ env.CACHE_OS }}
+```
+
+Read from `/etc/os-release` rather than hardcoded from `runs-on`. A literal would have worked today and
+gone stale silently the next time a runner label changed — which is precisely the failure mode being
+fixed, one level up.
+
+Applied to **all five** cache uses, not only the two jobs that currently differ. The bug was that two
+jobs could share a cache while differing in something that mattered; fixing only the pair that happens
+to differ now leaves the mechanism intact for the next pair.
+
+**Guard.** None beyond the key itself, and none is available: a cache poisoning another job cannot be
+asserted from inside either job. What *is* recorded is why the key is derived rather than written down,
+because that is the part a future change would otherwise undo.

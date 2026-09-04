@@ -71,9 +71,23 @@ jobs:
             libayatana-appindicator3-dev libssl-dev patchelf rpm desktop-file-utils dpkg-dev
 
       - uses: dtolnay/rust-toolchain@stable
+      # The Rust cache must not be shared between Ubuntu releases.
+      #
+      # `Swatinem/rust-cache` keys on `runner.os`, which is "Linux" for both 22.04 and 24.04 — so a
+      # cache saved by a 24.04 job restores into a 22.04 one, bringing **prebuilt build-script
+      # binaries** with it. Those are executables: one linked against glibc 2.39 cannot run on 2.35, and
+      # the build fails inside a dependency's build script with the same `GLIBC_2.39 not found` as the
+      # packaged app did.
+      #
+      # Read from `/etc/os-release` rather than hardcoded from `runs-on`, so the key follows the runner
+      # if a label ever changes instead of quietly going stale.
+      - name: Key the Rust cache to this Ubuntu release
+        run: . /etc/os-release && echo "CACHE_OS=$ID-$VERSION_ID" >> "$GITHUB_ENV"
+
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          prefix-key: v0-rust-${{ env.CACHE_OS }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -148,9 +162,23 @@ jobs:
             libayatana-appindicator3-dev libssl-dev patchelf rpm desktop-file-utils dpkg-dev
 
       - uses: dtolnay/rust-toolchain@stable
+      # The Rust cache must not be shared between Ubuntu releases.
+      #
+      # `Swatinem/rust-cache` keys on `runner.os`, which is "Linux" for both 22.04 and 24.04 — so a
+      # cache saved by a 24.04 job restores into a 22.04 one, bringing **prebuilt build-script
+      # binaries** with it. Those are executables: one linked against glibc 2.39 cannot run on 2.35, and
+      # the build fails inside a dependency's build script with the same `GLIBC_2.39 not found` as the
+      # packaged app did.
+      #
+      # Read from `/etc/os-release` rather than hardcoded from `runs-on`, so the key follows the runner
+      # if a label ever changes instead of quietly going stale.
+      - name: Key the Rust cache to this Ubuntu release
+        run: . /etc/os-release && echo "CACHE_OS=$ID-$VERSION_ID" >> "$GITHUB_ENV"
+
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          prefix-key: v0-rust-${{ env.CACHE_OS }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:

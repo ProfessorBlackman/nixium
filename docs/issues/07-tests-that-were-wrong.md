@@ -169,3 +169,55 @@ conditional property, since a machine legitimately might have none.
 That second shape is the transferable part. The original assertion was about the *result*; the
 replacement is about the result agreeing with the input. A test that reads a directory and asserts
 "something came back" cannot tell you it read the right directory.
+
+---
+
+## 6. Two tests fighting over one process's nice value
+
+**Phase 6** · **Moderate** · **Found by** a full `make check` after a version bump
+
+```
+test signal::tests::raising_niceness_on_our_own_process_works ... FAILED
+  anyone may lower their own priority: AppError { code: AuthDenied,
+    message: "Not allowed to set process 2163426 to niceness 1." }
+```
+
+Setting a nice value *up* to 1 is allowed for anyone, always — unless the value is already above 1, in
+which case it is a decrease and needs privilege. So something had already moved it.
+
+Two tests had. Both reniced `std::process::id()`:
+
+```rust
+fn lowering_niceness_on_our_own_process_reports_the_real_reason() {
+    match renice(me, -5) { … Ok(()) => { renice(me, 0).ok(); } }
+}
+
+fn raising_niceness_on_our_own_process_works() {
+    renice(me, 1).expect("anyone may lower their own priority");
+    assert!(renice(me, 0).is_err() || renice(me, 0).is_ok());
+}
+```
+
+A nice value set through `setpriority(PRIO_PROCESS)` belongs to the **process**, not to the test that
+set it, and `cargo test` runs a crate's tests in parallel threads of one process. So the two were
+writing one value and reading each other's writes. Neither restored it. It passes in isolation, passed
+the next several runs, and failed once — which is the worst frequency for a test to fail at.
+
+And the second one's cleanup asserted nothing whatsoever: `x.is_err() || x.is_ok()` is true of every
+`Result` that exists. Written to express "either outcome is fine here", it expressed nothing, and would
+have gone on passing if `renice` had started returning the wrong error entirely.
+
+**Resolved** by giving each test a **child process it owns** — `sleep 30`, killed and reaped on drop.
+State no other test can reach, and a better test of the real thing: renicing *another* process is what
+the process table actually does. The tautology is replaced with a match asserting `AuthDenied`
+specifically, with the root case handled explicitly rather than swept into an always-true expression.
+
+**Guard.** The isolation is the guard: there is no longer shared state to interleave. The reaping
+matters too — a zombie left behind would be read by the process-table tests, which walk the real
+`/proc`.
+
+This is the third defect in this project from **process-wide state in a parallel test harness**, after
+the idle-CPU budget that measured 196% of one core and the memory budget that measured 317 MiB. The
+pattern is worth stating plainly: `cargo test` gives each test a thread, not a process, so anything
+reached through a pid — CPU time, resident memory, nice value, `/proc/self/*` — is shared, and a test
+that writes one is writing to every other test at once.
