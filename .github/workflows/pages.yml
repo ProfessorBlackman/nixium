@@ -1,0 +1,69 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Methuselah Nwodobeh
+
+name: Landing page
+
+# Only when the page itself changes. The site is one directory of static files with no build step, so
+# there is nothing for a push elsewhere in the repo to invalidate.
+on:
+  push:
+    branches: [master]
+    paths:
+      - "site/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+# `pages: write` and `id-token: write` are what the deploy action needs; nothing here writes to the
+# repository.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time, and a newer push wins rather than queueing behind an older one.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Publish
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Every reference in the page is relative, so it works at whatever path Pages serves it from.
+      # This asserts that rather than assuming it: an absolute `/asset` path would 404 on a project
+      # site, which is served from a subdirectory, and the page would look fine locally.
+      - name: No absolute asset paths
+        run: |
+          set -euo pipefail
+          if grep -nE '(src|href)="/[^/]' site/*.html; then
+            echo "::error::an absolute path will 404 on a project site, which is served from a subdirectory"
+            exit 1
+          fi
+          echo "all asset references are relative"
+
+      - name: Every file carries its licence
+        run: |
+          set -euo pipefail
+          missing=$(git ls-files 'site/*.html' 'site/*.css' \
+            | while read -r f; do
+                head -c 400 "$f" | grep -q 'SPDX-License-Identifier: GPL-3.0-or-later' || echo "$f"
+              done)
+          if [ -n "$missing" ]; then
+            echo "::error::missing SPDX licence header:"
+            echo "$missing"
+            exit 1
+          fi
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4

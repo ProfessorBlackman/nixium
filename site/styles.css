@@ -1,0 +1,524 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* Copyright (C) 2026 Methuselah Nwodobeh */
+
+/*
+ * The palette comes from the mascot rather than from a stock scheme: the aubergine ground is what
+ * makes her cream circle read as a coin, the hibiscus is the flower in the hat, the straw is the hat
+ * itself, and the pale wing pink marks figures that are estimates rather than measurements.
+ *
+ * Every pair used for text was checked against WCAG AA before it went in.
+ */
+:root {
+  --plum: #2e1b2e;
+  --plum-deep: #241623;
+  /* Two line colours, because they answer to different rules.
+     `--plum-line` divides sections and table rows: decoration, which WCAG asks nothing of, and which
+     should stay quiet or it competes with the content it separates.
+     `--plum-edge` is the boundary of a control. AA wants 3:1 for those, and it gets exactly that —
+     the app itself shipped a button border at 1.55:1 once, which is an outline nobody with low
+     vision can find. */
+  --plum-line: #4a3049;
+  --plum-edge: #826081;
+  --cream: #f6efe3;
+  --cream-dim: #cbbcb4;
+  --hibiscus: #ff5f92;
+  --straw: #e8bd77;
+  --wing: #f0c4dc;
+
+  --measure: 62ch;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  /* Anchors land below the fixed masthead rather than under it. */
+  scroll-padding-top: 5rem;
+}
+
+body {
+  margin: 0;
+  background: var(--plum);
+  color: var(--cream);
+  font-family: "Archivo", system-ui, sans-serif;
+  font-size: 1.0625rem;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Figures and commands are set in mono because aligned digits and copyable commands are what mono is
+   for here — not as a decorative device on small labels. */
+.fig,
+code,
+pre {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+a {
+  color: var(--hibiscus);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+a:hover {
+  color: var(--wing);
+}
+
+:focus-visible {
+  outline: 2px solid var(--straw);
+  outline-offset: 3px;
+}
+
+.skip {
+  position: absolute;
+  left: -9999px;
+}
+
+.skip:focus {
+  left: 1rem;
+  top: 1rem;
+  z-index: 10;
+  background: var(--cream);
+  color: var(--plum);
+  padding: 0.5rem 0.9rem;
+  border-radius: 2px;
+}
+
+/* ---------- masthead ---------- */
+
+.masthead {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 1rem clamp(1.25rem, 5vw, 4.5rem);
+  background: color-mix(in srgb, var(--plum) 92%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--plum-line);
+}
+
+/* The wordmark is set the way the app spells its own name: lowercase, tight, no ornament. */
+.wordmark {
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.masthead nav {
+  display: flex;
+  align-items: center;
+  gap: clamp(0.9rem, 2.5vw, 1.9rem);
+  font-size: 0.9375rem;
+}
+
+.masthead nav a {
+  color: var(--cream);
+  text-decoration: none;
+}
+
+.masthead nav a:hover {
+  color: var(--hibiscus);
+}
+
+.masthead-cta {
+  border: 1px solid var(--hibiscus);
+  border-radius: 999px;
+  padding: 0.3rem 1rem;
+  color: var(--hibiscus) !important;
+}
+
+.masthead-cta:hover {
+  background: var(--hibiscus);
+  color: var(--plum) !important;
+}
+
+/* ---------- hero ---------- */
+
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  gap: clamp(2rem, 5vw, 4.5rem);
+  align-items: center;
+  padding: clamp(3rem, 8vw, 6.5rem) clamp(1.25rem, 5vw, 4.5rem) clamp(3rem, 7vw, 5.5rem);
+  max-width: 78rem;
+  margin: 0 auto;
+}
+
+h1 {
+  margin: 0 0 1rem;
+  font-size: clamp(2.4rem, 6vw, 4.1rem);
+  font-weight: 700;
+  line-height: 1.02;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+
+.lede {
+  margin: 0 0 2rem;
+  max-width: var(--measure);
+  font-size: 1.125rem;
+  color: var(--cream-dim);
+}
+
+/*
+ * The ledger: the page's one bold structural element, so everything around it stays quiet. Bordered
+ * and inset rather than another rounded card with a soft shadow — it is a reckoning, and it should
+ * read like one.
+ */
+.ledger {
+  margin: 0 0 2.25rem;
+  padding: 1.4rem 1.5rem 1.25rem;
+  background: var(--plum-deep);
+  border: 1px solid var(--plum-line);
+  border-left: 3px solid var(--straw);
+  max-width: 34rem;
+}
+
+.ledger figcaption {
+  margin-bottom: 1rem;
+  font-size: 0.875rem;
+  color: var(--cream-dim);
+}
+
+.ledger dl {
+  margin: 0;
+}
+
+.ledger-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--plum-line);
+}
+
+.ledger-row dt {
+  font-size: 0.9375rem;
+  color: var(--cream-dim);
+}
+
+.ledger-row dd {
+  margin: 0;
+  white-space: nowrap;
+  font-size: 1.0625rem;
+}
+
+.ledger-row .fig {
+  font-size: 1.35rem;
+  font-weight: 600;
+}
+
+/* The answer, distinguished by weight and colour rather than by a badge. */
+.ledger-row.is-answer {
+  border-bottom: 0;
+  padding-top: 0.8rem;
+}
+
+.ledger-row.is-answer dt {
+  color: var(--cream);
+  font-weight: 600;
+}
+
+.ledger-row.is-answer dd {
+  color: var(--straw);
+}
+
+.ledger-row.is-answer .fig {
+  font-size: 2.1rem;
+}
+
+.ledger-note {
+  margin: 1rem 0 0;
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  color: var(--cream-dim);
+}
+
+.hero-mark img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 27rem;
+  margin-inline: auto;
+}
+
+/* ---------- buttons ---------- */
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.button {
+  display: inline-block;
+  padding: 0.7rem 1.4rem;
+  background: var(--hibiscus);
+  color: var(--plum);
+  border: 1px solid var(--hibiscus);
+  border-radius: 3px;
+  font-weight: 600;
+  font-size: 0.9375rem;
+  text-decoration: none;
+}
+
+.button:hover {
+  background: var(--wing);
+  border-color: var(--wing);
+  color: var(--plum);
+}
+
+.button-quiet {
+  background: transparent;
+  color: var(--cream);
+  border-color: var(--plum-edge);
+}
+
+.button-quiet:hover {
+  background: transparent;
+  border-color: var(--straw);
+  color: var(--straw);
+}
+
+/* ---------- bands ---------- */
+
+.band {
+  padding: clamp(3rem, 7vw, 5rem) clamp(1.25rem, 5vw, 4.5rem);
+  max-width: 78rem;
+  margin: 0 auto;
+}
+
+.band-recessed {
+  max-width: none;
+  background: var(--plum-deep);
+  border-block: 1px solid var(--plum-line);
+}
+
+.band-recessed > * {
+  max-width: 78rem;
+  margin-inline: auto;
+}
+
+.band h2 {
+  margin: 0 0 0.9rem;
+  font-size: clamp(1.6rem, 3.4vw, 2.3rem);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+}
+
+.band-lede {
+  margin: 0 0 2rem;
+  max-width: var(--measure);
+  color: var(--cream-dim);
+}
+
+.band-note {
+  margin: 1.75rem 0 0;
+  max-width: var(--measure);
+  font-size: 0.9375rem;
+  color: var(--cream-dim);
+}
+
+.band-note code {
+  color: var(--cream);
+  font-size: 0.875em;
+}
+
+/* ---------- what it does ---------- */
+
+.does {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  gap: 2rem clamp(1.5rem, 4vw, 3rem);
+  margin-top: 1.5rem;
+}
+
+.does h3 {
+  margin: 0 0 0.5rem;
+  padding-top: 0.9rem;
+  border-top: 2px solid var(--hibiscus);
+  font-size: 1.0625rem;
+  font-weight: 600;
+}
+
+.does p {
+  margin: 0;
+  font-size: 0.9375rem;
+  color: var(--cream-dim);
+}
+
+/* ---------- what it will not do ---------- */
+
+/* A hanging refusal mark, not a tick: these are the things it declines. */
+.wont {
+  list-style: none;
+  margin: 1.5rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 1.15rem;
+  max-width: 58rem;
+}
+
+.wont li {
+  position: relative;
+  padding-left: 2.1rem;
+  font-size: 0.9375rem;
+  color: var(--cream-dim);
+}
+
+.wont li::before {
+  content: "\2014";
+  position: absolute;
+  left: 0;
+  top: -0.05em;
+  color: var(--straw);
+  font-size: 1.1rem;
+}
+
+.wont strong {
+  color: var(--cream);
+  font-weight: 600;
+}
+
+/* ---------- numbers ---------- */
+
+.numbers {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+}
+
+.numbers th,
+.numbers td {
+  text-align: left;
+  padding: 0.75rem 1rem 0.75rem 0;
+  border-bottom: 1px solid var(--plum-line);
+  vertical-align: baseline;
+}
+
+.numbers thead th {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--cream-dim);
+  border-bottom-color: var(--straw);
+}
+
+.numbers tbody th {
+  font-weight: 400;
+  color: var(--cream);
+}
+
+.numbers tbody td {
+  color: var(--cream-dim);
+  white-space: nowrap;
+}
+
+.numbers tbody td:first-of-type {
+  color: var(--straw);
+}
+
+.numbers .fig {
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+/* ---------- install ---------- */
+
+.install {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.install-block h3 {
+  margin: 0 0 0.6rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--cream-dim);
+}
+
+.install pre {
+  margin: 0;
+  padding: 0.85rem 1rem;
+  background: var(--plum);
+  border: 1px solid var(--plum-line);
+  border-radius: 3px;
+  overflow-x: auto;
+  font-size: 0.875rem;
+}
+
+.band-recessed .install pre {
+  background: #1b1019;
+}
+
+.install code {
+  color: var(--wing);
+}
+
+.install-links {
+  margin: 0;
+}
+
+/* ---------- where it is up to ---------- */
+
+.standing {
+  margin: 0 0 1.1rem;
+  max-width: var(--measure);
+  color: var(--cream-dim);
+}
+
+/* ---------- footer ---------- */
+
+footer {
+  padding: clamp(2.5rem, 5vw, 3.5rem) clamp(1.25rem, 5vw, 4.5rem);
+  border-top: 1px solid var(--plum-line);
+  font-size: 0.875rem;
+  color: var(--cream-dim);
+}
+
+footer p {
+  max-width: var(--measure);
+  margin: 0 0 0.9rem;
+}
+
+footer p:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  margin-bottom: 0;
+}
+
+/* ---------- narrow ---------- */
+
+@media (max-width: 62rem) {
+  .hero {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* The mascot leads on a phone, where a 4rem headline plus a ledger fills the screen before she
+     would ever be reached. */
+  .hero-mark {
+    order: -1;
+  }
+
+  .hero-mark img {
+    max-width: 15rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}

@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>nix — find out where your disk went</title>
+    <meta
+      name="description"
+      content="A Linux storage tool that tells you what you will actually get back. Open source, GPL-3.0."
+    />
+    <link rel="icon" href="favicon.png" type="image/png" />
+
+    <meta property="og:title" content="nix — find out where your disk went" />
+    <meta
+      property="og:description"
+      content="A Linux storage tool that tells you what you will actually get back."
+    />
+    <meta property="og:image" content="mascot.png" />
+    <meta property="og:type" content="website" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+
+  <body>
+    <a class="skip" href="#start">Skip to content</a>
+
+    <header class="masthead">
+      <span class="wordmark">nix</span>
+      <nav aria-label="Links">
+        <a href="https://github.com/ProfessorBlackman/nixium">Source</a>
+        <a href="https://github.com/ProfessorBlackman/nixium/releases">Releases</a>
+        <a class="masthead-cta" href="#install">Install</a>
+      </nav>
+    </header>
+
+    <main id="start">
+      <!--
+        The hero is the product's thesis, not a slogan: three real measurements of one real package,
+        only one of which is the answer to "what do I get back". No screenshot, because there is no
+        screenshot to show and a fabricated mockup would be the first lie on a page about not lying.
+      -->
+      <section class="hero">
+        <div class="hero-text">
+          <h1>Find out where your disk went.</h1>
+          <p class="lede">
+            Then get it back — with a figure you can hold the tool to. nix is a storage manager for
+            Linux that measures what it is about to delete, and tells you when it cannot promise the
+            space will come back.
+          </p>
+
+          <figure class="ledger">
+            <figcaption>
+              One package on the machine this was built on, measured three ways
+            </figcaption>
+            <dl>
+              <div class="ledger-row">
+                <dt>Its own package manager claims</dt>
+                <dd><span class="fig">96.3</span> MB</dd>
+              </div>
+              <div class="ledger-row">
+                <dt>Its files actually contain</dt>
+                <dd><span class="fig">76.1</span> MB</dd>
+              </div>
+              <div class="ledger-row is-answer">
+                <dt>The disk has actually committed</dt>
+                <dd><span class="fig">181.3</span> MB</dd>
+              </div>
+            </dl>
+            <p class="ledger-note">
+              Only the last one is what removing it gives you back. It is 85&nbsp;MB more than the
+              package manager reports, because 30,547 small files each cost a whole block. nix shows
+              you that figure, and says so when it is an estimate.
+            </p>
+          </figure>
+
+          <div class="hero-actions">
+            <a class="button" href="#install">Install nix</a>
+            <a class="button button-quiet" href="https://github.com/ProfessorBlackman/nixium"
+              >Read the source</a
+            >
+          </div>
+        </div>
+
+        <div class="hero-mark">
+          <img
+            src="mascot.png"
+            alt="The nix mascot: a chimpanzee in a straw hat and sunglasses, wearing a pink floral dress and fairy wings, smoking a cigar and making a peace sign."
+            width="440"
+            height="440"
+          />
+        </div>
+      </section>
+
+      <section class="band" id="does" aria-labelledby="does-h">
+        <h2 id="does-h">What it does</h2>
+        <div class="does">
+          <article>
+            <h3>Shows you the disk</h3>
+            <p>
+              A scan that attributes every byte to something, down a tree you can walk. Sizes are what
+              the filesystem has committed, not what the files claim to contain.
+            </p>
+          </article>
+          <article>
+            <h3>Reclaims it, on your say-so</h3>
+            <p>
+              Caches, logs, superseded packages, old kernels, build output, container images. You see
+              every item and what losing it costs before anything is touched.
+            </p>
+          </article>
+          <article>
+            <h3>Watches the machine</h3>
+            <p>
+              CPU, memory, disks, network, temperatures and battery, sampled only while you are
+              looking. Close the window and it stops.
+            </p>
+          </article>
+          <article>
+            <h3>Manages what is installed</h3>
+            <p>
+              Packages, services and timers, startup entries, software sources and the hosts file —
+              each read from the system rather than guessed at.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <!--
+        The trust section. A features list is the easy half; for a tool that deletes things, the
+        refusals are what a sceptical user needs, so they get equal billing and plain language.
+      -->
+      <section class="band band-recessed" id="wont" aria-labelledby="wont-h">
+        <h2 id="wont-h">What it will not do</h2>
+        <ul class="wont">
+          <li>
+            <strong>Touch anything you made.</strong> Documents, pictures, projects, configuration.
+            It reclaims things that regenerate themselves, and things you have chosen.
+          </li>
+          <li>
+            <strong>Remove the kernel you are running,</strong> or the newest one installed. Refused
+            by the interface, and refused again by the privileged process that would have to carry it
+            out.
+          </li>
+          <li>
+            <strong>Count the trash as freed.</strong> The trash is on the same disk, so moving
+            something there frees nothing until you empty it. That is reported as its own figure.
+          </li>
+          <li>
+            <strong>Claim a number it has not measured.</strong> Where space is shared with a
+            filesystem snapshot it says <em>up to</em>, and afterwards it checks its own arithmetic
+            against the filesystem and tells you if the two disagree.
+          </li>
+          <li>
+            <strong>Ask for your password more than it needs to.</strong> Once per batch, through
+            polkit, and only for operations that genuinely require it.
+          </li>
+        </ul>
+      </section>
+
+      <section class="band" id="numbers" aria-labelledby="numbers-h">
+        <h2 id="numbers-h">Numbers it is held to</h2>
+        <p class="band-lede">
+          Each of these is asserted by a test that fails the build when it regresses. Measured on the
+          machine nix was written on — an eight-core desktop running Ubuntu 22.04.
+        </p>
+        <table class="numbers">
+          <thead>
+            <tr>
+              <th scope="col">Measured</th>
+              <th scope="col">Result</th>
+              <th scope="col">Ceiling</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">Subprocesses spawned while monitoring</th>
+              <td><span class="fig">0</span></td>
+              <td>none permitted</td>
+            </tr>
+            <tr>
+              <th scope="row">Processor used with the monitor open</th>
+              <td><span class="fig">0.75</span>% of one core</td>
+              <td>1%</td>
+            </tr>
+            <tr>
+              <th scope="row">Memory held after a full scan</th>
+              <td><span class="fig">45.7</span> MiB</td>
+              <td>150 MB</td>
+            </tr>
+            <tr>
+              <th scope="row">Time to read a file while scanning</th>
+              <td><span class="fig">4.65</span> µs</td>
+              <td>10 µs</td>
+            </tr>
+            <tr>
+              <th scope="row">Time to list 757 system services</th>
+              <td><span class="fig">11.7</span> ms</td>
+              <td>500 ms</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="band-note">
+          The first row is the one worth explaining: nix reads the kernel's own interfaces directly, so
+          nothing is launched on a timer to sample your machine. Listing those services takes one call
+          rather than 1,515 of them.
+        </p>
+      </section>
+
+      <section class="band band-recessed" id="install" aria-labelledby="install-h">
+        <h2 id="install-h">Install</h2>
+        <p class="band-lede">
+          Version 0.2.0, for x86-64 Linux. Built on Ubuntu 22.04, so it runs on that and anything
+          newer.
+        </p>
+
+        <div class="install">
+          <div class="install-block">
+            <h3>Debian, Ubuntu and derivatives</h3>
+            <pre><code>sudo apt install ./nix_0.2.0_amd64.deb</code></pre>
+          </div>
+          <div class="install-block">
+            <h3>Fedora and RPM distributions</h3>
+            <pre><code>sudo dnf install ./nix-0.2.0-1.x86_64.rpm</code></pre>
+          </div>
+          <div class="install-block">
+            <h3>Arch, from source</h3>
+            <pre><code>makepkg -si</code></pre>
+          </div>
+        </div>
+
+        <p class="install-links">
+          <a class="button" href="https://github.com/ProfessorBlackman/nixium/releases"
+            >Download from the releases page</a
+          >
+        </p>
+
+        <p class="band-note">
+          The <code>.deb</code> and <code>.rpm</code> install a small privileged helper and its polkit
+          policy, which is what lets nix reclaim system space. An AppImage is also published, but
+          polkit identifies a program by its absolute path and an AppImage does not have a fixed one —
+          so privileged features report themselves unavailable there rather than failing when you try
+          to use them.
+        </p>
+      </section>
+
+      <!--
+        Stating the pre-1.0 position plainly, and linking the defect log. A page that argues for
+        honest measurement and then hides its own unfinished edges would be arguing against itself.
+      -->
+      <section class="band" id="honest" aria-labelledby="honest-h">
+        <h2 id="honest-h">Where it is up to</h2>
+        <p class="standing">
+          nix is not 1.0 yet. Everything above is built and tested, and some of it has been tested
+          only against the machine it was written on: the package backends for Fedora, openSUSE and
+          Arch are written to documented output and have never met a real installation of those
+          systems, and the operations that delete system files have never run as root outside a test.
+          Those are listed, one by one, with what is missing.
+        </p>
+        <p class="standing">
+          Every defect found while building it is written down too — what it was, how it surfaced, and
+          what now stops it recurring. There are seventy-one of them.
+        </p>
+        <p class="hero-actions">
+          <a
+            class="button button-quiet"
+            href="https://github.com/ProfessorBlackman/nixium/blob/master/docs/issues/README.md"
+            >Read the defect log</a
+          >
+          <a
+            class="button button-quiet"
+            href="https://github.com/ProfessorBlackman/nixium/blob/master/docs/SPEC.md"
+            >Read the specification</a
+          >
+        </p>
+      </section>
+    </main>
+
+    <footer>
+      <p>
+        nix is free software under the
+        <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU GPL, version 3 or later</a>. It began
+        as a replacement for Stacer, which stopped being maintained.
+      </p>
+      <p>
+        <a href="https://github.com/ProfessorBlackman/nixium">Source</a>
+        <a href="https://github.com/ProfessorBlackman/nixium/issues">Report a problem</a>
+        <a href="https://github.com/ProfessorBlackman/nixium/releases">Releases</a>
+      </p>
+    </footer>
+  </body>
+</html>
