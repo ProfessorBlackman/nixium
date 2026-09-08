@@ -115,7 +115,7 @@ pub(crate) fn operation_count(state: State<'_, AppState>) -> usize {
 /// The Phase 0 proof that the escalation loop works end to end: spawn under polkit, handshake,
 /// verify the protocol version, report the effective uid. A refused authorisation comes back as
 /// [`ErrorCode::AuthDenied`] with a remedy — never as success, which is what Stacer did.
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn helper_probe() -> Result<HelperProbe> {
     let transport = helper::Transport::production()?;
     let mut client = helper::Client::connect(&transport)?;
@@ -455,7 +455,7 @@ pub(crate) fn packages_removal_preview(ids: Vec<String>) -> Result<pkg::RemovalP
 ///
 /// **The outcome is measured, not assumed.** apt exits once for the whole transaction, so the
 /// inventory is read before and after and diffed against the preview.
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn packages_remove(ids: Vec<String>) -> Result<pkg::RemovalOutcome> {
     if ids.is_empty() {
         return Ok(pkg::RemovalOutcome::default());
@@ -608,7 +608,7 @@ pub(crate) fn apt_sources_list() -> Vec<apt_sources::Repository> {
 ///
 /// Addressed by file and **position** — line number for a one-line entry, stanza index for deb822.
 /// Never by matching the entry's text, which is how an edit ends up on a different line.
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn apt_source_set_enabled(
     at: apt_sources::Location,
     enabled: bool,
@@ -620,7 +620,7 @@ pub(crate) fn apt_source_set_enabled(
 }
 
 /// Remove a repository entry. `PKG-5`.
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn apt_source_remove(at: apt_sources::Location) -> Result<Vec<apt_sources::Repository>> {
     let mut file = apt_sources::open(&at.file)?;
     file.remove(at.index)?;
@@ -717,7 +717,7 @@ pub(crate) fn hosts_load() -> Result<hosts::HostsFile> {
 ///
 /// Validated here as well as in the helper. Here it gives the user an error they can act on before a
 /// password prompt; there it is what stops the operation being an arbitrary privileged write.
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn hosts_save(file: hosts::HostsFile) -> Result<hosts::HostsFile> {
     let content = file.render();
     hosts::validate_document(&content)?;
@@ -794,7 +794,7 @@ pub(crate) fn processes_forget(state: State<'_, AppState>) {
 /// never prompts — and a prompt, when it appears, means the process really does belong to someone
 /// else. `state` is the process's state as the table last saw it, used to refuse a zombie before
 /// anything is sent.
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn process_signal(
     pid: u32,
     signal: nix_core::signal::Signal,
@@ -822,7 +822,7 @@ pub(crate) fn process_signal(
 ///
 /// Escalates on permission failure for the same reason, and that is more often here: lowering a
 /// niceness is privileged even for your own process.
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn process_renice(pid: u32, niceness: i32) -> Result<()> {
     match nix_core::signal::renice(pid, niceness) {
         Ok(()) => Ok(()),
@@ -1199,7 +1199,7 @@ pub(crate) fn reclaim_preview(state: State<'_, AppState>) -> Result<Preview> {
 /// `ticket` must match the preview the user was shown, and `selection` must name items from it.
 /// Both guards — the protection rules and the time-of-check comparison — run again per item, at the
 /// moment of acting.
-#[tauri::command]
+#[tauri::command(async)]
 pub(crate) fn reclaim_execute(
     app: AppHandle,
     state: State<'_, AppState>,

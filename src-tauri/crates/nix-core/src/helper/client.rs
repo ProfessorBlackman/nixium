@@ -90,7 +90,9 @@ fn default_helper_path() -> PathBuf {
 #[derive(Debug)]
 pub struct Client {
     child: Child,
-    stdin: std::process::ChildStdin,
+    /// `None` once [`Client::shutdown`] has closed it. Dropping this pipe is what stops the helper,
+    /// so it cannot be a plain field: a field only drops *after* `Drop::drop` has already returned.
+    stdin: Option<std::process::ChildStdin>,
     stdout: BufReader<std::process::ChildStdout>,
     next_id: AtomicU64,
     uid: u32,
@@ -136,7 +138,7 @@ impl Client {
 
         let mut client = Self {
             child,
-            stdin,
+            stdin: Some(stdin),
             stdout: BufReader::new(stdout),
             next_id: AtomicU64::new(1),
             uid: u32::MAX,
@@ -208,10 +210,16 @@ impl Client {
             })
         })?;
 
-        self.stdin
+        let stdin = self.stdin.as_mut().ok_or_else(|| {
+            AppError::new(
+                ErrorCode::HelperUnavailable,
+                "The privileged session has already been closed.",
+            )
+        })?;
+        stdin
             .write_all(line.as_bytes())
-            .and_then(|()| self.stdin.write_all(b"\n"))
-            .and_then(|()| self.stdin.flush())
+            .and_then(|()| stdin.write_all(b"\n"))
+            .and_then(|()| stdin.flush())
             .map_err(|e| AppError::from_io(&e, "send a request to the helper"))?;
 
         let mut response_line = String::new();
@@ -247,15 +255,59 @@ impl Client {
     }
 
     /// Close stdin and reap the child. Called by [`Drop`], exposed for the error paths.
+    ///
+    /// # Why this closes a pipe rather than killing the child
+    ///
+    /// Under [`Transport::Pkexec`] the helper is root and the application is not, so `kill` fails with
+    /// `EPERM`: the privileged process cannot be signalled by the unprivileged one that authorised it.
+    /// Closing stdin is the only shutdown that works on the escalated path, and it has to happen
+    /// **before** the wait.
+    ///
+    /// # Regression
+    ///
+    /// This flushed stdin, killed, then waited. Under `Direct` — every test, because `pkexec` cannot
+    /// run in CI — the kill succeeds and the wait returns at once. Under `pkexec` the kill was refused
+    /// and the wait then blocked on a helper that was still reading a stdin nobody had closed: a
+    /// deadlock in `Drop`, on Tauri's main thread, after the privileged work had already succeeded. The
+    /// window froze and the desktop offered to force-quit an application whose deletions had all
+    /// completed. So the wait is bounded now as well, because a wait that cannot be interrupted must
+    /// not be able to hang a caller.
     fn shutdown(&mut self) {
-        // Closing stdin is the helper's cue to exit; then reap so we leave no zombie.
-        let _ = self.stdin.flush();
-        if let Err(e) = self.child.kill() {
-            tracing::debug!(error = %e, "helper had already exited");
+        /// How long to wait for the helper to notice its input closed before giving up on reaping it.
+        const GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+        /// Poll interval while waiting. Short enough to be imperceptible, long enough not to spin.
+        const POLL: std::time::Duration = std::time::Duration::from_millis(20);
+
+        // Dropping the pipe *is* the shutdown. Everything below is only reaping.
+        if let Some(mut stdin) = self.stdin.take() {
+            let _ = stdin.flush();
         }
-        if let Err(e) = self.child.wait() {
-            tracing::debug!(error = %e, "could not reap the helper");
+
+        let deadline = std::time::Instant::now() + GRACE;
+        loop {
+            match self.child.try_wait() {
+                Ok(Some(_)) => return,
+                Ok(None) => {}
+                Err(e) => {
+                    tracing::debug!(error = %e, "could not reap the helper");
+                    return;
+                }
+            }
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+            std::thread::sleep(POLL);
         }
+
+        // Still there after being told to leave. A kill only lands when the helper is unprivileged, so
+        // this is a best effort; an escalated helper that ignores EOF is a helper bug, and is reported
+        // as one rather than waited on forever.
+        tracing::warn!(
+            grace = ?GRACE,
+            "the helper did not exit when its input closed; abandoning it"
+        );
+        let _ = self.child.kill();
+        let _ = self.child.try_wait();
     }
 }
 
@@ -385,6 +437,48 @@ mod tests {
             OpResult::Text { content } => assert!(!content.trim().is_empty()),
             other => panic!("unexpected: {other:?}"),
         }
+    }
+
+    /// Closing stdin — on its own, with no signal — is enough to stop the helper.
+    ///
+    /// # Regression
+    ///
+    /// [`Client::shutdown`] used to flush stdin, `kill`, then `wait`, and every test took the
+    /// `Direct` path where the helper is the same user and the kill lands. Under `pkexec` the helper
+    /// is root, `kill` returns `EPERM`, and the wait then blocked forever on a process still reading
+    /// a stdin that nothing had closed — freezing the application in `Drop` after the privileged work
+    /// had already succeeded.
+    ///
+    /// `pkexec` cannot run here, so this asserts the property the fix actually relies on: EOF alone
+    /// ends the helper. If that stops being true, a shutdown that no longer kills would hang.
+    #[test]
+    fn closing_stdin_alone_stops_the_helper() {
+        let Some(helper) = built_helper() else {
+            eprintln!("skipping: nix-helper not built yet");
+            return;
+        };
+        let mut client = connect_for_test(&Transport::Direct {
+            helper_path: helper,
+        })
+        .expect("handshake should succeed");
+
+        // The shutdown, without the signal: exactly what the escalated path is left with.
+        drop(client.stdin.take());
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let status = loop {
+            match client.child.try_wait().expect("try_wait") {
+                Some(status) => break status,
+                None if std::time::Instant::now() >= deadline => {
+                    panic!("the helper outlived its closed stdin: shutdown cannot rely on EOF")
+                }
+                None => std::thread::sleep(std::time::Duration::from_millis(20)),
+            }
+        };
+        assert!(
+            status.success(),
+            "a helper that saw EOF exits cleanly: {status}"
+        );
     }
 
     #[test]
