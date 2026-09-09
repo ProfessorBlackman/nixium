@@ -20,7 +20,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Busy } from "../components/Busy";
 import Chart, { formatRate, palette, type Series } from "../components/Chart";
-import { t } from "../lib/i18n";
+import { t, tf, useLocale } from "../lib/i18n";
 import { formatBytes, formatPercent } from "../lib/format";
 import {
   api,
@@ -67,6 +67,14 @@ function describeAlert(metric: Metric): string {
 }
 
 export default function Overview() {
+  /*
+   * The series labels below are built inside `useMemo`, and a legend is text like any other.
+   *
+   * Without the locale in those dependency lists a language switch would leave every key in the old
+   * language until the next sample happened to arrive — a second of nonsense, and indefinitely on a
+   * chart that is not moving.
+   */
+  const locale = useLocale();
   // `null` until the first load resolves, so the view can distinguish "still fetching" from "there is
   // nothing" — which are different answers and were previously drawn the same.
   const [loading, setLoading] = useState(true);
@@ -133,51 +141,76 @@ export default function Overview() {
   const cpuSeries: Series[] = useMemo(
     () => [
       {
-        label: "CPU",
+        label: t("CPU total"),
         points: seriesOf(readings, (r) => r.cpu.total * 100),
-        colour: "var(--accent)",
+        colour: "var(--series-1)",
       },
     ],
-    [readings],
+    [readings, locale],
   );
 
   const coreSeries: Series[] = useMemo(
     () =>
       Array.from({ length: cores }, (_, core) => ({
-        label: `Core ${core}`,
+        label: tf("Core {n}", { n: core }),
         points: readings.map((r) => (r.cpu.per_core[core] ?? 0) * 100),
-        colour: corePalette[core] ?? "var(--accent)",
+        colour: corePalette[core] ?? "var(--series-1)",
       })),
-    [readings, cores, corePalette],
+    [readings, cores, corePalette, locale],
   );
 
   const memorySeries: Series[] = useMemo(
     () => [
       {
-        label: "Memory",
+        label: t("Memory in use"),
         points: seriesOf(readings, (r) =>
           r.memory.total > 0 ? (1 - r.memory.available / r.memory.total) * 100 : 0,
         ),
-        colour: "var(--accent)",
+        colour: "var(--series-1)",
       },
     ],
-    [readings],
+    [readings, locale],
   );
 
+  /*
+   * The legend carries the current rate, so the reader matches a name to a number rather than to a
+   * colour. `value` is the newest sample rather than anything derived: it is the same figure the
+   * caption used to hold, moved to where the line it describes is named.
+   */
   const networkSeries: Series[] = useMemo(
     () => [
-      { label: "Received", points: seriesOf(readings, (r) => r.network.received_per_second), colour: "var(--safe)" },
-      { label: "Sent", points: seriesOf(readings, (r) => r.network.sent_per_second), colour: "var(--review)" },
+      {
+        label: t("Received"),
+        points: seriesOf(readings, (r) => r.network.received_per_second),
+        colour: "var(--series-1)",
+        value: latest ? formatRate(latest.network.received_per_second) : undefined,
+      },
+      {
+        label: t("Sent"),
+        points: seriesOf(readings, (r) => r.network.sent_per_second),
+        colour: "var(--series-2)",
+        value: latest ? formatRate(latest.network.sent_per_second) : undefined,
+      },
     ],
-    [readings],
+    [readings, latest, locale],
   );
 
   const diskSeries: Series[] = useMemo(
     () => [
-      { label: "Read", points: seriesOf(readings, (r) => r.disk.totals.read_per_second), colour: "var(--safe)" },
-      { label: "Written", points: seriesOf(readings, (r) => r.disk.totals.written_per_second), colour: "var(--review)" },
+      {
+        label: t("Read"),
+        points: seriesOf(readings, (r) => r.disk.totals.read_per_second),
+        colour: "var(--series-1)",
+        value: latest ? formatRate(latest.disk.totals.read_per_second) : undefined,
+      },
+      {
+        label: t("Written"),
+        points: seriesOf(readings, (r) => r.disk.totals.written_per_second),
+        colour: "var(--series-2)",
+        value: latest ? formatRate(latest.disk.totals.written_per_second) : undefined,
+      },
     ],
-    [readings],
+    [readings, latest, locale],
   );
 
   const featured = useMemo(() => {
@@ -239,14 +272,27 @@ export default function Overview() {
         <h2>CPU</h2>
         {latest ? (
           <>
+            {/* This card holds two charts of the same metric — the machine's total, then the same
+                thing broken out per core — and a legend is what tells them apart. Without one the
+                lower chart is an unexplained thicket of coloured lines, which is what it was.
+
+                A lone series gets a key here for that reason: `Chart` would not draw one by default,
+                and "which of these two is the total?" is exactly the question this card raises. */}
             <Chart
               series={cpuSeries}
               max={100}
               capacity={WINDOW}
               caption={`${formatPercent(latest.cpu.total)} · load ${latest.load.one.toFixed(2)}`}
               formatPeak={peakPercent}
+              legend
             />
-            <Chart series={coreSeries} max={100} capacity={WINDOW} height={60} caption={`${cores} cores`} />
+            <Chart
+              series={coreSeries}
+              max={100}
+              capacity={WINDOW}
+              height={60}
+              caption={tf("{n} cores", { n: cores })}
+            />
             <p className="muted">
               {latest.cpu.frequency_khz !== null &&
                 `${(latest.cpu.frequency_khz / 1000).toFixed(0)} MHz · `}
@@ -286,20 +332,21 @@ export default function Overview() {
         <h2>{t("Disk and network")}</h2>
         {latest ? (
           <>
+            {/* Both charts draw two lines, and the two rates used to be named only in a caption at
+                the far corner — so reading one meant carrying a colour across the card to a piece of
+                text that listed both. The rates are in the legends now, beside the swatch of the line
+                they belong to, and each caption is left saying what the chart covers rather than
+                repeating what it shows. */}
             <Chart
               series={diskSeries}
               capacity={WINDOW}
-              caption={`read ${formatRate(latest.disk.totals.read_per_second)} · write ${formatRate(latest.disk.totals.written_per_second)}`}
+              caption={t("summed across every disk")}
               formatPeak={formatRate}
             />
             <Chart
               series={networkSeries}
               capacity={WINDOW}
-              caption={
-                featured
-                  ? `${featured.name}: down ${formatRate(latest.network.received_per_second)} · up ${formatRate(latest.network.sent_per_second)}`
-                  : "no connected interface"
-              }
+              caption={featured ? featured.name : t("no connected interface")}
               formatPeak={formatRate}
             />
             {!featured && (

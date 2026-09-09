@@ -97,6 +97,12 @@ const PAIRS = [
   { fg: "--risky", bg: "--surface", min: 4.5, what: "a red warning on a card" },
   { fg: "--safe", bg: "--surface", min: 4.5, what: "a green confirmation on a card" },
 
+  // Chart lines. Non-text, so 3:1 — but against the *card*, which is what a chart is drawn on, and
+  // that is the check the old colours would have failed: the safety-tier green and brown were picked
+  // to be read as text on a tinted chip, and a 2px line of either on a white card is not seen at all.
+  { fg: "--series-1", bg: "--surface", min: 3, what: "the first chart series on a card" },
+  { fg: "--series-2", bg: "--surface", min: 3, what: "the second chart series on a card" },
+
   // Non-text: a control's boundary only needs 3:1, but it does need that — an input the user cannot
   // find is not usable however readable its label is.
   { fg: "--rule-strong", bg: "--surface", min: 3, what: "button and input borders" },

@@ -103,11 +103,55 @@ export default function Find() {
 
   return (
     <section className="view">
-      {/* The two things people come here to *do*, side by side and first: a search they type into,
-          and a duplicate hunt they start. `Largest files` is a view of the last scan rather than an
-          action, so it reads below them rather than standing between them and the controls. */}
+      {/* Two columns. Search and `Largest files` stack on the left; `Duplicates` sits beside them
+          on the right, starting level with the search form rather than below it.
+
+          `Largest files` used to run the full width underneath both, where `Duplicates` — thirty
+          sets of several paths each — pushed it off the bottom of the window: whether you could see
+          one answer at all depended on how long the other happened to be. In its own column, the
+          card next to it cannot push it anywhere.
+
+          Left is the column that always has something in it. The largest files come out of a scan
+          that already happened, so that list is there the moment the page opens; duplicates do not
+          exist until someone asks for them, and the asking is what sits beside the search.
+
+          Search keeps the top of the left column because it is the one thing here you type into, and
+          it is what the width of that column is for — six fields and a three-column table of paths.
+          Its results are a scroll box of bounded height, so a long search cannot push the list below
+          it off the page either. */}
       <div className="find-columns">
-        <SearchPanel />
+        <div className="find-column">
+          <SearchPanel />
+
+          <div className="card">
+            <h2>{t("Largest files")}</h2>
+            {largest === null ? (
+              <p className="muted">{t("Reading the last scan…")}</p>
+            ) : largest.length === 0 ? (
+              <p className="muted">
+                {t(
+                  "Nothing to show yet — the space explorer has not scanned anything. This list is a view of that scan rather than a search of its own, so it costs nothing once a scan exists.",
+                )}
+              </p>
+            ) : (
+              <>
+                <p className="muted">
+                  From the last scan of <code>{home}</code>. Files only: a directory&rsquo;s size is its
+                  contents&rsquo;, and listing both would show the same bytes twice.
+                </p>
+                <ul className="find-list">
+                  {largest.slice(0, 40).map((entry) => (
+                    <li key={entry.id}>
+                      <span className="find-bytes">{formatBytes(entry.allocated)}</span>
+                      <code title={entry.path ?? entry.label}>{entry.path ?? entry.label}</code>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </div>
+        </div>
+
         <div className="card">
           <h2>{t("Duplicates")}</h2>
           <p className="muted">
@@ -190,35 +234,6 @@ export default function Find() {
           )}
         </div>
       </div>
-
-      <div className="card">
-        <h2>{t("Largest files")}</h2>
-        {largest === null ? (
-          <p className="muted">{t("Reading the last scan…")}</p>
-        ) : largest.length === 0 ? (
-          <p className="muted">
-            {t(
-              "Nothing to show yet — the space explorer has not scanned anything. This list is a view of that scan rather than a search of its own, so it costs nothing once a scan exists.",
-            )}
-          </p>
-        ) : (
-          <>
-            <p className="muted">
-              From the last scan of <code>{home}</code>. Files only: a directory&rsquo;s size is its
-              contents&rsquo;, and listing both would show the same bytes twice.
-            </p>
-            <ul className="find-list">
-              {largest.slice(0, 40).map((entry) => (
-                <li key={entry.id}>
-                  <span className="find-bytes">{formatBytes(entry.allocated)}</span>
-                  <code title={entry.path ?? entry.label}>{entry.path ?? entry.label}</code>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
-      </div>
-
     </section>
   );
 }

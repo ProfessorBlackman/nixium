@@ -104,7 +104,7 @@ i18n: ## Translatable-string ratchet: the count must not go up (PLT-1)
 version: ## The version must be the same in all three files that carry it
 	node scripts/check-version.mjs
 
-icons: ## Regenerate the application icons from assets/nix-mascot.png
+icons: ## Regenerate the application icons and the sidebar logo from assets/nix-mascot.png
 	# One recipe, one shell, so the temporary directory is created and removed here rather than on
 	# every `make` invocation — which is what a top-level mktemp variable would do, since make expands
 	# those whatever target you asked for.
@@ -113,16 +113,21 @@ icons: ## Regenerate the application icons from assets/nix-mascot.png
 	# panel, so the artwork's framing becomes a defect once it is 32 pixels wide. A flood fill from a
 	# corner, not a colour threshold — the sunglasses are rgb(18,13,10) and the background is
 	# rgb(16,15,14), so any threshold dark enough to remove one removes the other. See assets/README.md.
+	#
+	# The sidebar logo comes out of the same masked source rather than being filled again: the sidebar
+	# and the launcher showing subtly different artwork would be a bug nobody would think to look for.
+	# 128px for a mark drawn at 28 — enough for a 2x display and 29 kB on disk.
 	@set -eu; \
 	scratch="$$(mktemp -d)"; \
 	trap 'rm -rf "$$scratch"' EXIT; \
 	convert assets/nix-mascot.png -alpha set -fuzz 12% -fill none \
 		-draw "color 0,0 floodfill" -resize 1024x1024 \
 		-background none -gravity center -extent 1024x1024 "PNG32:$$scratch/icon-source.png"; \
+	convert "$$scratch/icon-source.png" -resize 128x128 "PNG32:public/nix-logo.png"; \
 	npx tauri icon "$$scratch/icon-source.png"; \
 	rm -rf src-tauri/icons/android src-tauri/icons/ios
 	@echo "Regenerated, and the mobile icon sets removed — nix is Linux-only."
-	@echo "Review with: git diff --stat src-tauri/icons/"
+	@echo "Review with: git diff --stat src-tauri/icons/ public/nix-logo.png"
 
 bump: ## Bump the version everywhere: make bump BUMP=patch|minor|major, or BUMP=1.2.3
 	@test -n "$(BUMP)" || { echo "usage: make bump BUMP=patch|minor|major|x.y.z"; exit 2; }

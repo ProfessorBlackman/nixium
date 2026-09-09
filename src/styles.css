@@ -40,9 +40,44 @@
   --review-soft: #f7eedc;
   --risky-soft: #faeae8;
 
+  /*
+   * Chart series colours, and the reason they are their own tokens.
+   *
+   * The charts used to draw with `--safe` and `--review`, which are the *safety tier* colours: a dark
+   * green and a brown, chosen to be readable as small text on a tinted chip. That is the opposite of
+   * what a 2px line on a white card needs, and it also meant a line's colour claimed a disk write was
+   * "worth reviewing" — a byte written is not a risk.
+   *
+   * Slot 1 is the quantity itself, and where a chart has an in/out pair it is the inbound half: read,
+   * received. Slot 2 is the outbound half: written, sent. Two hues rather than four across the
+   * disk-and-network card on purpose — blue means "in" and orange means "out" in both of its charts,
+   * so the pair only has to be learnt once.
+   *
+   * Blue and orange also survive being colour-blind: they separate under both protanopia and
+   * deuteranopia (OKLab ΔE 24.7 light, 26.8 dark, against a target of 8), and both clear 3:1 against
+   * their own card in both themes — `scripts/check-contrast.mjs` holds them to it. Every chart carries
+   * a text legend as well, because a chart that is only legible in colour is not legible.
+   */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+
   --font-ui: "Inter", "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --radius: 3px;
+
+  /*
+   * Which way round the engine paints the controls it owns.
+   *
+   * A `select`'s popup, a checkbox, a text field, the scrollbars: this stylesheet does not draw any
+   * of them, the engine does, and `color-scheme` is the only thing that tells it which theme it is
+   * drawing for. There was no declaration at all, so the answer was always "light" — and in the dark
+   * theme a dropdown therefore opened as a white popup whose rows inherited `color` from the select,
+   * which is near-white ink. A white list on white.
+   *
+   * Declared in all three theme blocks, for the same reason every colour here is: a value that
+   * exists only inside a media query is a value that one of the three states does not have.
+   */
+  color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -67,6 +102,13 @@
     --safe-soft: #17281f;
     --review-soft: #2a2418;
     --risky-soft: #2b1b1a;
+
+    /* The same two hues, stepped for the dark card rather than flipped to it: a colour that
+       clears 3:1 on white does not automatically do so on #191d26, and the other way round. */
+    --series-1: #3987e5;
+    --series-2: #d95926;
+
+    color-scheme: dark;
   }
 }
 
@@ -91,6 +133,13 @@
   --safe-soft: #17281f;
   --review-soft: #2a2418;
   --risky-soft: #2b1b1a;
+
+  /* The same two hues, stepped for the dark card rather than flipped to it: a colour that
+     clears 3:1 on white does not automatically do so on #191d26, and the other way round. */
+  --series-1: #3987e5;
+  --series-2: #d95926;
+
+  color-scheme: dark;
 }
 
 * {
@@ -141,9 +190,15 @@ pre {
   padding: 0.25rem 0.5rem 1.25rem;
 }
 
+/* The mascot, not a glyph. Sized in rem so it tracks the sidebar's type rather than the viewport,
+   and `flex: none` so a long product name could never squeeze it. The 1px ring is what keeps her
+   cream circle from dissolving into the light theme's sidebar, which is nearly the same value. */
 .brand-mark {
-  color: var(--accent);
-  font-size: 1.25rem;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex: none;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--rule);
 }
 
 .brand-name {
@@ -412,6 +467,15 @@ select {
   max-width: 18rem;
 }
 
+/* The rows, not just the box.
+   `color-scheme` puts the popup's own chrome the right way round, but each row still inherits its
+   text colour from the `select` — so it is given a background of its own to be legible on rather
+   than whichever one the engine would have chosen for it. */
+option {
+  background: var(--surface);
+  color: var(--ink);
+}
+
 .progress {
   margin-top: 0.75rem;
 }
@@ -541,15 +605,45 @@ select {
   max-width: 68rem;
 }
 
+/* No cap at all.
+ *
+ * `.stack`'s 52rem and `.stack-wide`'s 68rem are *measure* limits: they exist so a paragraph is not
+ * a hundred characters wide. That is the right constraint for a page of prose and the wrong one for
+ * a page whose content is a list of paths beside a panel — there, the cap leaves half of a 2560px
+ * monitor empty, which is not restraint but waste.
+ *
+ * Only the limit is lifted. The flex column stays, because that is where the 1rem between cards
+ * comes from, and prose is still held to a readable line by `.card p`'s own `max-width` — which is
+ * what the cap was protecting in the first place, and does it per-paragraph rather than by starving
+ * the whole page of width.
+ */
+.stack-full {
+  max-width: none;
+}
+
+/* A card that is **alone** on the page holds itself to a readable measure.
+ *
+ * Once a view stops capping its own width, a card with a sentence and a button in it becomes a
+ * 1700px band with its content in one corner. Where the card has siblings the width is worth
+ * keeping, because their edges line up and read as one page; where it is the only thing on screen
+ * there is nothing to line up with, and 52rem is the same measure `.stack` uses. */
+.card-narrow {
+  max-width: 52rem;
+}
+
 .card-flush {
   padding: 0;
   overflow: hidden;
 }
 
+/* Capped, because `auto-fit` with a `1fr` maximum spreads whatever is in it across the whole row:
+   three figures in a full-width card end up a third of a screen apart, and stop reading as one
+   summary of one thing. The cap keeps them a group — the card stays as wide as it likes. */
 .summary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
   gap: 0.75rem 1.5rem;
+  max-width: 44rem;
   margin-bottom: 0.5rem;
 }
 
@@ -859,7 +953,13 @@ select {
    path in a cell refuse to shrink and widen the whole column past its share. */
 .reclaim-columns {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 23rem);
+  /* The panel was a flat 23rem, so every pixel of a wide monitor landed on the list — the column
+     that needs it least, since a row there is a label and a size. The panel is the one holding full
+     paths and a sentence about each of them. `clamp` gives it a third of the surplus instead: still
+     exactly 23rem until the page passes about 68rem — so the narrow two-column case is untouched —
+     then a third of the width, to a ceiling of 40rem. Both columns grow, rather than every spare
+     pixel going to the one that gains least from it. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, clamp(23rem, 34%, 40rem));
   gap: 0.9rem;
   align-items: start;
 }
@@ -1255,14 +1355,64 @@ button.danger:hover:not(:disabled) {
   margin: 0.5rem 0 0.7rem;
 }
 
+/* The caption floats over the canvas, so on a spiky chart the lines run straight through it. It
+   carries the card's own background to sit on — a label that has to be read *around* the data is
+   worse than no label. */
 .chart-caption {
   position: absolute;
   top: 0;
   right: 0.2rem;
+  padding: 0 0.2rem;
+  background: var(--surface);
+  border-radius: 2px;
   font-family: var(--font-mono);
   font-size: 0.6875rem;
   color: var(--ink-mute);
   pointer-events: none;
+}
+
+/*
+ * A chart's key.
+ *
+ * Wraps rather than scrolls, because the widest legend here belongs to the per-core chart and a
+ * 64-core machine must not stretch the card sideways — `Chart` caps how many are named and summarises
+ * the rest.
+ *
+ * The label wears `--ink-mid`, never the series colour. Coloured text at 11px is the least readable
+ * thing a palette can be asked to do, and the swatch beside it already carries the identity.
+ */
+.chart-legend {
+  list-style: none;
+  margin: 0.3rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.1rem 0.85rem;
+  font-size: 0.6875rem;
+  color: var(--ink-mid);
+}
+
+.chart-legend li {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+/* A chip, not a dash: a 2px line segment reads as a stray piece of the chart. */
+.chart-swatch {
+  width: 0.6rem;
+  height: 0.6rem;
+  flex: none;
+  border-radius: 2px;
+}
+
+.chart-legend-value {
+  font-family: var(--font-mono);
+  color: var(--ink-mute);
+}
+
+.chart-legend-more {
+  color: var(--ink-faint);
 }
 
 /* Filesystem usage bars. Usage, not capacity — a bar that fills as a disk fills. */
@@ -2105,10 +2255,18 @@ button.danger:hover:not(:disabled) {
 
 /* File search (SYS-2). Results stream in, so the list scrolls on its own rather than growing the page
    under the form the user is still adjusting. */
+/* Six fields, auto-fitting to however wide the search card is: two across in its column at a normal
+   window, three when there is room for three.
+
+   The max-width is what stops it going past that. Left alone, a wide enough window spreads the six
+   into five across and one on a second row, and the odd one out is "At most" — which is exactly the
+   field that needs to be beside "At least". Capped, the rows always break between pairs. A form does
+   not need the width a table of paths does. */
 .search-form {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
   gap: 0 0.9rem;
+  max-width: 46rem;
   margin: 0.6rem 0 0.2rem;
 }
 
@@ -2275,6 +2433,20 @@ button.danger:hover:not(:disabled) {
 /* Find: search on the left, duplicates on the right, both above the largest-files list.
    Those two are what a user comes here to *do*; the largest-files list is a view of the last scan, so
    it reads below them rather than standing between them and the controls. */
+/* Find's two columns: search over the largest-files list on the left, duplicates on the right.
+ *
+ * `Duplicates` has no bounded height — thirty sets of several paths each — and while all three cards
+ * were in one stack, a good answer to that question pushed the answer to the other one off the bottom
+ * of the window.
+ *
+ * `align-items: start` is what keeps that fixed. Without it the grid stretches both columns to the
+ * taller one's height, and the shorter one grows a lake of empty space beneath its content.
+ *
+ * The left column is a nested flex column rather than two grid rows, and that is not a stylistic
+ * choice: a duplicates card spanning two auto rows makes the grid grow *those rows* to fit it, so a
+ * tall right-hand column would push the largest-files card down the page — reintroducing the exact
+ * problem this layout exists to solve, by a different route.
+ */
 .find-columns {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -2282,8 +2454,17 @@ button.danger:hover:not(:disabled) {
   align-items: start;
 }
 
-/* One column when two would each be too narrow for a form. The search card carries six fields, and a
-   cramped form is worse than a tall page. */
+.find-column {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1rem;
+}
+
+/* One column when two would each be too narrow for a path. These are lists of absolute paths, which
+   break mid-word to fit: at half of an already narrow window that is three lines per row, and a
+   stacked page reads better than a shredded one. The cards then read search, largest, duplicates —
+   the document order, so what a keyboard tabs through is still what the eye sees. */
 @media (max-width: 68rem) {
   .find-columns {
     grid-template-columns: minmax(0, 1fr);

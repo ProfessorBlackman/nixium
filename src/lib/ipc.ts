@@ -231,11 +231,6 @@ export const api = {
       maxDepth: maxDepth ?? null,
       crossFilesystems: crossFilesystems ?? null,
     }),
-  /** Phase 0 scaffolding: a slow operation, so progress and cancellation can be verified. */
-  demoOperation: (steps: number, failAt?: number) =>
-    call<OperationId>("demo_operation", { steps, failAt: failAt ?? null }),
-  /** Phase 0 scaffolding: fail on purpose, to exercise the error surface. */
-  demoFailure: (code: string) => call<void>("demo_failure", { code }),
 };
 
 /** Subscribe to unit changes, including ones made in a terminal. `SVC-3`. */

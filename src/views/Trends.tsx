@@ -149,7 +149,7 @@ export default function Trends() {
           <>
             <p className="muted">
               {t(
-                "Off by default. When enabled, nix records one sample a day: category totals and the largest directories, a few kilobytes each. Not a copy of your filesystem — the question this answers is &ldquo;what grew&rdquo;, and that needs trends rather than detail.",
+                "Off by default. When enabled, nix records one sample a day: category totals and the largest directories, a few kilobytes each. Not a copy of your filesystem — the question this answers is what grew, and that needs trends rather than detail.",
               )}
             </p>
             {timer.tier === "session" ? (

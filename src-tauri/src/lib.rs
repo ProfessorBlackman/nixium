@@ -54,6 +54,31 @@ pub fn run() {
     );
 
     let result = tauri::Builder::default()
+        /*
+         * One instance, and this is deliberately the first plugin registered.
+         *
+         * Without it, `close_to_tray` turns every launch into another process. Closing the window
+         * hides it and leaves the process running — that is the whole point of the setting — so the
+         * next launch from a launcher, an autostart entry or a terminal starts a *second* nix, which
+         * builds a second tray icon. Four launches, four icons, three of them belonging to windows
+         * the user thought they had closed. The tray id is already unique per process, so nothing
+         * about the tray could have caught this: the duplication was one process per icon.
+         *
+         * The plugin claims `com.tlc.nix.SingleInstance` on the session bus. Whichever instance owns
+         * that name is the one that runs; a later one hands over its argv, runs the callback below
+         * *in the first process*, and exits without opening a window. Registered first so that exit
+         * happens before any other plugin, the managed state or the tray has done anything.
+         */
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if !tray::should_reveal(&argv) {
+                tracing::info!(
+                    "a second instance asked to stay hidden, so the window is left as it is"
+                );
+                return;
+            }
+            tracing::info!("a second instance was launched, so this one's window is coming back");
+            tray::reveal(app);
+        }))
         .plugin(tauri_plugin_opener::init())
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
@@ -121,8 +146,6 @@ pub fn run() {
             commands::operation_cancel,
             commands::operation_count,
             commands::helper_probe,
-            commands::demo_operation,
-            commands::demo_failure,
         ])
         .setup(|app| {
             // The tray is built here rather than in the builder chain because it needs the managed
