@@ -29,6 +29,15 @@ transparent and the sunglasses are still there.
 **Then `tauri icon` produces the set.** It also offers Android and iOS icons, which are deleted: nix is
 a Linux application, and carrying icon sets for platforms it does not target would imply otherwise.
 
+**And the sidebar logo falls out of the same source.** `public/nix-logo.png` is the masked artwork at
+128px, which the shell draws at 28 — enough for a 2x display, 30 kB on disk. It is cut from the
+*masked* intermediate rather than filled again from the original, so the mark in the sidebar and the
+icon in the launcher cannot drift apart: one flood fill, two outputs.
+
+Nothing in the app knows what the artwork is except its size and its shape. The sidebar's `img` is
+`aria-hidden` with an empty `alt`, because the product's name is rendered right next to it — a screen
+reader announcing "nix logo, nix" would read one thing twice.
+
 ## `icon.icns` is not reproducible, and no check may assume it is
 
 Running `make icons` twice produces a byte-identical set **except** `icon.icns`, which comes out

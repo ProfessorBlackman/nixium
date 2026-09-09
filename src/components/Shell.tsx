@@ -191,9 +191,13 @@ export function Shell({ initialView }: { initialView: ViewId }) {
     <div className="shell">
       <nav className="sidebar" aria-label={t("Views")}>
         <div className="brand">
-          <span className="brand-mark" aria-hidden="true">
-            ◪
-          </span>
+          {/* The mascot, from the same artwork the application icons are generated from — so the
+              sidebar, the launcher and the landing page are one identity rather than three.
+
+              Empty `alt` and `aria-hidden`: the name is rendered right beside it, and a screen
+              reader announcing "nix logo, nix" reads one thing twice. Width and height are on the
+              element as well as in CSS so the sidebar does not reflow while the file decodes. */}
+          <img className="brand-mark" src="/nix-logo.png" alt="" aria-hidden="true" width={28} height={28} />
           {/* Not translated: it is the application's name, not a word. */}
           <span className="brand-name">nix</span>
         </div>

@@ -17,28 +17,78 @@
  *
  * Drawn on a canvas rather than as SVG for the same reason the treemap is: sixty points times eight
  * cores is 480 nodes a second, and a DOM cannot be asked to do that.
+ *
+ * # Colours have to reach the canvas as literals
+ *
+ * `context.strokeStyle = "var(--accent)"` is **not an error**. The canvas silently ignores a value it
+ * cannot parse and keeps the one set before it — which here was the gridline grey — so every
+ * single-series chart drew its line in exactly the same near-invisible colour as its own axis. It read
+ * as a chart with badly chosen colours rather than as one that was never given them, which is why it
+ * survived: the lines were there, in `--rule`. Custom properties are read off the element and passed
+ * as literals now, and `setStroke` proves the assignment took rather than trusting it.
+ *
+ * # The key is part of the chart, not decoration
+ *
+ * Two lines drawn in two colours are two lines until something says which is which. A chart of more
+ * than one series therefore renders a legend by default, and carries each series' current value in it
+ * — a reader should not have to hold a colour in mind while looking for it in a caption.
  */
 import { useEffect, useRef } from "react";
+
+import { tf } from "../lib/i18n";
 
 /** One line to draw. `null` marks a gap, which is left as one. */
 export type Series = {
   label: string;
   points: Array<number | null>;
+  /** Any CSS colour, `var(--token)` included — resolved against the canvas before it is used. */
   colour: string;
+  /** The current reading, shown in the legend. A direct label beats a colour to match up. */
+  value?: string;
 };
+
+/**
+ * Whether this WebView understands `oklch()`.
+ *
+ * WebKitGTK has since 2.38 and Tauri 2 requires 2.40 or newer, so this is expected to be true
+ * wherever nix runs. It is asked rather than assumed because the failure mode is silent — see the
+ * note above on unparseable colours — and a wrong guess here would cost every core its colour.
+ */
+let oklchSupported: boolean | null = null;
+function supportsOklch(): boolean {
+  if (oklchSupported === null) {
+    oklchSupported =
+      typeof CSS !== "undefined" &&
+      typeof CSS.supports === "function" &&
+      CSS.supports("color", "oklch(0.62 0.17 120)");
+  }
+  return oklchSupported;
+}
 
 /**
  * Colours for `n` series, spread around the wheel.
  *
- * Generated rather than tabulated, so sixty-four cores render as correctly as four. The saturation
- * and lightness are fixed so no core is visually louder than another — the hue carries identity and
- * nothing else does.
+ * Generated rather than tabulated, so sixty-four cores render as correctly as four. A fixed
+ * categorical palette is the right answer for a handful of named series — that is what `--series-1`
+ * and `--series-2` are — but no eight-slot table names the cores of a 64-core machine, and this chart
+ * is read as a texture ("are they all busy, or is one pinned?") rather than by picking one core out
+ * of a key.
+ *
+ * Stepped in **OKLCH rather than HSL**, which is what makes one constant work for both themes. HSL's
+ * lightness is not perceptual: `hsl(60 62% 55%)` and `hsl(240 62% 55%)` are the same number and
+ * nothing like the same brightness, so a rotation at fixed HSL lightness gives yellows that vanish
+ * into a white card and blues that disappear into a dark one. A fixed OKLCH lightness holds every hue
+ * at the same *apparent* brightness — L 0.62 measures about 2.9:1 on the light card and 5.5:1 on the
+ * dark, so no core is ever the invisible one.
  */
 export function palette(n: number): string[] {
   if (n <= 0) return [];
   // A golden-angle step spreads adjacent indices far apart, so neighbouring cores are easy to tell
   // apart even when there are many of them. Stepping by 360/n instead makes 64 cores 5.6° apart.
-  return Array.from({ length: n }, (_, i) => `hsl(${(i * 137.508) % 360} 62% 55%)`);
+  return Array.from({ length: n }, (_, i) => {
+    const hue = ((i * 137.508) % 360).toFixed(1);
+    return supportsOklch() ? `oklch(0.62 0.17 ${hue})` : `hsl(${hue} 72% 52%)`;
+  });
 }
 
 /** Format a byte-rate axis label in binary units, per §P8. */
@@ -53,6 +103,32 @@ export function formatRate(bytes: number): string {
   return `${value < 10 && unit > 0 ? value.toFixed(1) : Math.round(value)} ${units[unit]}/s`;
 }
 
+/** `var(--token)` and `var(--token, fallback)` → the literal the token holds on this element. */
+function resolve(style: CSSStyleDeclaration, colour: string): string {
+  const match = /^var\(\s*(--[\w-]+)\s*(?:,([^)]*))?\)$/.exec(colour);
+  if (match === null) return colour;
+  const value = style.getPropertyValue(match[1]).trim();
+  return value !== "" ? value : (match[2] ?? "").trim();
+}
+
+/** A colour no palette contains, used to tell "assignment ignored" from "assignment took". */
+const PROBE = "#010203";
+
+/**
+ * Set the stroke colour, and prove it took.
+ *
+ * Handing the canvas something unparseable is a no-op rather than a throw, so without this a typo in
+ * a token name renders as a line drawn in the *previous* series' colour — the hardest kind of wrong to
+ * see, and precisely the bug this file used to have. Setting a known value first makes the failure
+ * detectable, and a detected failure falls back to something legible instead of to whatever the last
+ * line used.
+ */
+function setStroke(context: CanvasRenderingContext2D, colour: string, fallback: string): void {
+  context.strokeStyle = PROBE;
+  context.strokeStyle = colour;
+  if (context.strokeStyle === PROBE && colour !== PROBE) context.strokeStyle = fallback;
+}
+
 type Props = {
   series: Series[];
   /** Fixed upper bound, for a percentage axis. Omit to scale to the data. */
@@ -64,6 +140,16 @@ type Props = {
   caption?: string;
   /** Formats the peak into an axis label. */
   formatPeak?: (value: number) => string;
+  /**
+   * Draw a key beneath the chart. Defaults to on for two or more series.
+   *
+   * Identity carried by colour alone is not identity for a reader who cannot separate the two hues in
+   * question, so a multi-line chart gets one whether or not anyone asked. A lone series may pass
+   * `legend` explicitly where its card holds a second chart and the two need telling apart.
+   */
+  legend?: boolean;
+  /** How many keys to name before summarising the rest. Keeps a 64-core legend off the card. */
+  legendLimit?: number;
 };
 
 export default function Chart({
@@ -73,6 +159,8 @@ export default function Chart({
   height = 90,
   caption,
   formatPeak,
+  legend,
+  legendLimit = 8,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   /**
@@ -121,40 +209,127 @@ export default function Chart({
     }
 
     const step = width / Math.max(1, capacity - 1);
+    const baseline = height - 1;
+    // A wash under a lone series is what makes a thin line read as a quantity at a glance. Only when
+    // it is alone: two translucent fills stacked on each other invent a third colour that means
+    // nothing, and hide whichever line is behind.
+    const wash = series.length === 1;
+
+    context.lineJoin = "round";
+    context.lineCap = "round";
+    // A lone line should be bold; sixty-four of them at the same weight is a solid block. The
+    // threshold is where the per-core chart stops being readable as separate lines, not a round
+    // number — four fit at full weight in a 60px chart and five do not.
+    const weight = series.length > 4 ? 1.4 : 2;
+
     for (const line of series) {
-      context.strokeStyle = line.colour;
-      context.lineWidth = 1.5;
-      context.beginPath();
+      const colour = resolve(style, line.colour);
+
       // Right-aligned, so the newest sample is at the right edge and a partial history grows
       // leftwards into the space rather than stretching to fill it.
       const offset = capacity - line.points.length;
-      let drawing = false;
+
+      /*
+       * Split into runs of observed samples before drawing anything.
+       *
+       * A gap has to break the line — bridging it would draw a value nobody observed — and the wash
+       * needs both ends of a run to close its shape, which a pen that only knows where it is now
+       * cannot supply. So the geometry is worked out first and drawn second.
+       */
+      const runs: Array<Array<{ x: number; y: number }>> = [];
+      let run: Array<{ x: number; y: number }> = [];
       line.points.forEach((point, i) => {
         if (point === null) {
-          // A gap: lift the pen. Bridging it would draw a value nobody observed.
-          drawing = false;
+          if (run.length > 0) runs.push(run);
+          run = [];
           return;
         }
-        const x = (offset + i) * step;
-        const y = height - (point / peak) * (height - 2) - 1;
-        if (drawing) context.lineTo(x, y);
-        else context.moveTo(x, y);
-        drawing = true;
+        run.push({
+          x: (offset + i) * step,
+          y: height - (point / peak) * (height - 2) - 1,
+        });
       });
-      context.stroke();
+      if (run.length > 0) runs.push(run);
+
+      for (const points of runs) {
+        // The stroke is set first so the wash can take its colour from it: that value has been
+        // through `setStroke` and is known to have been accepted, where `colour` is only known to
+        // have been asked for.
+        setStroke(context, colour, ink);
+        context.lineWidth = weight;
+
+        if (wash && points.length > 1) {
+          // Alpha rather than a pre-mixed tint: the series colour is whatever the caller passed, and
+          // no arithmetic here works for a hex, an `hsl()` and an `oklch()` alike.
+          context.globalAlpha = 0.14;
+          context.fillStyle = context.strokeStyle;
+          context.beginPath();
+          context.moveTo(points[0].x, baseline);
+          for (const point of points) context.lineTo(point.x, point.y);
+          context.lineTo(points[points.length - 1].x, baseline);
+          context.closePath();
+          context.fill();
+          context.globalAlpha = 1;
+        }
+
+        if (points.length === 1) {
+          // One sample is not a line, and stroking a zero-length path draws nothing. A dot, so the
+          // first tick after a cold open — and a lone sample between two gaps — is visible at all.
+          context.fillStyle = context.strokeStyle;
+          context.beginPath();
+          context.arc(points[0].x, points[0].y, weight * 0.75, 0, Math.PI * 2);
+          context.fill();
+          continue;
+        }
+
+        context.beginPath();
+        points.forEach((point, i) => {
+          if (i === 0) context.moveTo(point.x, point.y);
+          else context.lineTo(point.x, point.y);
+        });
+        context.stroke();
+      }
     }
 
     if (formatPeak) {
-      context.fillStyle = ink;
+      const label = formatPeak(peak);
       context.font = "10px system-ui, sans-serif";
-      context.fillText(formatPeak(peak), 4, 11);
+      // Drawn over the data, like the caption, and with the same answer: the card's own background,
+      // sized to the text. An axis label a spike runs through is worse than one that is not there.
+      const surface = style.getPropertyValue("--surface").trim();
+      if (surface !== "") {
+        context.fillStyle = surface;
+        context.fillRect(2, 2, context.measureText(label).width + 4, 12);
+      }
+      context.fillStyle = ink;
+      context.fillText(label, 4, 11);
     }
   }, [series, max, capacity, height, formatPeak]);
+
+  const showLegend = legend ?? series.length > 1;
+  const named = showLegend ? series.slice(0, legendLimit) : [];
+  const unnamed = showLegend ? series.length - named.length : 0;
 
   return (
     <div className="chart">
       {caption && <span className="chart-caption">{caption}</span>}
       <canvas ref={canvasRef} style={{ width: "100%", height }} />
+      {showLegend && (
+        <ul className="chart-legend">
+          {named.map((line) => (
+            <li key={line.label}>
+              {/* `var()` resolves in an inline style, unlike on a canvas — so the swatch can be
+                  handed the token directly and stays right through a theme switch. */}
+              <span className="chart-swatch" style={{ background: line.colour }} aria-hidden="true" />
+              {line.label}
+              {line.value !== undefined && <span className="chart-legend-value">{line.value}</span>}
+            </li>
+          ))}
+          {unnamed > 0 && (
+            <li className="chart-legend-more">{tf("+{n} more", { n: unnamed })}</li>
+          )}
+        </ul>
+      )}
     </div>
   );
 }

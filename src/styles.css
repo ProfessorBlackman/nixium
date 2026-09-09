@@ -40,6 +40,27 @@
   --review-soft: #f7eedc;
   --risky-soft: #faeae8;
 
+  /*
+   * Chart series colours, and the reason they are their own tokens.
+   *
+   * The charts used to draw with `--safe` and `--review`, which are the *safety tier* colours: a dark
+   * green and a brown, chosen to be readable as small text on a tinted chip. That is the opposite of
+   * what a 2px line on a white card needs, and it also meant a line's colour claimed a disk write was
+   * "worth reviewing" — a byte written is not a risk.
+   *
+   * Slot 1 is the quantity itself, and where a chart has an in/out pair it is the inbound half: read,
+   * received. Slot 2 is the outbound half: written, sent. Two hues rather than four across the
+   * disk-and-network card on purpose — blue means "in" and orange means "out" in both of its charts,
+   * so the pair only has to be learnt once.
+   *
+   * Blue and orange also survive being colour-blind: they separate under both protanopia and
+   * deuteranopia (OKLab ΔE 24.7 light, 26.8 dark, against a target of 8), and both clear 3:1 against
+   * their own card in both themes — `scripts/check-contrast.mjs` holds them to it. Every chart carries
+   * a text legend as well, because a chart that is only legible in colour is not legible.
+   */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+
   --font-ui: "Inter", "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --radius: 3px;
@@ -67,6 +88,11 @@
     --safe-soft: #17281f;
     --review-soft: #2a2418;
     --risky-soft: #2b1b1a;
+
+    /* The same two hues, stepped for the dark card rather than flipped to it: a colour that
+       clears 3:1 on white does not automatically do so on #191d26, and the other way round. */
+    --series-1: #3987e5;
+    --series-2: #d95926;
   }
 }
 
@@ -91,6 +117,11 @@
   --safe-soft: #17281f;
   --review-soft: #2a2418;
   --risky-soft: #2b1b1a;
+
+  /* The same two hues, stepped for the dark card rather than flipped to it: a colour that
+     clears 3:1 on white does not automatically do so on #191d26, and the other way round. */
+  --series-1: #3987e5;
+  --series-2: #d95926;
 }
 
 * {
@@ -141,9 +172,15 @@ pre {
   padding: 0.25rem 0.5rem 1.25rem;
 }
 
+/* The mascot, not a glyph. Sized in rem so it tracks the sidebar's type rather than the viewport,
+   and `flex: none` so a long product name could never squeeze it. The 1px ring is what keeps her
+   cream circle from dissolving into the light theme's sidebar, which is nearly the same value. */
 .brand-mark {
-  color: var(--accent);
-  font-size: 1.25rem;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex: none;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--rule);
 }
 
 .brand-name {
@@ -1255,14 +1292,64 @@ button.danger:hover:not(:disabled) {
   margin: 0.5rem 0 0.7rem;
 }
 
+/* The caption floats over the canvas, so on a spiky chart the lines run straight through it. It
+   carries the card's own background to sit on — a label that has to be read *around* the data is
+   worse than no label. */
 .chart-caption {
   position: absolute;
   top: 0;
   right: 0.2rem;
+  padding: 0 0.2rem;
+  background: var(--surface);
+  border-radius: 2px;
   font-family: var(--font-mono);
   font-size: 0.6875rem;
   color: var(--ink-mute);
   pointer-events: none;
+}
+
+/*
+ * A chart's key.
+ *
+ * Wraps rather than scrolls, because the widest legend here belongs to the per-core chart and a
+ * 64-core machine must not stretch the card sideways — `Chart` caps how many are named and summarises
+ * the rest.
+ *
+ * The label wears `--ink-mid`, never the series colour. Coloured text at 11px is the least readable
+ * thing a palette can be asked to do, and the swatch beside it already carries the identity.
+ */
+.chart-legend {
+  list-style: none;
+  margin: 0.3rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.1rem 0.85rem;
+  font-size: 0.6875rem;
+  color: var(--ink-mid);
+}
+
+.chart-legend li {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+/* A chip, not a dash: a 2px line segment reads as a stray piece of the chart. */
+.chart-swatch {
+  width: 0.6rem;
+  height: 0.6rem;
+  flex: none;
+  border-radius: 2px;
+}
+
+.chart-legend-value {
+  font-family: var(--font-mono);
+  color: var(--ink-mute);
+}
+
+.chart-legend-more {
+  color: var(--ink-faint);
 }
 
 /* Filesystem usage bars. Usage, not capacity — a bar that fills as a disk fills. */
