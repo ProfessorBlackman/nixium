@@ -578,15 +578,45 @@ select {
   max-width: 68rem;
 }
 
+/* No cap at all.
+ *
+ * `.stack`'s 52rem and `.stack-wide`'s 68rem are *measure* limits: they exist so a paragraph is not
+ * a hundred characters wide. That is the right constraint for a page of prose and the wrong one for
+ * a page whose content is a list of paths beside a panel — there, the cap leaves half of a 2560px
+ * monitor empty, which is not restraint but waste.
+ *
+ * Only the limit is lifted. The flex column stays, because that is where the 1rem between cards
+ * comes from, and prose is still held to a readable line by `.card p`'s own `max-width` — which is
+ * what the cap was protecting in the first place, and does it per-paragraph rather than by starving
+ * the whole page of width.
+ */
+.stack-full {
+  max-width: none;
+}
+
+/* A card that is **alone** on the page holds itself to a readable measure.
+ *
+ * Once a view stops capping its own width, a card with a sentence and a button in it becomes a
+ * 1700px band with its content in one corner. Where the card has siblings the width is worth
+ * keeping, because their edges line up and read as one page; where it is the only thing on screen
+ * there is nothing to line up with, and 52rem is the same measure `.stack` uses. */
+.card-narrow {
+  max-width: 52rem;
+}
+
 .card-flush {
   padding: 0;
   overflow: hidden;
 }
 
+/* Capped, because `auto-fit` with a `1fr` maximum spreads whatever is in it across the whole row:
+   three figures in a full-width card end up a third of a screen apart, and stop reading as one
+   summary of one thing. The cap keeps them a group — the card stays as wide as it likes. */
 .summary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
   gap: 0.75rem 1.5rem;
+  max-width: 44rem;
   margin-bottom: 0.5rem;
 }
 
@@ -896,7 +926,13 @@ select {
    path in a cell refuse to shrink and widen the whole column past its share. */
 .reclaim-columns {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 23rem);
+  /* The panel was a flat 23rem, so every pixel of a wide monitor landed on the list — the column
+     that needs it least, since a row there is a label and a size. The panel is the one holding full
+     paths and a sentence about each of them. `clamp` gives it a third of the surplus instead: still
+     exactly 23rem until the page passes about 68rem — so the narrow two-column case is untouched —
+     then a third of the width, to a ceiling of 40rem. Both columns grow, rather than every spare
+     pixel going to the one that gains least from it. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, clamp(23rem, 34%, 40rem));
   gap: 0.9rem;
   align-items: start;
 }

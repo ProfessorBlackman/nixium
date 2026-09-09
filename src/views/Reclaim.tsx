@@ -150,11 +150,16 @@ export default function Reclaim() {
     }
   }
 
+  // `stack-full` rather than `stack-wide`: this page is a list of paths beside a panel of paths, and
+  // both read better wide. The 68rem cap is a measure limit for prose, and it left half of a large
+  // monitor empty here — `.card p` still holds the paragraphs to a readable line.
   return (
-    <section className="stack stack-wide">
+    <section className="stack stack-full">
       {/* ---------- 1. preview ---------- */}
       {(stage === "idle" || stage === "previewing") && (
-        <div className="card">
+        /* Alone on the page, so it keeps a measure rather than the page's full width — see
+           `.card-narrow`. */
+        <div className="card card-narrow">
           <h2>{t("Find reclaimable space")}</h2>
           <p className="muted">
             {t(
@@ -388,7 +393,7 @@ export default function Reclaim() {
 
       {/* ---------- 3. executing ---------- */}
       {stage === "executing" && (
-        <div className="card">
+        <div className="card card-narrow">
           <h2>{t("Reclaiming")}</h2>
           <Busy label={t("Each item is re-checked immediately before it is touched.")} />
         </div>
