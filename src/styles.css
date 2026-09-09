@@ -2192,10 +2192,18 @@ button.danger:hover:not(:disabled) {
 
 /* File search (SYS-2). Results stream in, so the list scrolls on its own rather than growing the page
    under the form the user is still adjusting. */
+/* Six fields, auto-fitting to however wide the search card is: two across in its column at a normal
+   window, three when there is room for three.
+
+   The max-width is what stops it going past that. Left alone, a wide enough window spreads the six
+   into five across and one on a second row, and the odd one out is "At most" — which is exactly the
+   field that needs to be beside "At least". Capped, the rows always break between pairs. A form does
+   not need the width a table of paths does. */
 .search-form {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
   gap: 0 0.9rem;
+  max-width: 46rem;
   margin: 0.6rem 0 0.2rem;
 }
 
@@ -2362,6 +2370,20 @@ button.danger:hover:not(:disabled) {
 /* Find: search on the left, duplicates on the right, both above the largest-files list.
    Those two are what a user comes here to *do*; the largest-files list is a view of the last scan, so
    it reads below them rather than standing between them and the controls. */
+/* Find's two columns: search over the largest-files list on the left, duplicates on the right.
+ *
+ * `Duplicates` has no bounded height — thirty sets of several paths each — and while all three cards
+ * were in one stack, a good answer to that question pushed the answer to the other one off the bottom
+ * of the window.
+ *
+ * `align-items: start` is what keeps that fixed. Without it the grid stretches both columns to the
+ * taller one's height, and the shorter one grows a lake of empty space beneath its content.
+ *
+ * The left column is a nested flex column rather than two grid rows, and that is not a stylistic
+ * choice: a duplicates card spanning two auto rows makes the grid grow *those rows* to fit it, so a
+ * tall right-hand column would push the largest-files card down the page — reintroducing the exact
+ * problem this layout exists to solve, by a different route.
+ */
 .find-columns {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -2369,8 +2391,17 @@ button.danger:hover:not(:disabled) {
   align-items: start;
 }
 
-/* One column when two would each be too narrow for a form. The search card carries six fields, and a
-   cramped form is worse than a tall page. */
+.find-column {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1rem;
+}
+
+/* One column when two would each be too narrow for a path. These are lists of absolute paths, which
+   break mid-word to fit: at half of an already narrow window that is three lines per row, and a
+   stacked page reads better than a shredded one. The cards then read search, largest, duplicates —
+   the document order, so what a keyboard tabs through is still what the eye sees. */
 @media (max-width: 68rem) {
   .find-columns {
     grid-template-columns: minmax(0, 1fr);
