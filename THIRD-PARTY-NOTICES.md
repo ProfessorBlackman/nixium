@@ -5,7 +5,7 @@
 
 nix is GPL-3.0-or-later. Its dependencies are permissive, which is compatible in that direction — but Apache-2.0 §4(d) requires that any `NOTICE` file a dependency ships be reproduced in distributions, so this file exists to satisfy that rather than to assume it empty.
 
-Generated from `src-tauri/Cargo.lock`: **504 third-party crates**.
+Generated from `src-tauri/Cargo.lock`: **515 third-party crates**.
 
 ## NOTICE files
 
@@ -13,7 +13,7 @@ Generated from `src-tauri/Cargo.lock`: **504 third-party crates**.
 
 ## Licences
 
-419 crates ship their licence text in-tree. The licences themselves are the standard MIT, Apache-2.0, BSD and Unicode texts; the copyright lines they carry are the part that varies, and are preserved in each crate's own source as distributed.
+420 crates ship their licence text in-tree. The licences themselves are the standard MIT, Apache-2.0, BSD and Unicode texts; the copyright lines they carry are the part that varies, and are preserved in each crate's own source as distributed.
 
 - `adler2`: LICENSE-0BSD, LICENSE-APACHE, LICENSE-MIT
 - `aho-corasick`: COPYING, LICENSE-MIT
@@ -321,6 +321,7 @@ Generated from `src-tauri/Cargo.lock`: **504 third-party crates**.
 - `tauri-codegen`: LICENSE_APACHE-2.0, LICENSE_MIT
 - `tauri-macros`: LICENSE_APACHE-2.0, LICENSE_MIT
 - `tauri-plugin-opener`: LICENSE.spdx, LICENSE_APACHE-2.0, LICENSE_MIT
+- `tauri-plugin-single-instance`: LICENSE.spdx, LICENSE_APACHE-2.0, LICENSE_MIT
 - `tauri-runtime`: LICENSE_APACHE-2.0, LICENSE_MIT
 - `tauri-runtime-wry`: LICENSE_APACHE-2.0, LICENSE_MIT
 - `tauri-utils`: LICENSE_APACHE-2.0, LICENSE_MIT

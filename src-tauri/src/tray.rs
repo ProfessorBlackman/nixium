@@ -9,6 +9,11 @@
 //! Neither is something to assume they wanted, and Stacer had no tray at all — so nobody is losing
 //! behaviour they had by this starting off.
 //!
+//! **That outliving process is why nix has a single-instance guard**, registered as the first plugin
+//! in [`crate::run`]. A hidden window is a running nix with nothing on screen, so without the guard
+//! the next launch starts another one — and since each process builds its own tray icon, the panel
+//! collects one per launch. The tray id is unique per process and could never have caught it.
+//!
 //! # The acceptance criterion is about what stops, not what shows
 //!
 //! *Hidden in tray with no alerts armed, CPU is ~0.* That does not follow from hiding a window.
@@ -93,11 +98,30 @@ pub(crate) fn install(app: &AppHandle) -> bool {
     }
 }
 
+/// Whether a second instance's arguments are asking for the window.
+///
+/// Launching nix while it is already running means "show me nix" — that is what clicking a launcher
+/// entry is for, and a click that appears to do nothing is the worst answer available. The exception
+/// is `--hide`, which is what a session autostart entry passes: at login that invocation is asking
+/// for the opposite, and honouring it costs nothing while ignoring it would pop a window open at
+/// exactly the moment people turn autostart off to avoid.
+pub(crate) fn should_reveal(argv: &[String]) -> bool {
+    !argv.iter().any(|argument| argument == "--hide")
+}
+
 /// Bring the window back and resume whatever it needs.
-fn reveal(app: &AppHandle) {
+///
+/// Called from the tray menu, from a tray click, and from the single-instance callback when a second
+/// launch hands its arguments to this process — all three mean the same thing.
+pub(crate) fn reveal(app: &AppHandle) {
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
+    // Unminimise before showing. A window that was minimised rather than hidden is already "shown",
+    // so `show` is a no-op on it and the user's click would appear to do nothing at all.
+    if let Err(e) = window.unminimize() {
+        tracing::debug!(error = %e, "could not unminimise the window");
+    }
     if let Err(e) = window.show() {
         tracing::warn!(error = %e, "could not show the window");
     }
@@ -224,5 +248,26 @@ mod tests {
         pause_sampling_unless_alerting(&state);
         pause_sampling_unless_alerting(&state);
         assert!(!state.metrics.is_sampling());
+    }
+
+    /// A second launch means "show me nix".
+    ///
+    /// Tested on the argv rather than through a window, for the same reason as the pair above: the
+    /// decision is the whole behaviour, and a window cannot be created in a test.
+    fn argv(arguments: &[&str]) -> Vec<String> {
+        arguments.iter().map(|a| (*a).to_owned()).collect()
+    }
+
+    #[test]
+    fn a_second_launch_reveals_the_window() {
+        assert!(should_reveal(&argv(&["nix"])));
+        assert!(should_reveal(&argv(&["/usr/bin/nix"])));
+    }
+
+    #[test]
+    fn a_second_launch_asking_to_hide_is_left_hidden() {
+        // What a session autostart entry passes. Revealing here would pop a window open at login,
+        // which is the behaviour `--hide` exists to prevent.
+        assert!(!should_reveal(&argv(&["nix", "--hide"])));
     }
 }
