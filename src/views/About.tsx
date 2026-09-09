@@ -2,10 +2,20 @@
 // Copyright (C) 2026 Methuselah Nwodobeh
 
 /**
- * About and diagnostics — and the Phase 0 proving ground.
+ * About and diagnostics.
  *
- * This view exists to satisfy the M0 and M1 gates: every load-bearing mechanism built in Phase 0 is
- * exercisable from here. Once real features arrive, the demo controls go and the diagnostics stay.
+ * Versions, what this machine can do, the privileged helper, the introduction, and where nix keeps
+ * its files: what someone needs to hand over when they report a bug.
+ *
+ * It used to double as the Phase 0 proving ground — two cards drove a demo operation and a demo
+ * failure, so progress, cancellation and the error surface could be exercised before there was any
+ * real work to exercise them with. Both are gone, as this file always said they would be. Scans,
+ * searches, duplicate detection and reclaim are real long operations now, and they fail in real
+ * ways, so the scaffolding proved nothing the app does not prove by being used.
+ *
+ * It had also stopped being harmless. On a page whose other five cards are genuine diagnostics,
+ * buttons reading "Fail at step 5" and "auth_denied" look like configuration — something you might
+ * be setting rather than a test harness you are firing.
  */
 import { useEffect, useState } from "react";
 
@@ -20,16 +30,6 @@ import {
 import { t } from "../lib/i18n";
 import { Spinner } from "../components/Busy";
 import { notify } from "../lib/notices";
-import { useOperation } from "../lib/useOperation";
-
-const DEMO_ERRORS = [
-  "cancelled",
-  "auth_denied",
-  "not_found",
-  "unsupported",
-  "refused",
-  "internal",
-] as const;
 
 export default function About() {
   const [reintroducing, setReintroducing] = useState(false);
@@ -38,7 +38,6 @@ export default function About() {
   const [diag, setDiag] = useState<Diagnostics | null>(null);
   const [helper, setHelper] = useState<HelperProbe | null>(null);
   const [probing, setProbing] = useState(false);
-  const op = useOperation();
 
   useEffect(() => {
     Promise.all([api.versions(), api.capabilities(), api.diagnostics()])
@@ -81,9 +80,6 @@ export default function About() {
       setProbing(false);
     }
   }
-
-  const fraction =
-    op.progress && op.progress.total ? op.progress.done / op.progress.total : null;
 
   return (
     <section className="stack">
@@ -182,70 +178,6 @@ export default function About() {
         <button type="button" disabled={reintroducing} onClick={() => void showIntroduction()}>
           {reintroducing ? t("Opening…") : t("Show it again")}
         </button>
-      </div>
-
-      <div className="card">
-        <h2>{t("Long operations")}</h2>
-        <p className="muted">
-          {t(
-            "The primitive every scan, search and package query will reuse: progress events, a terminal outcome, and cancellation that actually stops the work.",
-          )}
-        </p>
-        <div className="row">
-          <button
-            type="button"
-            disabled={op.running}
-            onClick={() => void op.start(() => api.demoOperation(12))}
-          >
-            {t("Run for 12 steps")}
-          </button>
-          <button
-            type="button"
-            disabled={op.running}
-            onClick={() => void op.start(() => api.demoOperation(12, 5))}
-          >
-            {t("Fail at step 5")}
-          </button>
-          <button type="button" disabled={!op.running} onClick={() => void op.cancel()}>
-            {t("Stop")}
-          </button>
-        </div>
-        {op.running && (
-          <div className="progress">
-            <div
-              className="progress-bar"
-              style={{ width: fraction === null ? "100%" : `${Math.round(fraction * 100)}%` }}
-            />
-            <p className="muted">{op.progress?.message ?? "Starting…"}</p>
-          </div>
-        )}
-        {!op.running && op.outcome && (
-          <p className="muted">
-            Last run: <strong>{op.outcome}</strong>
-          </p>
-        )}
-      </div>
-
-      <div className="card">
-        <h2>{t("Error surface")}</h2>
-        <p className="muted">
-          {t(
-            "Every failure carries a stable code, a plain-language message, a remedy where one exists, and the underlying cause. Try each — they land in the notifications panel.",
-          )}
-        </p>
-        <div className="row wrap">
-          {DEMO_ERRORS.map((code) => (
-            <button
-              key={code}
-              type="button"
-              onClick={() =>
-                api.demoFailure(code).catch((thrown) => notify.error(toAppError(thrown)))
-              }
-            >
-              {code}
-            </button>
-          ))}
-        </div>
       </div>
 
       <div className="card">

@@ -146,8 +146,6 @@ pub fn run() {
             commands::operation_cancel,
             commands::operation_count,
             commands::helper_probe,
-            commands::demo_operation,
-            commands::demo_failure,
         ])
         .setup(|app| {
             // The tray is built here rather than in the builder chain because it needs the managed

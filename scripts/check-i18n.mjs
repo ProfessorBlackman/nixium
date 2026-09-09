@@ -44,7 +44,7 @@ const roots = [join(here, "..", "src", "views"), join(here, "..", "src", "compon
  * A ratchet does not need an accurate inventory. It needs a number that cannot go up, and one that
  * falls when a view is genuinely converted. Both hold with the over-count in it.
  */
-const CEILING = 74;
+const CEILING = 72;
 
 /** Things that look like prose but are not shown to anyone. */
 const IGNORE = [
