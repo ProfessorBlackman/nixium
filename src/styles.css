@@ -64,6 +64,20 @@
   --font-ui: "Inter", "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --radius: 3px;
+
+  /*
+   * Which way round the engine paints the controls it owns.
+   *
+   * A `select`'s popup, a checkbox, a text field, the scrollbars: this stylesheet does not draw any
+   * of them, the engine does, and `color-scheme` is the only thing that tells it which theme it is
+   * drawing for. There was no declaration at all, so the answer was always "light" — and in the dark
+   * theme a dropdown therefore opened as a white popup whose rows inherited `color` from the select,
+   * which is near-white ink. A white list on white.
+   *
+   * Declared in all three theme blocks, for the same reason every colour here is: a value that
+   * exists only inside a media query is a value that one of the three states does not have.
+   */
+  color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -93,6 +107,8 @@
        clears 3:1 on white does not automatically do so on #191d26, and the other way round. */
     --series-1: #3987e5;
     --series-2: #d95926;
+
+    color-scheme: dark;
   }
 }
 
@@ -122,6 +138,8 @@
      clears 3:1 on white does not automatically do so on #191d26, and the other way round. */
   --series-1: #3987e5;
   --series-2: #d95926;
+
+  color-scheme: dark;
 }
 
 * {
@@ -447,6 +465,15 @@ select {
   border-radius: var(--radius);
   padding: 0.25rem 0.4rem;
   max-width: 18rem;
+}
+
+/* The rows, not just the box.
+   `color-scheme` puts the popup's own chrome the right way round, but each row still inherits its
+   text colour from the `select` — so it is given a background of its own to be legible on rather
+   than whichever one the engine would have chosen for it. */
+option {
+  background: var(--surface);
+  color: var(--ink);
 }
 
 .progress {
