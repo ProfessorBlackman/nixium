@@ -48,11 +48,20 @@ pub(crate) const EVENT_PROGRESS: &str = "op://progress";
 /// Event name for the terminal outcome of an operation.
 pub(crate) const EVENT_DONE: &str = "op://done";
 
-/// Versions of both halves of the application, so a mismatched install is detectable.
+/// Versions of both halves of the application, so a mismatched install is detectable — and where to
+/// report a problem with them.
 #[derive(Debug, Serialize)]
 pub(crate) struct Versions {
     pub(crate) app: String,
     pub(crate) core: String,
+    /// The project's repository, straight from the manifest.
+    ///
+    /// Carried here so the interface never writes a URL of its own. The About view had one written
+    /// out, and it had already drifted from `Cargo.toml` — which named a repository this project
+    /// does not live in, so the two disagreed and neither was checked against anything. Cargo's
+    /// value is the only one now. Empty if the manifest omits it, which the view treats as "no
+    /// tracker to link to" rather than guessing.
+    pub(crate) repository: String,
 }
 
 #[tauri::command]
@@ -60,6 +69,7 @@ pub(crate) fn versions() -> Versions {
     Versions {
         app: env!("CARGO_PKG_VERSION").to_string(),
         core: nix_core::VERSION.to_string(),
+        repository: env!("CARGO_PKG_REPOSITORY").to_string(),
     }
 }
 
@@ -1252,4 +1262,30 @@ pub(crate) fn reclaim_clear(state: State<'_, AppState>) {
 #[tauri::command]
 pub(crate) fn protected_paths() -> Vec<Refusal> {
     nix_core::protect::Guard::built_in_rules()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The URL the About view links to comes from the manifest, so the manifest has to carry one.
+    ///
+    /// This is the check that was missing. The view used to hold its own copy of the URL, which had
+    /// quietly drifted from `Cargo.toml` — the manifest named a repository this project does not
+    /// live in, and nothing compared the two. Now there is one value, and losing it would be silent
+    /// in the other direction: `env!("CARGO_PKG_REPOSITORY")` yields an empty string for a manifest
+    /// without `repository` rather than failing the build, and the view reads empty as "no tracker
+    /// to link to". The link would simply stop being offered.
+    #[test]
+    fn versions_carry_a_repository_to_link_to() {
+        let versions = versions();
+
+        assert!(
+            versions.repository.starts_with("https://"),
+            "the About view builds its issue link from this: {:?}",
+            versions.repository
+        );
+        assert!(!versions.app.is_empty(), "the app version");
+        assert!(!versions.core.is_empty(), "the core version");
+    }
 }

@@ -19,7 +19,7 @@ edition = "2024"
 # range of compilers the crate *claims* to support — but it is a real narrowing and belongs in a diff
 # rather than happening by accident.
 rust-version = "1.87"
-repository = "https://github.com/tlc/nix"
+repository = "https://github.com/ProfessorBlackman/nixium"
 license = "GPL-3.0-or-later"
 authors = ["Methuselah Nwodobeh"]
 

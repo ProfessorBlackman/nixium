@@ -101,7 +101,7 @@ a11y: ## Accessibility checks: WCAG AA contrast, and every control named (PLT-2)
 i18n: ## Translatable-string ratchet: the count must not go up (PLT-1)
 	node scripts/check-i18n.mjs
 
-version: ## The version must be the same in all three files that carry it
+version: ## Facts written twice must agree: the version in three files, the repository URL in two
 	node scripts/check-version.mjs
 
 icons: ## Regenerate the application icons and the sidebar logo from assets/nix-mascot.png

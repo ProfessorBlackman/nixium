@@ -21,6 +21,7 @@ import { useEffect, useState } from "react";
 
 import {
   api,
+  openExternal,
   toAppError,
   type Diagnostics,
   type HelperProbe,
@@ -30,6 +31,46 @@ import {
 import { t } from "../lib/i18n";
 import { Spinner } from "../components/Busy";
 import { notify } from "../lib/notices";
+
+/**
+ * Where to raise an issue, from the repository Cargo records.
+ *
+ * Not written out in this file. It was, and that is exactly how it goes wrong: the literal here and
+ * `repository` in `src-tauri/Cargo.toml` had already drifted apart, and nothing compared them. The
+ * manifest is the single source now and `versions` carries it through, which leaves `site/` as the
+ * only other copy of the URL — a static page that cannot read Cargo at all.
+ *
+ * `/issues/new` rather than the issue list: someone who clicks "report a problem" has one.
+ *
+ * `null` when there is no repository to link to. `env!` yields an empty string for a manifest with
+ * no `repository` rather than failing the build, so the link is withheld instead of pointing at a
+ * bare `/issues/new`.
+ */
+function issuesUrl(versions: Versions | null): string | null {
+  const repository = (versions?.repository ?? "").trim().replace(/\/+$/, "");
+  return repository === "" ? null : `${repository}/issues/new`;
+}
+
+/**
+ * What "Copy diagnostics" puts on the clipboard.
+ *
+ * The two version numbers as well as the diagnostics. `Diagnostics` carries the kernel and the
+ * paths but not the version, so what a reporter pasted was missing the first thing anyone would ask
+ * them for — and they had no way to know that, because the button is called "Copy diagnostics" and
+ * it copied exactly that.
+ *
+ * Assembled here rather than in the backend because the two really are separate commands: one is
+ * compile-time constants, the other reads the filesystem and can fail. Only the report wants both.
+ * The repository URL is left out — it is how the reader got to the tracker, not evidence about their
+ * machine.
+ */
+function bugReport(versions: Versions | null, diagnostics: Diagnostics): string {
+  return JSON.stringify(
+    { app: versions?.app ?? "unknown", core: versions?.core ?? "unknown", ...diagnostics },
+    null,
+    2,
+  );
+}
 
 export default function About() {
   const [reintroducing, setReintroducing] = useState(false);
@@ -67,6 +108,8 @@ export default function About() {
       setReintroducing(false);
     }
   }
+
+  const issues = issuesUrl(versions);
 
   async function probeHelper() {
     setProbing(true);
@@ -204,7 +247,7 @@ export default function About() {
               type="button"
               onClick={() => {
                 void navigator.clipboard
-                  .writeText(JSON.stringify(diag, null, 2))
+                  .writeText(bugReport(versions, diag))
                   .then(() => notify.success(t("Diagnostics copied.")))
                   .catch(() => notify.warning(t("Could not reach the clipboard.")));
               }}
@@ -214,6 +257,30 @@ export default function About() {
           </>
         ) : (
           <p className="empty">{t("Collecting…")}</p>
+        )}
+      </div>
+
+      {/* Last, and directly under `Copy diagnostics` on purpose: the order the card describes is the
+          order the two cards are in. */}
+      <div className="card">
+        <h2>{t("Report a problem")}</h2>
+        <p className="muted">
+          {t(
+            "Bugs and feature requests go to the issue tracker. Copy the diagnostics above and paste them in — the version, the kernel and the paths nix is using are what a report is usually missing, and they are the first things anyone would ask you for.",
+          )}
+        </p>
+        {issues === null ? (
+          <p className="empty">{t("Loading…")}</p>
+        ) : (
+          <button
+            type="button"
+            className="link"
+            onClick={() =>
+              void openExternal(issues).catch((thrown) => notify.error(toAppError(thrown)))
+            }
+          >
+            {t("Raise an issue on GitHub")}
+          </button>
         )}
       </div>
     </section>

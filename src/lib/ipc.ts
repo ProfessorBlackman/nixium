@@ -11,6 +11,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 import type { AppError } from "../bindings/AppError";
 import type { Completion } from "../bindings/Completion";
@@ -143,7 +144,7 @@ async function call<T>(command: string, args?: Record<string, unknown>): Promise
   }
 }
 
-export type Versions = { app: string; core: string };
+export type Versions = { app: string; core: string; repository: string };
 export type HelperProbe = { uid: number; elevated: boolean; kernel: string };
 
 export const api = {
@@ -280,4 +281,19 @@ export function onSearchDone(
 /** Subscribe to completed scan results. A cancelled scan still delivers its partial tree. */
 export function onScanDone(handler: (r: ScanResult) => void): Promise<UnlistenFn> {
   return listen<ScanResult>(EVENT_SCAN_DONE, (event) => handler(event.payload));
+}
+
+/**
+ * Hand a URL to the user's browser.
+ *
+ * Not a command — it is the opener plugin — but it goes through this module all the same, because
+ * this file is the only one that is allowed to know Tauri exists.
+ *
+ * A plain `<a href>` cannot do this. The navigation would happen in the application's own webview,
+ * so the window would stop being nix and become a web page, with no way back but a reload; and
+ * `target="_blank"` has no second window to open into. `opener:default`, which the main window's
+ * capability already grants, covers `http` and `https` — the only schemes this is called with.
+ */
+export function openExternal(url: string): Promise<void> {
+  return openUrl(url);
 }
