@@ -228,7 +228,7 @@ export default function Overview() {
   const peakPercent = useCallback((v: number) => `${Math.round(v)}%`, []);
 
   return (
-    <section className="view">
+    <section>
       {/* The dashboard has nothing to draw until the first reading arrives, and a sampler ticks once a
           second — so on a cold open there is a visible gap where empty charts look like broken ones. */}
       {loading && <Busy label={t("Reading this machine…")} />}

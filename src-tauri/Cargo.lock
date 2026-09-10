@@ -2182,7 +2182,7 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
 name = "nix-app"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "nix-core",
  "serde",
@@ -2196,7 +2196,7 @@ dependencies = [
 
 [[package]]
 name = "nix-core"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "proptest",
  "rayon",
@@ -2214,7 +2214,7 @@ dependencies = [
 
 [[package]]
 name = "nix-helper"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "nix-core",
  "serde",

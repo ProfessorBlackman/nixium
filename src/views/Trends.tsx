@@ -140,7 +140,7 @@ export default function Trends() {
   }, [refresh]);
 
   return (
-    <section className="view">
+    <section>
       <div className="card">
         <h2>{t("Collection")}</h2>
         {timer === null ? (
@@ -149,7 +149,7 @@ export default function Trends() {
           <>
             <p className="muted">
               {t(
-                "Off by default. When enabled, nix records one sample a day: category totals and the largest directories, a few kilobytes each. Not a copy of your filesystem — the question this answers is what grew, and that needs trends rather than detail.",
+                "Off by default. When enabled, nix records one sample a day: category totals and the largest directories, a few kilobytes each. Not a copy of your filesystem, the question this answers is what grew, and that needs trends rather than detail.",
               )}
             </p>
             {timer.tier === "session" ? (
@@ -162,7 +162,7 @@ export default function Trends() {
               <p className="muted">
                 The job runs at <code>Nice=19</code> with idle I/O priority, never on battery, and a
                 run missed while the machine was off happens at your next login instead of vanishing.
-                nix does not enable lingering — collection needs you to be logged in at some point.
+                nix does not enable lingering, collection needs you to be logged in at some point.
               </p>
             )}
             {timer.orphaned && (
@@ -205,7 +205,7 @@ export default function Trends() {
           </p>
         ) : samples.length === 1 ? (
           <p className="muted">
-            One sample so far, of {formatBytes(samples[0].total_allocated)}. A trend needs two points —
+            One sample so far, of {formatBytes(samples[0].total_allocated)}. A trend needs two points,
             there is nothing to say about change yet, and nix will not invent it.
           </p>
         ) : (

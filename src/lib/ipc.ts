@@ -11,6 +11,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 import type { AppError } from "../bindings/AppError";
 import type { Completion } from "../bindings/Completion";
@@ -100,6 +101,8 @@ export const EVENT_DONE = "op://done";
 export const EVENT_SCAN_DONE = "scan://done";
 /** A finished duplicate search. `STO-15`. */
 export const EVENT_DUPLICATES_DONE = "duplicates://done";
+/** How far a reclaim preview has got. See `onReclaimPreview`. */
+export const EVENT_RECLAIM_PREVIEW = "reclaim://preview";
 /** One metrics reading, once a second while subscribed. `MON-1`. */
 export const EVENT_METRICS_TICK = "metrics://tick";
 /** The name of a unit that changed. `SVC-3`. */
@@ -143,7 +146,7 @@ async function call<T>(command: string, args?: Record<string, unknown>): Promise
   }
 }
 
-export type Versions = { app: string; core: string };
+export type Versions = { app: string; core: string; repository: string };
 export type HelperProbe = { uid: number; elevated: boolean; kernel: string };
 
 export const api = {
@@ -248,6 +251,20 @@ export function onDuplicatesDone(handler: (r: DuplicateReport) => void): Promise
   return listen<DuplicateReport>(EVENT_DUPLICATES_DONE, (event) => handler(event.payload));
 }
 
+/** How far a reclaim preview has got: the category being asked, and how many of how many. */
+export type PreviewProgress = { category: string; done: number; total: number };
+
+/**
+ * Subscribe to a reclaim preview's progress.
+ *
+ * Its own event rather than `op://progress`, which is keyed by operation id: `reclaim_preview`
+ * returns the preview itself, so there is no id to filter on until after the work it would describe
+ * is over.
+ */
+export function onReclaimPreview(handler: (p: PreviewProgress) => void): Promise<UnlistenFn> {
+  return listen<PreviewProgress>(EVENT_RECLAIM_PREVIEW, (event) => handler(event.payload));
+}
+
 /** Subscribe to progress for all operations. */
 export function onProgress(handler: (p: Progress) => void): Promise<UnlistenFn> {
   return listen<Progress>(EVENT_PROGRESS, (event) => handler(event.payload));
@@ -280,4 +297,19 @@ export function onSearchDone(
 /** Subscribe to completed scan results. A cancelled scan still delivers its partial tree. */
 export function onScanDone(handler: (r: ScanResult) => void): Promise<UnlistenFn> {
   return listen<ScanResult>(EVENT_SCAN_DONE, (event) => handler(event.payload));
+}
+
+/**
+ * Hand a URL to the user's browser.
+ *
+ * Not a command — it is the opener plugin — but it goes through this module all the same, because
+ * this file is the only one that is allowed to know Tauri exists.
+ *
+ * A plain `<a href>` cannot do this. The navigation would happen in the application's own webview,
+ * so the window would stop being nix and become a web page, with no way back but a reload; and
+ * `target="_blank"` has no second window to open into. `opener:default`, which the main window's
+ * capability already grants, covers `http` and `https` — the only schemes this is called with.
+ */
+export function openExternal(url: string): Promise<void> {
+  return openUrl(url);
 }

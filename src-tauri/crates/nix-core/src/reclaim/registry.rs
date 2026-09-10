@@ -170,10 +170,26 @@ impl Registry {
     ///
     /// A category that fails is logged and skipped rather than aborting the whole scan: one broken
     /// backend must not deny the user everything else that was found.
-    pub fn collect(&self, token: &CancelToken) -> Result<Vec<Candidate>> {
+    /// `on_category` is called before each category is asked, with the label a user would recognise
+    /// and how many have been asked already.
+    ///
+    /// Asking a category is where all of a preview's time goes — one of them walks `~/.cache`, and
+    /// another shells out to a package manager — so this loop is the only place a preview can report
+    /// progress from. Without it the interface has nothing to show for however long that takes, and
+    /// a window with nothing moving in it is a window that looks broken.
+    ///
+    /// Reported *before* the work rather than after, so the message names what is happening now
+    /// rather than what has just finished.
+    pub fn collect(
+        &self,
+        token: &CancelToken,
+        mut on_category: impl FnMut(&str, usize, usize),
+    ) -> Result<Vec<Candidate>> {
         let mut all = Vec::new();
-        for category in &self.categories {
+        let total = self.categories.len();
+        for (asked, category) in self.categories.iter().enumerate() {
             token.check()?;
+            on_category(category.label(), asked, total);
             if !category.available() {
                 tracing::debug!(
                     category = category.id(),

@@ -233,7 +233,7 @@ export default function Software() {
   );
 
   return (
-    <section className="view">
+    <section>
       <div className="card">
         <div className="row">
           <label className="field field-inline">
@@ -279,7 +279,7 @@ export default function Software() {
         )}
         <p className="muted">
           {t(
-            "Recorded sizes come from the package manager, which computes them when the package is built. Measure a package to see what it occupies on this disk — the two are different figures, and the difference is worth seeing.",
+            "Recorded sizes come from the package manager, which computes them when the package is built. Measure a package to see what it occupies on this disk, the two are different figures, and the difference is worth seeing.",
           )}
         </p>
       </div>

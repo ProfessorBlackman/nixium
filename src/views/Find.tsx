@@ -102,7 +102,7 @@ export default function Find() {
   }, [home, operation]);
 
   return (
-    <section className="view">
+    <section>
       {/* Two columns. Search and `Largest files` stack on the left; `Duplicates` sits beside them
           on the right, starting level with the search form rather than below it.
 
@@ -156,7 +156,7 @@ export default function Find() {
           <h2>{t("Duplicates")}</h2>
           <p className="muted">
             {t(
-              "Compared by size, then by the first few kilobytes, then by full content, and finally byte for byte — so a reported set really is identical rather than merely very likely to be. Files under 1 MiB are skipped, and hard links are not counted: two names for one file share the same blocks, so deleting a name frees nothing.",
+              "Compared by size, then by the first few kilobytes, then by full content, and finally byte for byte, so a reported set really is identical rather than merely very likely to be. Files under 1 MiB are skipped, and hard links are not counted: two names for one file share the same blocks, so deleting a name frees nothing.",
             )}
           </p>
 
@@ -397,7 +397,7 @@ function SearchPanel() {
       <div className="row wrap">
         <label className="field field-inline">
           <input type="checkbox" checked={invert} onChange={(e) => setInvert(e.target.checked)} />
-          <span>{t("Invert — everything that does not match")}</span>
+          <span>{t("Invert, everything that does not match")}</span>
         </label>
         <label className="field field-inline">
           <input

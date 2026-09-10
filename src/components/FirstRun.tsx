@@ -63,7 +63,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
         <ul className="firstrun-list">
           <li>
             {t(
-              "Your documents, pictures, projects and configuration. nix reclaims caches, logs, build output and superseded packages — never the things you made.",
+              "Your documents, pictures, projects and configuration. nix reclaims caches, logs, build output and superseded packages, never the things you made.",
             )}
           </li>
           <li>
@@ -101,7 +101,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
         <ul className="firstrun-list">
           <li>
             {t(
-              "Administrator rights are asked for once per batch, not once per file — and only when an operation genuinely needs them.",
+              "Administrator rights are asked for once per batch, not once per file, and only when an operation genuinely needs them.",
             )}
           </li>
           <li>
@@ -113,7 +113,7 @@ export function FirstRun({ onDone }: { onDone: () => void }) {
 
         <div className="row">
           <button type="button" className="danger" disabled={busy} onClick={() => void dismiss()}>
-            {busy ? t("Saving…") : t("Got it — take me to the overview")}
+            {busy ? t("Saving…") : t("Got it, take me to the overview")}
           </button>
         </div>
         <p className="muted">

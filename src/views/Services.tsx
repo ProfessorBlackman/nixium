@@ -167,7 +167,7 @@ export default function Services() {
   const masked = units.filter((u) => u.load_state === "masked");
 
   return (
-    <section className="view">
+    <section>
       <div className="card">
         <div className="row">
           <label className="field field-inline">
@@ -203,7 +203,7 @@ export default function Services() {
             {shown.length} of {units.length} units
             {failed.length > 0 && <> · {failed.length} failed</>}
             {masked.length > 0 && <> · {masked.length} masked</>}. Static, generated, transient and
-            template units are all included — a service list that hides them hides most of what is
+            template units are all included, a service list that hides them hides most of what is
             running.
           </p>
         )}

@@ -170,9 +170,24 @@ pre {
 
 /* ---------- shell ---------- */
 
+/*
+ * The shell is exactly the window, and nothing in it may make the window itself scroll.
+ *
+ * `height: 100%` sizes the grid but does not stop its row growing: an implicit `auto` row is sized
+ * by its content, so a tall view pushed the row past the viewport, the shell's content overflowed
+ * the body, and the *document* became the scroller. Which took the sidebar with it — the sidebar had
+ * `overflow-y: auto` all along, and it never fired, because a box the full height of its content has
+ * nothing to scroll.
+ *
+ * `minmax(0, 1fr)` on the row is the same declaration as on the columns, for the same reason given
+ * there: `1fr` alone has a min of `auto`, which is content-based, so the track can still be pushed
+ * past its share. With a floor of zero the row is the viewport, the panes inside are bounded, and
+ * each one scrolls its own content.
+ */
 .shell {
   display: grid;
   grid-template-columns: 15rem minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   height: 100%;
 }
 
@@ -259,6 +274,9 @@ pre {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  /* The counterpart to the row's floor: a grid item's automatic minimum is content-based too, so
+     without this the header plus a tall view can still force this column taller than its track. */
+  min-height: 0;
 }
 
 .header {
@@ -288,7 +306,20 @@ pre {
   flex: 1;
 }
 
-.view {
+/*
+ * The pane a view is mounted into — and it is the only thing here that scrolls a view.
+ *
+ * This used to be `.view`, the same class the views put on their own root, and one name doing two
+ * jobs had made both of them wrong. The padding applied twice, so six views sat 48px from the
+ * sidebar while the `.stack` ones sat at 24. The inner copy's `overflow-y: auto` never fired,
+ * because its height came from its content. Its `flex: 1` did nothing at all, its parent being a
+ * block. None of that was visible as a bug — it read as "those pages have a wider margin".
+ *
+ * So the pane owns the scrolling and the page's inset, and a view's root owns its own content and
+ * nothing else. The six views that needed no root styling now say so by carrying no class; the ones
+ * that want a column with a measure limit still say `.stack`.
+ */
+.pane {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
@@ -982,7 +1013,7 @@ option {
   /* And the height cap comes off with the second column. Two independently scrolling boxes stacked
      vertically is a worse experience than one page that scrolls — the cap exists to keep the two
      columns level, and there are no longer two columns. The panel's sticky action still works,
-     because it sticks to the view's own scroll container once the card stops being one. */
+     because it sticks to the pane's scroll container once the card stops being one. */
   .reclaim-columns > * {
     max-height: none;
     overflow-y: visible;

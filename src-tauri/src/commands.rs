@@ -47,12 +47,44 @@ use crate::state::AppState;
 pub(crate) const EVENT_PROGRESS: &str = "op://progress";
 /// Event name for the terminal outcome of an operation.
 pub(crate) const EVENT_DONE: &str = "op://done";
+/// Event name for how far a reclaim preview has got.
+///
+/// Its own event rather than `op://progress`, because that one is keyed by operation id and
+/// [`reclaim_preview`] has none to give: it returns the preview itself, so the id would arrive at
+/// the interface after the work it describes had finished. See [`PreviewProgress`].
+pub(crate) const EVENT_RECLAIM_PREVIEW: &str = "reclaim://preview";
 
-/// Versions of both halves of the application, so a mismatched install is detectable.
+/// How far a reclaim preview has got. `STO-3`.
+///
+/// The fraction counts **categories asked**, not bytes and not seconds, and they are not the same
+/// size: one shells out to a package manager and answers at once, another walks `~/.cache`. So the
+/// bar can sit still and then jump. It is still a real count of real work rather than an invented
+/// percentage, and `category` is the part that carries the meaning — a reader wants to know it is
+/// asking about the journal right now, more than they want a number.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct PreviewProgress {
+    /// The category being asked, by the label a user would recognise.
+    pub(crate) category: String,
+    /// How many have been asked already.
+    pub(crate) done: usize,
+    /// How many there are.
+    pub(crate) total: usize,
+}
+
+/// Versions of both halves of the application, so a mismatched install is detectable — and where to
+/// report a problem with them.
 #[derive(Debug, Serialize)]
 pub(crate) struct Versions {
     pub(crate) app: String,
     pub(crate) core: String,
+    /// The project's repository, straight from the manifest.
+    ///
+    /// Carried here so the interface never writes a URL of its own. The About view had one written
+    /// out, and it had already drifted from `Cargo.toml` — which named a repository this project
+    /// does not live in, so the two disagreed and neither was checked against anything. Cargo's
+    /// value is the only one now. Empty if the manifest omits it, which the view treats as "no
+    /// tracker to link to" rather than guessing.
+    pub(crate) repository: String,
 }
 
 #[tauri::command]
@@ -60,6 +92,7 @@ pub(crate) fn versions() -> Versions {
     Versions {
         app: env!("CARGO_PKG_VERSION").to_string(),
         core: nix_core::VERSION.to_string(),
+        repository: env!("CARGO_PKG_REPOSITORY").to_string(),
     }
 }
 
@@ -1185,12 +1218,39 @@ pub(crate) fn snapshots() -> Vec<Snapshot> {
 ///
 /// Computes but changes nothing. The returned [`Preview`] carries a ticket, and [`reclaim_execute`]
 /// will not act without it — so there is no path from the UI to a deletion that skips this step.
-#[tauri::command]
-pub(crate) fn reclaim_preview(state: State<'_, AppState>) -> Result<Preview> {
+///
+/// # `async`, and that is the whole of the bug it fixes
+///
+/// This was a plain `#[tauri::command]`, which Tauri runs **on the main thread**. Asking every
+/// category what it can free walks directories and shells out to package managers, so for as long
+/// as that took the event loop was blocked: the window did not repaint, the spinner the view had
+/// already put on screen never drew a frame, and the whole application looked hung rather than busy.
+/// The work was fine. Nothing could say so.
+///
+/// `(async)` moves it off that thread — the same fix, for the same reason, that the eight privileged
+/// commands got in e59ed8f. The view's indicator can now animate, and it is fed by
+/// [`EVENT_RECLAIM_PREVIEW`] so it also says which category is being asked.
+#[tauri::command(async)]
+pub(crate) fn reclaim_preview(app: AppHandle, state: State<'_, AppState>) -> Result<Preview> {
     let token = nix_core::op::CancelToken::new();
     state
         .reclaim
-        .preview(&state.categories, &state.guard(), &token)
+        .preview(
+            &state.categories,
+            &state.guard(),
+            &token,
+            |category, done, total| {
+                let progress = PreviewProgress {
+                    category: category.to_string(),
+                    done,
+                    total,
+                };
+                if let Err(e) = app.emit(EVENT_RECLAIM_PREVIEW, &progress) {
+                    // A preview that cannot report progress is still a preview worth finishing.
+                    tracing::warn!(error = %e, "could not emit preview progress");
+                }
+            },
+        )
         .map_err(|e| e.context("working out what can be reclaimed"))
 }
 
@@ -1252,4 +1312,30 @@ pub(crate) fn reclaim_clear(state: State<'_, AppState>) {
 #[tauri::command]
 pub(crate) fn protected_paths() -> Vec<Refusal> {
     nix_core::protect::Guard::built_in_rules()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The URL the About view links to comes from the manifest, so the manifest has to carry one.
+    ///
+    /// This is the check that was missing. The view used to hold its own copy of the URL, which had
+    /// quietly drifted from `Cargo.toml` — the manifest named a repository this project does not
+    /// live in, and nothing compared the two. Now there is one value, and losing it would be silent
+    /// in the other direction: `env!("CARGO_PKG_REPOSITORY")` yields an empty string for a manifest
+    /// without `repository` rather than failing the build, and the view reads empty as "no tracker
+    /// to link to". The link would simply stop being offered.
+    #[test]
+    fn versions_carry_a_repository_to_link_to() {
+        let versions = versions();
+
+        assert!(
+            versions.repository.starts_with("https://"),
+            "the About view builds its issue link from this: {:?}",
+            versions.repository
+        );
+        assert!(!versions.app.is_empty(), "the app version");
+        assert!(!versions.core.is_empty(), "the core version");
+    }
 }

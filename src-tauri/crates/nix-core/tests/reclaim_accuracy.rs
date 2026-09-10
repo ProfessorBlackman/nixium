@@ -177,7 +177,9 @@ fn reported_bytes_match_the_measured_delta_within_two_percent() {
     let guard = Guard::new(Vec::new());
     let token = CancelToken::new();
 
-    let preview = session.preview(&registry, &guard, &token).expect("preview");
+    let preview = session
+        .preview(&registry, &guard, &token, |_, _, _| {})
+        .expect("preview");
     assert_eq!(preview.items.len(), files.len());
 
     let selection: Vec<u64> = preview.items.iter().map(|i| i.id).collect();
@@ -232,7 +234,9 @@ fn many_small_files_are_accounted_by_allocation_not_apparent_size() {
     let session = Session::new();
     let guard = Guard::new(Vec::new());
     let token = CancelToken::new();
-    let preview = session.preview(&registry, &guard, &token).expect("preview");
+    let preview = session
+        .preview(&registry, &guard, &token, |_, _, _| {})
+        .expect("preview");
 
     assert!(
         preview.total_bytes > apparent * 10,
@@ -271,7 +275,9 @@ fn the_preview_does_not_overpromise() {
     let guard = Guard::new(Vec::new());
     let token = CancelToken::new();
 
-    let preview = session.preview(&registry, &guard, &token).expect("preview");
+    let preview = session
+        .preview(&registry, &guard, &token, |_, _, _| {})
+        .expect("preview");
     let promised = preview.total_bytes;
 
     let selection: Vec<u64> = preview.items.iter().map(|i| i.id).collect();
@@ -309,7 +315,9 @@ fn reclaiming_a_subset_frees_only_that_subset() {
     let session = Session::new();
     let guard = Guard::new(Vec::new());
     let token = CancelToken::new();
-    let preview = session.preview(&registry, &guard, &token).expect("preview");
+    let preview = session
+        .preview(&registry, &guard, &token, |_, _, _| {})
+        .expect("preview");
 
     // Half of them.
     let selection: Vec<u64> = preview.items.iter().take(3).map(|i| i.id).collect();
@@ -354,7 +362,9 @@ fn skipped_items_contribute_nothing_to_the_total() {
     let session = Session::new();
     let guard = Guard::new(Vec::new());
     let token = CancelToken::new();
-    let preview = session.preview(&registry, &guard, &token).expect("preview");
+    let preview = session
+        .preview(&registry, &guard, &token, |_, _, _| {})
+        .expect("preview");
 
     // Change one of them after the preview, so the executor's time-of-check guard skips it.
     std::fs::write(&kept, vec![b'y'; 120_000]).expect("rewrite");
@@ -406,7 +416,9 @@ fn trashing_stages_bytes_without_freeing_them() {
     let session = Session::new();
     let guard = Guard::new(Vec::new());
     let token = CancelToken::new();
-    let preview = session.preview(&registry, &guard, &token).expect("preview");
+    let preview = session
+        .preview(&registry, &guard, &token, |_, _, _| {})
+        .expect("preview");
     let selection: Vec<u64> = preview.items.iter().map(|i| i.id).collect();
     let report = session
         .execute(preview.ticket, &selection, &guard, &token, |_, _| {})
@@ -458,7 +470,9 @@ fn emptying_the_trash_frees_what_trashing_only_staged() {
         return; // no mount information available; nothing to assert against
     };
 
-    let preview = session.preview(&registry, &guard, &token).expect("preview");
+    let preview = session
+        .preview(&registry, &guard, &token, |_, _, _| {})
+        .expect("preview");
     let selection: Vec<u64> = preview.items.iter().map(|i| i.id).collect();
     let trash_report = session
         .execute(preview.ticket, &selection, &guard, &token, |_, _| {})
