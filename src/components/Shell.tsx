@@ -261,7 +261,9 @@ export function Shell({ initialView }: { initialView: ViewId }) {
         <Announcer />
 
         <div className="content">
-          <main className="view">
+          {/* The pane, not the view: it owns the scrolling and the page's inset, and whatever
+              mounts inside it owns only its own content. See `.pane`. */}
+          <main className="pane">
             <Suspense fallback={<p className="empty">{t("Loading…")}</p>}>
               <ViewBody id={view} />
             </Suspense>

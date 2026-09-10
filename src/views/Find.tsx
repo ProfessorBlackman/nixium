@@ -102,7 +102,7 @@ export default function Find() {
   }, [home, operation]);
 
   return (
-    <section className="view">
+    <section>
       {/* Two columns. Search and `Largest files` stack on the left; `Duplicates` sits beside them
           on the right, starting level with the search form rather than below it.
 

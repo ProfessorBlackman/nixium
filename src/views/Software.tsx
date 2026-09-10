@@ -233,7 +233,7 @@ export default function Software() {
   );
 
   return (
-    <section className="view">
+    <section>
       <div className="card">
         <div className="row">
           <label className="field field-inline">

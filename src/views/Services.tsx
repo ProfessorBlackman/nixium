@@ -167,7 +167,7 @@ export default function Services() {
   const masked = units.filter((u) => u.load_state === "masked");
 
   return (
-    <section className="view">
+    <section>
       <div className="card">
         <div className="row">
           <label className="field field-inline">

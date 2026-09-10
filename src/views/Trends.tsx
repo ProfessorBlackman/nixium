@@ -140,7 +140,7 @@ export default function Trends() {
   }, [refresh]);
 
   return (
-    <section className="view">
+    <section>
       <div className="card">
         <h2>{t("Collection")}</h2>
         {timer === null ? (

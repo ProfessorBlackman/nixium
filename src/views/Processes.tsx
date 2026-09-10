@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Methuselah Nwodobeh
 
 /**
- * Processes — `PRC-1` and `PRC-2`.
+ * Processes, `PRC-1` and `PRC-2`.
  *
  * The acceptance criteria here are entirely about **what survives a refresh**: selection, scroll
  * position, sort order and column choices. A table that reloses your place every two seconds is one
@@ -18,7 +18,7 @@
  * - **Selection is a pid, not an index.** A process that moves from row 3 to row 40 because it got
  *   busy is still the selected process.
  *
- * The `%CPU` column is instantaneous — the change since the last poll — not `ps`'s average over the
+ * The `%CPU` column is instantaneous, the change since the last poll, not `ps`'s average over the
  * process's whole life. It is a percentage of one core, so a threaded build reads past 100%.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -53,7 +53,7 @@ const COLUMNS: Array<{ id: Column; label: string; numeric: boolean }> = [
   { id: "name", label: "Name", numeric: false },
 ];
 
-/** A stable identity. A pid alone is not one — they are reused. */
+/** A stable identity. A pid alone is not one, they are reused. */
 function identify(process: Process): string {
   return `${process.pid}:${process.started_ticks}`;
 }
@@ -208,7 +208,7 @@ export default function Processes() {
         notify.success(success);
         setProcesses(await api.processesList());
       } catch (thrown) {
-        // The error carries the real errno and its remedy — no silent no-op.
+        // The error carries the real errno and its remedy, no silent no-op.
         notify.error(toAppError(thrown));
       } finally {
         setBusy(false);
@@ -241,7 +241,7 @@ export default function Processes() {
   );
 
   return (
-    <section className="view">
+    <section>
       <div className="card">
         <div className="row">
           <input
@@ -299,7 +299,7 @@ export default function Processes() {
             <tbody>
               {shown.map((process) => (
                 <tr
-                  /* Keyed on identity, so a row that moves is moved rather than rebuilt — which is
+                  /* Keyed on identity, so a row that moves is moved rather than rebuilt, which is
                      what keeps the scroll position and the selection across a refresh. */
                   key={identify(process)}
                   className={process.pid === selected ? "is-selected" : undefined}
@@ -346,7 +346,7 @@ export default function Processes() {
           {chosen.state === "zombie" ? (
             <p className="caveat">
               {t(
-                "This process has already exited and is waiting for its parent to collect it. A signal to it would succeed and do nothing, so nix will not pretend otherwise — it disappears when its parent reaps it, or when its parent exits.",
+                "This process has already exited and is waiting for its parent to collect it. A signal to it would succeed and do nothing, so nix will not pretend otherwise, it disappears when its parent reaps it, or when its parent exits.",
               )}
             </p>
           ) : (
@@ -370,7 +370,7 @@ export default function Processes() {
               </div>
               <p className="muted">
                 {t(
-                  "TERM lets it save its work. KILL cannot be caught, so anything unsaved is lost. If it belongs to another user, nix will ask for administrator rights — and if it is yours, it will not.",
+                  "TERM lets it save its work. KILL cannot be caught, so anything unsaved is lost. If it belongs to another user, nix will ask for administrator rights, and if it is yours, it will not.",
                 )}
               </p>
 
@@ -395,7 +395,7 @@ export default function Processes() {
               </label>
               <p className="muted">
                 {t(
-                  "Higher is politer. Lowering it needs administrator rights even for your own processes — the kernel lets anyone give up priority and nobody take it.",
+                  "Higher is politer. Lowering it needs administrator rights even for your own processes, the kernel lets anyone give up priority and nobody take it.",
                 )}
               </p>
             </>
@@ -434,7 +434,7 @@ export default function Processes() {
                       {formatBytes(detail.io.read_chars)} / {formatBytes(detail.io.written_chars)}
                       <span className="muted">
                         {" "}
-                        — of which {formatBytes(detail.io.read_bytes)} /{" "}
+                       , of which {formatBytes(detail.io.read_bytes)} /{" "}
                         {formatBytes(detail.io.written_bytes)} actually reached a disk
                       </span>
                     </span>
@@ -507,7 +507,7 @@ export default function Processes() {
         <h2>{t("Tree")}</h2>
         <p className="muted">
           {t(
-            "A build system&rsquo;s cost is spread across dozens of short-lived children, and each one alone looks like nothing. The subtree figure is what explains a slow machine.",
+            "A build system's cost is spread across dozens of short-lived children, and each one alone looks like nothing. The subtree figure is what explains a slow machine.",
           )}
         </p>
         <div className="row">
