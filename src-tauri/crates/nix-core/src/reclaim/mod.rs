@@ -377,11 +377,14 @@ impl Session {
     }
 
     /// Compute what would happen, and hold it for execution.
+    /// `on_category` is handed straight to [`Registry::collect`], which is where the time goes; see
+    /// there for what it is called with and why a preview has to report anything at all.
     pub fn preview(
         &self,
         registry: &Registry,
         guard: &Guard,
         token: &CancelToken,
+        on_category: impl FnMut(&str, usize, usize),
     ) -> Result<Preview> {
         let mut items = Vec::new();
         let mut refused = Vec::new();
@@ -392,7 +395,7 @@ impl Session {
         // for everything and the qualification costs nothing.
         let cow_map = CowMap::build();
 
-        for candidate in registry.collect(token)? {
+        for candidate in registry.collect(token, on_category)? {
             token.check()?;
 
             // The protection rules get the first word, before anything is offered — for anything
@@ -1030,8 +1033,12 @@ mod tests {
         let session = Session::new();
         let token = CancelToken::new();
 
-        let first = session.preview(&registry, &guard(), &token).unwrap();
-        let second = session.preview(&registry, &guard(), &token).unwrap();
+        let first = session
+            .preview(&registry, &guard(), &token, |_, _, _| {})
+            .unwrap();
+        let second = session
+            .preview(&registry, &guard(), &token, |_, _, _| {})
+            .unwrap();
         assert_ne!(
             first.ticket, second.ticket,
             "each preview mints its own ticket"
@@ -1053,7 +1060,9 @@ mod tests {
         let registry = sandbox.registry(sandbox.filled_trash(1));
         let session = Session::new();
         let token = CancelToken::new();
-        let preview = session.preview(&registry, &guard(), &token).unwrap();
+        let preview = session
+            .preview(&registry, &guard(), &token, |_, _, _| {})
+            .unwrap();
 
         let err = session
             .execute(preview.ticket, &[999], &guard(), &token, |_, _| {})
@@ -1072,7 +1081,9 @@ mod tests {
         let registry = sandbox.registry(sandbox.filled_trash(1));
         let session = Session::new();
         let token = CancelToken::new();
-        let preview = session.preview(&registry, &guard(), &token).unwrap();
+        let preview = session
+            .preview(&registry, &guard(), &token, |_, _, _| {})
+            .unwrap();
 
         session.clear();
 
@@ -1122,7 +1133,7 @@ mod tests {
         registry.register(Box::new(ProtectedCategory));
 
         let preview = Session::new()
-            .preview(&registry, &guard(), &CancelToken::new())
+            .preview(&registry, &guard(), &CancelToken::new(), |_, _, _| {})
             .unwrap();
 
         assert!(
@@ -1170,7 +1181,7 @@ mod tests {
         let mut registry = Registry::new();
         registry.register(Box::new(NeverCategory));
         let preview = Session::new()
-            .preview(&registry, &guard(), &CancelToken::new())
+            .preview(&registry, &guard(), &CancelToken::new(), |_, _, _| {})
             .unwrap();
 
         assert!(preview.items.is_empty());
@@ -1185,7 +1196,9 @@ mod tests {
         let session = Session::new();
         let token = CancelToken::new();
 
-        let preview = session.preview(&registry, &guard(), &token).unwrap();
+        let preview = session
+            .preview(&registry, &guard(), &token, |_, _, _| {})
+            .unwrap();
         assert_eq!(preview.items.len(), 1);
 
         // The user adds an exclusion between previewing and confirming.
@@ -1242,7 +1255,9 @@ mod tests {
         registry.register(Box::new(FileCategory(file.clone())));
         let session = Session::new();
         let token = CancelToken::new();
-        let preview = session.preview(&registry, &guard(), &token).unwrap();
+        let preview = session
+            .preview(&registry, &guard(), &token, |_, _, _| {})
+            .unwrap();
 
         // Someone rewrites the file after the user saw the preview.
         std::fs::write(&file, vec![b'y'; 65536]).unwrap();
@@ -1303,7 +1318,9 @@ mod tests {
         registry.register(Box::new(FileCategory(file.clone())));
         let session = Session::new();
         let token = CancelToken::new();
-        let preview = session.preview(&registry, &guard(), &token).unwrap();
+        let preview = session
+            .preview(&registry, &guard(), &token, |_, _, _| {})
+            .unwrap();
 
         std::fs::remove_file(&file).unwrap();
 
@@ -1331,7 +1348,9 @@ mod tests {
 
         assert_eq!(crate::trash::list(&dir).len(), 3);
 
-        let preview = session.preview(&registry, &guard(), &token).unwrap();
+        let preview = session
+            .preview(&registry, &guard(), &token, |_, _, _| {})
+            .unwrap();
         assert_eq!(
             preview.items.len(),
             1,
@@ -1374,7 +1393,7 @@ mod tests {
         let sandbox = Sandbox::new("nothing");
         let registry = sandbox.registry(sandbox.trash_dir());
         let preview = Session::new()
-            .preview(&registry, &guard(), &CancelToken::new())
+            .preview(&registry, &guard(), &CancelToken::new(), |_, _, _| {})
             .unwrap();
         assert!(preview.is_empty());
         assert_eq!(preview.total_bytes, 0);
@@ -1387,7 +1406,9 @@ mod tests {
         let registry = sandbox.registry(dir.clone());
         let session = Session::new();
         let token = CancelToken::new();
-        let preview = session.preview(&registry, &guard(), &token).unwrap();
+        let preview = session
+            .preview(&registry, &guard(), &token, |_, _, _| {})
+            .unwrap();
 
         let report = session
             .execute(preview.ticket, &[], &guard(), &token, |_, _| {})
@@ -1404,7 +1425,9 @@ mod tests {
         let registry = sandbox.registry(dir.clone());
         let session = Session::new();
         let token = CancelToken::new();
-        let preview = session.preview(&registry, &guard(), &token).unwrap();
+        let preview = session
+            .preview(&registry, &guard(), &token, |_, _, _| {})
+            .unwrap();
 
         token.cancel();
         let report = session
@@ -1426,7 +1449,9 @@ mod tests {
         let registry = sandbox.registry(sandbox.filled_trash(1));
         let session = Session::new();
         let token = CancelToken::new();
-        let preview = session.preview(&registry, &guard(), &token).unwrap();
+        let preview = session
+            .preview(&registry, &guard(), &token, |_, _, _| {})
+            .unwrap();
 
         let seen = std::sync::Mutex::new(Vec::new());
         session
@@ -1468,7 +1493,9 @@ mod tests {
         let registry = sandbox.registry(sandbox.filled_trash(4));
         let session = Session::new();
         let token = CancelToken::new();
-        let preview = session.preview(&registry, &guard(), &token).unwrap();
+        let preview = session
+            .preview(&registry, &guard(), &token, |_, _, _| {})
+            .unwrap();
 
         let report = session
             .execute(preview.ticket, &[0], &guard(), &token, |_, _| {})
@@ -1533,7 +1560,7 @@ mod tests {
         let mut registry = Registry::new();
         registry.register(Box::new(Shared));
         let preview = Session::new()
-            .preview(&registry, &guard(), &CancelToken::new())
+            .preview(&registry, &guard(), &CancelToken::new(), |_, _, _| {})
             .unwrap();
 
         assert_eq!(preview.items.len(), 1);
@@ -1589,7 +1616,7 @@ mod tests {
         let mut registry = Registry::new();
         registry.register(Box::new(Partly));
         let preview = Session::new()
-            .preview(&registry, &guard(), &CancelToken::new())
+            .preview(&registry, &guard(), &CancelToken::new(), |_, _, _| {})
             .unwrap();
 
         assert_eq!(preview.promisable_bytes, 2_000_000_000);
@@ -1605,7 +1632,7 @@ mod tests {
         let sandbox = Sandbox::new("exact");
         let registry = sandbox.registry(sandbox.filled_trash(2));
         let preview = Session::new()
-            .preview(&registry, &guard(), &CancelToken::new())
+            .preview(&registry, &guard(), &CancelToken::new(), |_, _, _| {})
             .unwrap();
 
         assert!(preview.items[0].reclaimable.is_exact());
@@ -1657,7 +1684,7 @@ mod tests {
         let mut registry = Registry::new();
         registry.register(Box::new(Multi));
         let preview = Session::new()
-            .preview(&registry, &guard(), &CancelToken::new())
+            .preview(&registry, &guard(), &CancelToken::new(), |_, _, _| {})
             .unwrap();
 
         let sizes: Vec<u64> = preview.items.iter().map(|i| i.bytes).collect();
@@ -1698,7 +1725,7 @@ mod tests {
         registry.register(Box::new(Broken));
 
         let preview = Session::new()
-            .preview(&registry, &guard(), &CancelToken::new())
+            .preview(&registry, &guard(), &CancelToken::new(), |_, _, _| {})
             .unwrap();
         assert_eq!(
             preview.items.len(),
@@ -1735,7 +1762,7 @@ mod tests {
         let mut registry = Registry::new();
         registry.register(Box::new(Unavailable));
         let preview = Session::new()
-            .preview(&registry, &guard(), &CancelToken::new())
+            .preview(&registry, &guard(), &CancelToken::new(), |_, _, _| {})
             .unwrap();
         assert!(preview.is_empty());
     }
@@ -1963,7 +1990,7 @@ mod tests {
 
         let session = Session::new();
         let preview = session
-            .preview(&registry, &guard(), &CancelToken::new())
+            .preview(&registry, &guard(), &CancelToken::new(), |_, _, _| {})
             .unwrap();
 
         assert!(
@@ -2096,5 +2123,60 @@ mod tests {
         let back: Report = serde_json::from_str(&json).unwrap();
         assert_eq!(report, back);
         assert!(json.contains("\"reclaimed\""), "{json}");
+    }
+
+    /// A preview says what it is doing while it does it.
+    ///
+    /// The reported bug was a frozen window: `reclaim_preview` ran on Tauri's main thread, so
+    /// nothing repainted for however long the categories took and the application looked hung. The
+    /// command being `async` is what fixes that, and it cannot be tested here — there is no window.
+    /// What can be tested is the other half, which is why the fix is worth anything: that the work
+    /// reports where it has got to, in order, before each category rather than after it.
+    #[test]
+    fn a_preview_reports_each_category_before_asking_it() {
+        struct Named(&'static str, &'static str);
+        impl Category for Named {
+            fn id(&self) -> &'static str {
+                self.0
+            }
+            fn label(&self) -> &'static str {
+                self.1
+            }
+            fn explains(&self) -> &'static str {
+                "A category used only by tests."
+            }
+            fn space_category(&self) -> crate::space::Category {
+                crate::space::Category::Unknown
+            }
+            fn candidates(&self, _: &CancelToken) -> Result<Vec<Candidate>> {
+                Ok(Vec::new())
+            }
+        }
+
+        let mut registry = Registry::new();
+        registry.register(Box::new(Named("first", "Apt package cache")));
+        registry.register(Box::new(Named("second", "Journal")));
+        registry.register(Box::new(Named("third", "Trash")));
+
+        let mut reported = Vec::new();
+        Session::new()
+            .preview(
+                &registry,
+                &guard(),
+                &CancelToken::new(),
+                |category, done, total| reported.push((category.to_string(), done, total)),
+            )
+            .expect("preview");
+
+        assert_eq!(
+            reported,
+            vec![
+                ("Apt package cache".to_string(), 0, 3),
+                ("Journal".to_string(), 1, 3),
+                ("Trash".to_string(), 2, 3),
+            ],
+            "each category is announced before it is asked, so the label names what is happening \
+             now rather than what has just finished — and the count is what drives the bar"
+        );
     }
 }

@@ -2,18 +2,18 @@
 // Copyright (C) 2026 Methuselah Nwodobeh
 
 /**
- * Reclaim — milestone M3.
+ * Reclaim, milestone M3.
  *
  * The whole view is shaped by principle P2: **preview → confirm → execute → report**. Those are
  * literally the four states below, and there is no path between the first and the third.
  *
  * The safety rating decides what the UI allows, not just what it says:
  *
- * - `safe`   — pre-checked. Regenerable with no user-visible loss.
- * - `review` — selectable, never pre-checked, and its cost is always shown. Choosing for someone
+ * - `safe`  , pre-checked. Regenerable with no user-visible loss.
+ * - `review`, selectable, never pre-checked, and its cost is always shown. Choosing for someone
  *              what they will lose is not a decision to make on their behalf.
- * - `risky`  — needs its own confirmation, and is excluded from "select all".
- * - `never`  — cannot reach this view at all; the backend refuses it before the preview.
+ * - `risky` , needs its own confirmation, and is excluded from "select all".
+ * - `never` , cannot reach this view at all; the backend refuses it before the preview.
  *
  * # The confirm stage is two columns
  *
@@ -24,7 +24,7 @@
  * out of reach.
  *
  * Inside the confirm panel the action is **pinned to the top**, and what is pinned is the button
- * *together with both caveats* — risky items, and bytes that only reach the trash. A button that
+ * *together with both caveats*, risky items, and bytes that only reach the trash. A button that
  * stayed visible while those two scrolled away would be a worse design than one that scrolled with
  * them: the warnings are what make pressing it an informed act, and the safe items arrive
  * pre-checked, so the button is live from the first render. Only the itemised list moves.
@@ -34,16 +34,18 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { t } from "../lib/i18n";
+import { t, tf } from "../lib/i18n";
 import { Busy, Spinner } from "../components/Busy";
 import { formatBytes } from "../lib/format";
 import {
   api,
+  onReclaimPreview,
   toAppError,
   type ItemOutcome,
   type Preview,
   type PreviewItem,
   type Report,
+  type PreviewProgress,
   type Safety,
 } from "../lib/ipc";
 import { notify } from "../lib/notices";
@@ -73,13 +75,27 @@ export default function Reclaim() {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [report, setReport] = useState<Report | null>(null);
+  const [progress, setProgress] = useState<PreviewProgress | null>(null);
 
   // A preview is only good until it is replaced, so drop it on leaving.
   useEffect(() => () => void api.reclaimClear().catch(() => {}), []);
 
+  /*
+   * How far the preview has got.
+   *
+   * Subscribed for the life of the view rather than only while it runs: the first category is asked
+   * before the `await` in `runPreview` has even yielded, so a listener attached when the click is
+   * handled can miss the beginning of the very thing it is there to report.
+   */
+  useEffect(() => {
+    const subscription = onReclaimPreview(setProgress);
+    return () => void subscription.then((un) => un());
+  }, []);
+
   const runPreview = useCallback(async () => {
     setStage("previewing");
     setReport(null);
+    setProgress(null);
     try {
       const next = await api.reclaimPreview();
       setPreview(next);
@@ -140,7 +156,7 @@ export default function Reclaim() {
         // the move is a rename and free space does not change until it is emptied.
         notify.success(
           result.trashed > 0
-            ? `Freed ${formatBytes(result.freed)}. ${formatBytes(result.trashed)} moved to the trash — empty it to reclaim that too.`
+            ? `Freed ${formatBytes(result.freed)}. ${formatBytes(result.trashed)} moved to the trash, empty it to reclaim that too.`
             : `Freed ${formatBytes(result.freed)}.`,
         );
       }
@@ -152,12 +168,12 @@ export default function Reclaim() {
 
   // `stack-full` rather than `stack-wide`: this page is a list of paths beside a panel of paths, and
   // both read better wide. The 68rem cap is a measure limit for prose, and it left half of a large
-  // monitor empty here — `.card p` still holds the paragraphs to a readable line.
+  // monitor empty here, `.card p` still holds the paragraphs to a readable line.
   return (
     <section className="stack stack-full">
       {/* ---------- 1. preview ---------- */}
       {(stage === "idle" || stage === "previewing") && (
-        /* Alone on the page, so it keeps a measure rather than the page's full width — see
+        /* Alone on the page, so it keeps a measure rather than the page's full width, see
            `.card-narrow`. */
         <div className="card card-narrow">
           <h2>{t("Find reclaimable space")}</h2>
@@ -171,9 +187,25 @@ export default function Reclaim() {
             {stage === "previewing" ? t("Looking…") : t("Look for reclaimable space")}
           </button>
           {/* Every category is asked in turn and some of them walk directories, so this takes long
-              enough that a button which merely goes grey reads as a button that did nothing. */}
+              enough that a button which merely goes grey reads as a button that did nothing.
+
+              The bar counts categories asked, which is honest but uneven, asking apt answers at
+              once, walking `~/.cache` does not, so the label carries the category name. That is
+              what tells a reader the thing is alive: a number that has not moved for four seconds
+              reads as stuck, "Asking Journal…" does not. */}
           {stage === "previewing" && (
-            <Busy label={t("Asking every category what it can free…")} />
+            <Busy
+              label={
+                progress
+                  ? tf("Asking {category}… ({done} of {total})", {
+                      category: progress.category,
+                      done: progress.done + 1,
+                      total: progress.total,
+                    })
+                  : t("Asking every category what it can free…")
+              }
+              fraction={progress && progress.total > 0 ? progress.done / progress.total : null}
+            />
           )}
         </div>
       )}
@@ -210,7 +242,7 @@ export default function Reclaim() {
               <p className="caveat">
                 Up to {formatBytes(preview.total_bytes)} was found, but only{" "}
                 {formatBytes(preview.promisable_bytes)} is certain to come back. The rest sits on a
-                copy-on-write filesystem where space can be shared with snapshots — deleting it may
+                copy-on-write filesystem where space can be shared with snapshots, deleting it may
                 return less, or nothing.
               </p>
             )}
@@ -264,7 +296,7 @@ export default function Reclaim() {
                           {preview.explanations[item.category]}
                         </span>
                       )}
-                      {/* A cost is shown wherever there is one — a rating that says "this costs
+                      {/* A cost is shown wherever there is one, a rating that says "this costs
                           something" without saying what gives nothing to decide with. */}
                       {item.cost && <span className="reclaim-cost">{item.cost}</span>}
                       {item.reclaimable.confidence !== "exact" && (
@@ -279,7 +311,7 @@ export default function Reclaim() {
             <div className="card card-confirm">
               {/* Sticky, and it holds more than the button. The itemised selection below can be long
                   enough to scroll, and a button that stayed visible while the two caveats scrolled
-                  away would be worse than one that scrolled with them — the warnings are the reason
+                  away would be worse than one that scrolled with them, the warnings are the reason
                   pressing it is an informed act. So the action and both caveats pin together, and
                   only the list of items moves. */}
               <div className="confirm-action">
@@ -316,7 +348,7 @@ export default function Reclaim() {
                 {selectedTrashable > 0 && (
                   <p className="caveat">
                     {formatBytes(selectedTrashable)} of this goes to the trash, which is reversible
-                    but on the same disk — so that space comes back only once you empty it. nix
+                    but on the same disk, so that space comes back only once you empty it. nix
                     offers emptying the trash as its own item.
                   </p>
                 )}
@@ -437,14 +469,14 @@ export default function Reclaim() {
             {report.measured_delta !== null && (
               <p className={report.measurement_agrees === false ? "caveat" : "muted"}>
                 {report.measurement_agrees === false
-                  ? `nix counted ${formatBytes(report.freed)} freed but the filesystem moved by ${formatBytes(report.measured_delta)}. The difference is worth knowing about — copy-on-write filesystems and snapshots can hold onto space that looks freed.`
+                  ? `nix counted ${formatBytes(report.freed)} freed but the filesystem moved by ${formatBytes(report.measured_delta)}. The difference is worth knowing about, copy-on-write filesystems and snapshots can hold onto space that looks freed.`
                   : `The filesystem confirms it: ${formatBytes(report.measured_delta)} came back.`}
               </p>
             )}
             {report.trashed > 0 && (
               <p className="caveat">
                 {formatBytes(report.trashed)} was moved to the trash, which sits on the same
-                filesystem — so that space has not come back yet. Emptying the trash is what reclaims
+                filesystem, so that space has not come back yet. Emptying the trash is what reclaims
                 it, and nix offers that as its own item.
               </p>
             )}
@@ -464,7 +496,7 @@ export default function Reclaim() {
                   <code>{o.path}</code>
                   <span className="muted">
                     {o.outcome === "reclaimed" && formatBytes(o.bytes)}
-                    {o.outcome === "trashed" && `${formatBytes(o.bytes)} — recoverable from the trash`}
+                    {o.outcome === "trashed" && `${formatBytes(o.bytes)}, recoverable from the trash`}
                     {o.outcome === "skipped" && o.reason}
                     {o.outcome === "failed" && o.error.message}
                   </span>

@@ -47,6 +47,29 @@ use crate::state::AppState;
 pub(crate) const EVENT_PROGRESS: &str = "op://progress";
 /// Event name for the terminal outcome of an operation.
 pub(crate) const EVENT_DONE: &str = "op://done";
+/// Event name for how far a reclaim preview has got.
+///
+/// Its own event rather than `op://progress`, because that one is keyed by operation id and
+/// [`reclaim_preview`] has none to give: it returns the preview itself, so the id would arrive at
+/// the interface after the work it describes had finished. See [`PreviewProgress`].
+pub(crate) const EVENT_RECLAIM_PREVIEW: &str = "reclaim://preview";
+
+/// How far a reclaim preview has got. `STO-3`.
+///
+/// The fraction counts **categories asked**, not bytes and not seconds, and they are not the same
+/// size: one shells out to a package manager and answers at once, another walks `~/.cache`. So the
+/// bar can sit still and then jump. It is still a real count of real work rather than an invented
+/// percentage, and `category` is the part that carries the meaning — a reader wants to know it is
+/// asking about the journal right now, more than they want a number.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct PreviewProgress {
+    /// The category being asked, by the label a user would recognise.
+    pub(crate) category: String,
+    /// How many have been asked already.
+    pub(crate) done: usize,
+    /// How many there are.
+    pub(crate) total: usize,
+}
 
 /// Versions of both halves of the application, so a mismatched install is detectable — and where to
 /// report a problem with them.
@@ -1195,12 +1218,39 @@ pub(crate) fn snapshots() -> Vec<Snapshot> {
 ///
 /// Computes but changes nothing. The returned [`Preview`] carries a ticket, and [`reclaim_execute`]
 /// will not act without it — so there is no path from the UI to a deletion that skips this step.
-#[tauri::command]
-pub(crate) fn reclaim_preview(state: State<'_, AppState>) -> Result<Preview> {
+///
+/// # `async`, and that is the whole of the bug it fixes
+///
+/// This was a plain `#[tauri::command]`, which Tauri runs **on the main thread**. Asking every
+/// category what it can free walks directories and shells out to package managers, so for as long
+/// as that took the event loop was blocked: the window did not repaint, the spinner the view had
+/// already put on screen never drew a frame, and the whole application looked hung rather than busy.
+/// The work was fine. Nothing could say so.
+///
+/// `(async)` moves it off that thread — the same fix, for the same reason, that the eight privileged
+/// commands got in e59ed8f. The view's indicator can now animate, and it is fed by
+/// [`EVENT_RECLAIM_PREVIEW`] so it also says which category is being asked.
+#[tauri::command(async)]
+pub(crate) fn reclaim_preview(app: AppHandle, state: State<'_, AppState>) -> Result<Preview> {
     let token = nix_core::op::CancelToken::new();
     state
         .reclaim
-        .preview(&state.categories, &state.guard(), &token)
+        .preview(
+            &state.categories,
+            &state.guard(),
+            &token,
+            |category, done, total| {
+                let progress = PreviewProgress {
+                    category: category.to_string(),
+                    done,
+                    total,
+                };
+                if let Err(e) = app.emit(EVENT_RECLAIM_PREVIEW, &progress) {
+                    // A preview that cannot report progress is still a preview worth finishing.
+                    tracing::warn!(error = %e, "could not emit preview progress");
+                }
+            },
+        )
         .map_err(|e| e.context("working out what can be reclaimed"))
 }
 

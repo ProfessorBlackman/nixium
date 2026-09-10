@@ -205,7 +205,7 @@ export default function Trends() {
           </p>
         ) : samples.length === 1 ? (
           <p className="muted">
-            One sample so far, of {formatBytes(samples[0].total_allocated)}. A trend needs two points —
+            One sample so far, of {formatBytes(samples[0].total_allocated)}. A trend needs two points,
             there is nothing to say about change yet, and nix will not invent it.
           </p>
         ) : (

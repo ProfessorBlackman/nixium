@@ -101,6 +101,8 @@ export const EVENT_DONE = "op://done";
 export const EVENT_SCAN_DONE = "scan://done";
 /** A finished duplicate search. `STO-15`. */
 export const EVENT_DUPLICATES_DONE = "duplicates://done";
+/** How far a reclaim preview has got. See `onReclaimPreview`. */
+export const EVENT_RECLAIM_PREVIEW = "reclaim://preview";
 /** One metrics reading, once a second while subscribed. `MON-1`. */
 export const EVENT_METRICS_TICK = "metrics://tick";
 /** The name of a unit that changed. `SVC-3`. */
@@ -247,6 +249,20 @@ export function onMetricsTick(handler: (r: Reading) => void): Promise<UnlistenFn
 /** Subscribe to finished duplicate searches. */
 export function onDuplicatesDone(handler: (r: DuplicateReport) => void): Promise<UnlistenFn> {
   return listen<DuplicateReport>(EVENT_DUPLICATES_DONE, (event) => handler(event.payload));
+}
+
+/** How far a reclaim preview has got: the category being asked, and how many of how many. */
+export type PreviewProgress = { category: string; done: number; total: number };
+
+/**
+ * Subscribe to a reclaim preview's progress.
+ *
+ * Its own event rather than `op://progress`, which is keyed by operation id: `reclaim_preview`
+ * returns the preview itself, so there is no id to filter on until after the work it would describe
+ * is over.
+ */
+export function onReclaimPreview(handler: (p: PreviewProgress) => void): Promise<UnlistenFn> {
+  return listen<PreviewProgress>(EVENT_RECLAIM_PREVIEW, (event) => handler(event.payload));
 }
 
 /** Subscribe to progress for all operations. */
