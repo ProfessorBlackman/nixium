@@ -190,7 +190,7 @@ export default function Hosts() {
         <h2>{t("The hosts file")}</h2>
         <p className="muted">
           Names on this list are resolved here rather than by DNS. {entries.length} entr
-          {entries.length === 1 ? "y" : "ies"}, and {file?.lines.length ?? 0} lines in total —
+          {entries.length === 1 ? "y" : "ies"}, and {file?.lines.length ?? 0} lines in total,
           comments and spacing included, all of which are kept exactly as they are.
         </p>
         <div className="row wrap">
@@ -212,7 +212,7 @@ export default function Hosts() {
         </div>
         <p className="muted">
           {t(
-            "Saving asks for administrator rights, and is refused if the file changed since it was loaded — so an edit made in a terminal is reported rather than overwritten.",
+            "Saving asks for administrator rights, and is refused if the file changed since it was loaded, so an edit made in a terminal is reported rather than overwritten.",
           )}
         </p>
       </div>

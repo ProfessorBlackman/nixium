@@ -145,7 +145,7 @@ export default function About() {
         <h2>{t("Privileged helper")}</h2>
         <p className="muted">
           {t(
-            "One authentication opens a privileged session, rather than a prompt per action. A refused authorisation is reported as refused — never as success.",
+            "One authentication opens a privileged session, rather than a prompt per action. A refused authorisation is reported as refused, never as success.",
           )}
         </p>
         <button type="button" onClick={() => void probeHelper()} disabled={probing}>
@@ -172,7 +172,7 @@ export default function About() {
         <h2>{t("What nix will and will not do")}</h2>
         <p className="muted">
           {t(
-            "The introduction shown on first run — what is never touched, what happens before anything is deleted, and what the sizes mean. The first-run screen says this can be read again here, so it can be.",
+            "The introduction shown on first run, what is never touched, what happens before anything is deleted, and what the sizes mean. The first-run screen says this can be read again here, so it can be.",
           )}
         </p>
         <button type="button" disabled={reintroducing} onClick={() => void showIntroduction()}>

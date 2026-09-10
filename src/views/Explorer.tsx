@@ -145,7 +145,7 @@ export default function Explorer() {
         {filesystems && filesystems.length > 0 && (
           <>
             <p className="muted" style={{ marginTop: "0.9rem" }}>
-              {t("Or a whole filesystem. Pseudo-filesystems are hidden — they are not storage.")}
+              {t("Or a whole filesystem. Pseudo-filesystems are hidden, they are not storage.")}
             </p>
             <ul className="fs-list">
               {filesystems.map((fs) => (
@@ -225,7 +225,7 @@ export default function Explorer() {
             {scannedAt && scanRoot && (
               <p className="stale">
                 <span>
-                  Scanned <strong>{formatAge(scannedAt)}</strong> — this is the last saved result,
+                  Scanned <strong>{formatAge(scannedAt)}</strong>, this is the last saved result,
                   not a fresh measurement.
                 </span>
                 <button type="button" onClick={() => void startScan(scanRoot)} disabled={op.running}>

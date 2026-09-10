@@ -106,7 +106,7 @@ export default function Repositories() {
         <p className="muted">
           {enabled} of {repos.length} entries active, across {files} files
           {deb822 > 0 && ` · ${deb822} in the deb822 format`}. Only files apt actually reads are
-          listed — `.save` and `.distUpgrade` leftovers are ignored, as apt ignores them.
+          listed, `.save` and `.distUpgrade` leftovers are ignored, as apt ignores them.
         </p>
         <div className="row wrap">
           <label className="field field-inline">

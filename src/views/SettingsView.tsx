@@ -220,7 +220,7 @@ export default function SettingsView() {
           </select>
           <small>
             {t(
-              "Takes effect immediately — no restart. Translations are inherited from Stacer, which covers common interface words; most of nix's own wording is new and still English.",
+              "Takes effect immediately, no restart. Translations are inherited from Stacer, which covers common interface words; most of nix's own wording is new and still English.",
             )}
           </small>
         </label>
@@ -248,7 +248,7 @@ export default function SettingsView() {
         </label>
         <p className="muted">
           {t(
-            "While hidden, nix stops sampling entirely — unless you have threshold alerts, which keep watching because an alert that stops when the window is hidden is not an alert. Both settings take effect at the next start.",
+            "While hidden, nix stops sampling entirely, unless you have threshold alerts, which keep watching because an alert that stops when the window is hidden is not an alert. Both settings take effect at the next start.",
           )}
         </p>
       </div>
@@ -291,7 +291,7 @@ export default function SettingsView() {
         <h2>{t("Alerts")}</h2>
         <p className="muted">
           {t(
-            "Off unless you add one. Each fires once when it crosses, stays quiet while the condition lasts, and will not fire again until it has come back past the threshold by a margin and the cooldown has passed — so a long build is one notification rather than a hundred.",
+            "Off unless you add one. Each fires once when it crosses, stays quiet while the condition lasts, and will not fire again until it has come back past the threshold by a margin and the cooldown has passed, so a long build is one notification rather than a hundred.",
           )}
         </p>
 
@@ -358,7 +358,7 @@ export default function SettingsView() {
         <h2>{t("Where this is kept")}</h2>
         <p className="muted">
           Settings are written atomically to <code>$XDG_CONFIG_HOME/nix/settings.json</code>, keyed
-          by stable identifiers rather than display names — so changing language cannot orphan a
+          by stable identifiers rather than display names, so changing language cannot orphan a
           preference.
         </p>
       </div>

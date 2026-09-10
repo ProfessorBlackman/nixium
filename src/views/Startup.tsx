@@ -113,7 +113,7 @@ export default function Startup() {
         <h2>{t("Startup applications")}</h2>
         <p className="muted">
           {running} of {entries.length} will start in this session. An entry runs unless something
-          turns it off — nix reads that the way the specification defines it.
+          turns it off, nix reads that the way the specification defines it.
         </p>
         <div className="row wrap">
           <button type="button" onClick={() => setAdding(!adding)} disabled={busy !== null}>
@@ -220,8 +220,8 @@ export default function Startup() {
                 {!entry.runs_in_this_session && (
                   <div className="startup-note">
                     Not for this desktop
-                    {entry.only_show_in.length > 0 && ` — only ${entry.only_show_in.join(", ")}`}
-                    {entry.not_show_in.length > 0 && ` — excluded from ${entry.not_show_in.join(", ")}`}
+                    {entry.only_show_in.length > 0 && ` : only ${entry.only_show_in.join(", ")}`}
+                    {entry.not_show_in.length > 0 && ` : excluded from ${entry.not_show_in.join(", ")}`}
                   </div>
                 )}
                 {entry.try_exec_missing && (

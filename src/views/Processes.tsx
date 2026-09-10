@@ -258,7 +258,7 @@ export default function Processes() {
 
         {polls.current <= 1 && (
           <p className="muted">
-            CPU reads zero until the second sample — one reading of a counter is not a rate. Unlike{" "}
+            CPU reads zero until the second sample, one reading of a counter is not a rate. Unlike{" "}
             <code>ps</code>, this is what each process is doing now, not its average since it started.
           </p>
         )}
