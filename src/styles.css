@@ -170,9 +170,24 @@ pre {
 
 /* ---------- shell ---------- */
 
+/*
+ * The shell is exactly the window, and nothing in it may make the window itself scroll.
+ *
+ * `height: 100%` sizes the grid but does not stop its row growing: an implicit `auto` row is sized
+ * by its content, so a tall view pushed the row past the viewport, the shell's content overflowed
+ * the body, and the *document* became the scroller. Which took the sidebar with it — the sidebar had
+ * `overflow-y: auto` all along, and it never fired, because a box the full height of its content has
+ * nothing to scroll.
+ *
+ * `minmax(0, 1fr)` on the row is the same declaration as on the columns, for the same reason given
+ * there: `1fr` alone has a min of `auto`, which is content-based, so the track can still be pushed
+ * past its share. With a floor of zero the row is the viewport, the panes inside are bounded, and
+ * each one scrolls its own content.
+ */
 .shell {
   display: grid;
   grid-template-columns: 15rem minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   height: 100%;
 }
 
@@ -259,6 +274,9 @@ pre {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  /* The counterpart to the row's floor: a grid item's automatic minimum is content-based too, so
+     without this the header plus a tall view can still force this column taller than its track. */
+  min-height: 0;
 }
 
 .header {
