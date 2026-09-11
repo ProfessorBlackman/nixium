@@ -1,0 +1,348 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* Copyright (C) 2026 Methuselah Nwodobeh */
+
+/*
+ * The gallery. Loaded after `styles.css`, which supplies the palette, the masthead, the buttons and
+ * the footer — the room is new, the building is not, and a visitor should never have to wonder
+ * whether they have left the site.
+ *
+ * Two ideas do the work here:
+ *
+ * The mount is cream. The artwork is a cream circle with everything outside it transparent, so a
+ * cream mount makes each plate read as a print on paper rather than a PNG on a dark page. It is the
+ * same trick the front page plays with the hero, and the reason the ground is `--plum-deep` here:
+ * the darker room is what lights the paper.
+ *
+ * Empty plates recede instead of pretending. A plate with no artwork is a dashed frame on the dark
+ * ground, which reads as a gap in a hang rather than as a picture — and the one plate that does have
+ * artwork becomes the focal point of the wall by default.
+ */
+
+body.gallery {
+  background: var(--plum-deep);
+}
+
+/* The masthead is mixed against the darker ground it now sits on, or its blur reads as a seam. */
+.gallery .masthead {
+  background: color-mix(in srgb, var(--plum-deep) 92%, transparent);
+}
+
+.gallery .wordmark {
+  color: var(--cream);
+  text-decoration: none;
+}
+
+/* ---------- hero ---------- */
+
+/*
+ * Louder than anything on the front page, and that is the point of the door: bigger type, a heavier
+ * weight, an emoji the serious site would never allow. The restraint resumes at the footer.
+ */
+.gallery-hero {
+  max-width: 78rem;
+  margin: 0 auto;
+  padding: clamp(3rem, 9vw, 7rem) clamp(1.25rem, 5vw, 4.5rem) clamp(2rem, 5vw, 3.5rem);
+}
+
+.gallery-eyebrow {
+  margin: 0 0 1.25rem;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.8125rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--straw);
+}
+
+.gallery-hero h1 {
+  margin: 0 0 1.25rem;
+  font-size: clamp(2.6rem, 9vw, 5.75rem);
+  font-weight: 800;
+  line-height: 0.98;
+  letter-spacing: -0.04em;
+  text-wrap: balance;
+}
+
+.gallery-glyph {
+  /* Sized against the headline and nudged off the baseline so it reads as a mark, not a character. */
+  display: inline-block;
+  font-size: 0.8em;
+  /* The colour emoji has no side bearing worth the name, so the gap is put in by hand — without it
+     the tail runs into the N once the headline wraps. */
+  margin-right: 0.12em;
+  transform: translateY(-0.06em);
+}
+
+.gallery-lede {
+  margin: 0 0 1rem;
+  max-width: 38ch;
+  font-size: clamp(1.2rem, 2.6vw, 1.6rem);
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--wing);
+  text-wrap: balance;
+}
+
+.gallery-sub {
+  margin: 0;
+  max-width: var(--measure);
+  font-size: 1.0625rem;
+  color: var(--cream-dim);
+}
+
+/* ---------- the wall ---------- */
+
+.plates {
+  list-style: none;
+  max-width: 78rem;
+  margin: 0 auto;
+  padding: clamp(1.5rem, 4vw, 2.5rem) clamp(1.25rem, 5vw, 4.5rem) clamp(3rem, 7vw, 5rem);
+  display: grid;
+  /* Three to a row at full width, about 340px a plate. These renders are dense — readable signage,
+     book spines, a notepad — and at four to a row none of that survived. */
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr));
+  gap: clamp(2rem, 4vw, 3.25rem) clamp(1.5rem, 3vw, 2.5rem);
+}
+
+.plate {
+  /* Positioned so an expanded card can be lifted above the ones it grows over. */
+  position: relative;
+}
+
+.plate figure {
+  margin: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  transition: transform 220ms ease;
+}
+
+/* A hung frame: square, mounted, and off true by a fraction of a degree. Every third plate leans the
+   other way, so the wall looks hung by hand rather than by a grid. */
+.plate-art {
+  position: relative;
+  aspect-ratio: 1;
+  overflow: hidden;
+  /* Seen only as a hairline behind a full-bleed render, and as the ground of an empty frame. One
+     step lighter than the wall, so a frame still has an edge where the artwork goes dark at it. */
+  background: var(--plum);
+  border: 1px solid var(--plum-line);
+  border-radius: 2px;
+  box-shadow: 0 1px 0 rgba(246, 239, 227, 0.08);
+  transform: rotate(var(--lean));
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease;
+}
+
+/*
+ * Two of the renders are not square — a runway shot and a campaign poster — and a square frame can
+ * only have one of cropping them or letterboxing them.
+ *
+ * It letterboxes. Cropping the poster to a square is how you lose the word VOTE, and cropping the
+ * runway shot is how you lose the train of the dress, which is the entire photograph. Giving those
+ * two frames the shape of their picture was tried first and is worse: mixed frame heights leave the
+ * placards in a row starting at four different lines, which reads as a broken grid rather than as a
+ * hand-hung wall. So every frame stays square, and the two odd ones sit on their mount with a
+ * margin — which is what a gallery does with a print that is not the shape of its frame.
+ */
+.plate-art.is-uncropped img {
+  object-fit: contain;
+}
+
+/* The frame clips, so a focus ring drawn inside it would be clipped with it. Put it on the frame. */
+.plate-art:focus-within {
+  outline: 2px solid var(--straw);
+  outline-offset: 3px;
+}
+
+.plate-art a:focus-visible {
+  outline: none;
+}
+
+.plate {
+  --lean: -0.35deg;
+}
+
+.plate:nth-child(3n) {
+  --lean: 0.4deg;
+}
+
+.plate:nth-child(4n) {
+  --lean: 0.15deg;
+}
+
+/* Pointing at a plate straightens it and deepens its shadow, whether or not it also grows. */
+.plate:hover .plate-art,
+.plate:focus-within .plate-art {
+  transform: rotate(0deg);
+  box-shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.8);
+}
+
+/*
+ * And the card grows — the placard with it, so the thing you are pointing at keeps its label.
+ *
+ * Gated on a real pointer and on there being room: a transform does not take part in layout, but it
+ * does make overflow, and a plate grown by a fifth of itself needs that fifth to come out of the
+ * grid's side padding rather than out of the width of the page. Above 75rem the padding is 4.5rem
+ * and a plate is about 340px, so it has 72px of room and wants 38. Below that the plates are wider
+ * and the padding is thinner, which is the wrong way round, so they simply do not grow.
+ */
+@media (hover: hover) and (min-width: 75rem) {
+  .plate:hover,
+  .plate:focus-within {
+    z-index: 2;
+  }
+
+  .plate:hover figure,
+  .plate:focus-within figure {
+    transform: scale(1.2);
+  }
+}
+
+/*
+ * The link fills the frame, by being taken out of flow rather than by asking for `height: 100%`.
+ * The frame's height comes from `aspect-ratio`, which as far as a percentage height on a child is
+ * concerned is still `auto` — so `height: 100%` there resolves to nothing and the image collapses
+ * to a zero-height sliver. `inset: 0` against the positioned frame has a definite box to work with,
+ * and the image inside the link has one in turn.
+ */
+.plate-art a {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+.plate-art img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* An empty plate. Dashed and dark, because a gap in a hang should look like a gap in a hang — the
+   front page will not show a screenshot it does not have, and this room will not invent a painting. */
+.plate-art.is-pending {
+  display: grid;
+  place-content: center;
+  gap: 0.75rem;
+  padding: 1.1rem;
+  border-style: dashed;
+  border-color: var(--plum-edge);
+  box-shadow: none;
+  text-align: center;
+}
+
+.plate-ghost {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: clamp(2.5rem, 7vw, 3.75rem);
+  font-weight: 600;
+  line-height: 1;
+  color: var(--plum-edge);
+}
+
+.plate-status {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--cream-dim);
+}
+
+/* ---------- placards ---------- */
+
+.plate figcaption {
+  padding-top: 0.95rem;
+}
+
+.plate-no {
+  margin: 0 0 0.3rem;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--cream-dim);
+  transition: color 180ms ease;
+}
+
+.plate:hover .plate-no {
+  color: var(--hibiscus);
+}
+
+.plate figcaption h2 {
+  margin: 0 0 0.45rem;
+  font-size: 1.1875rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.plate-note {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  color: var(--cream-dim);
+}
+
+.plate-note code {
+  font-size: 0.875em;
+  color: var(--wing);
+}
+
+/* ---------- catalogue note ---------- */
+
+.catalogue {
+  padding: clamp(3rem, 7vw, 4.5rem) clamp(1.25rem, 5vw, 4.5rem);
+  background: var(--plum);
+  border-block: 1px solid var(--plum-line);
+}
+
+.catalogue > * {
+  max-width: 78rem;
+  margin-inline: auto;
+}
+
+.catalogue h2 {
+  margin: 0 0 1.1rem;
+  font-size: clamp(1.4rem, 3vw, 1.9rem);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+
+.catalogue p {
+  margin: 0 0 1rem;
+  max-width: var(--measure);
+  color: var(--cream-dim);
+}
+
+.catalogue-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 1.75rem 0 0;
+  max-width: none;
+}
+
+.gallery footer {
+  border-top: 0;
+}
+
+/* ---------- motion ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .plate figure,
+  .plate-art,
+  .plate-no {
+    transition: none;
+  }
+
+  /* No growing either. A card that jumps to 120% without animating is not a gentler version of the
+     same effect, it is a worse one. The link and the placard are unaffected. */
+  .plate:hover figure,
+  .plate:focus-within figure {
+    transform: none;
+  }
+
+  /* The lean stays — a static composition is not motion — but hovering must not shift the frame,
+     so it keeps its resting angle and only the shadow answers the pointer. */
+  .plate:hover .plate-art {
+    transform: rotate(var(--lean));
+  }
+}

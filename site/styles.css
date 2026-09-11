@@ -114,7 +114,11 @@ a:hover {
 .masthead nav {
   display: flex;
   align-items: center;
-  gap: clamp(0.9rem, 2.5vw, 1.9rem);
+  /* Wraps rather than overflows: four links plus the pill is about all a 360px viewport holds, and a
+     fifth would push the CTA off the edge rather than onto a second line. */
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.6rem clamp(0.9rem, 2.5vw, 1.9rem);
   font-size: 0.9375rem;
 }
 
@@ -248,6 +252,26 @@ h1 {
   height: auto;
   max-width: 27rem;
   margin-inline: auto;
+}
+
+/* The second way into the gallery, and the honest one: it sits under the mascot, where somebody who
+   has just looked at the mascot is most likely to wonder what else there is. Quiet enough not to
+   compete
+   with the ledger. */
+.hero-mark-note {
+  margin: 0.9rem 0 0;
+  text-align: center;
+  font-size: 0.875rem;
+}
+
+.hero-mark-note a {
+  color: var(--cream-dim);
+  text-decoration-color: var(--plum-edge);
+}
+
+.hero-mark-note a:hover {
+  color: var(--hibiscus);
+  text-decoration-color: currentColor;
 }
 
 /* ---------- buttons ---------- */

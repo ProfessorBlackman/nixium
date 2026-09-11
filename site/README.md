@@ -2,8 +2,9 @@
 
 # The landing page
 
-One page, no build step, no JavaScript. `index.html`, `styles.css`, and the mascot. Deployed to GitHub
-Pages by `.github/workflows/pages.yml` when anything in this directory changes on `master`.
+Two pages, no build step, no JavaScript. `index.html` and `styles.css` are the product; `gallery.html`
+and `gallery.css` are the mascot's room. Deployed to GitHub Pages by `.github/workflows/pages.yml`
+when anything in this directory changes on `master`.
 
 To work on it: open `index.html` in a browser. There is nothing to install.
 
@@ -33,6 +34,38 @@ table is the performance budgets that CI holds the build to. Every figure on the
 
 When there are screenshots, they belong in the "What it does" section, and the four descriptions there
 are already written to sit beside one each.
+
+## The gallery
+
+`gallery.html` is the one unserious thing here, and it is unserious on purpose. A page whose whole
+argument is *this tool does not exaggerate to you* is easier to believe from a project that is
+visibly not precious about itself, so the mascot gets twelve portraits, a catalogue note, and no
+mention of features. It is reached from the masthead and from under the mascot on the front page,
+because a joke nobody finds is not doing any work.
+
+It loads `styles.css` first and `gallery.css` second: same palette, same masthead, same buttons, same
+footer. The room is new, the building is not, and nobody should have to wonder whether they have left
+the site.
+
+**The gallery says *he*, this file and `styles.css` say *she*, and that stays as it is.** Nobody knows
+what Nix is; the catalogue note on the gallery page admits as much in writing. It looks exactly like
+an inconsistency somebody forgot to clean up, which is why it is written down here: a pull request
+that unifies the pronoun is the one tidy-up this site will not take.
+
+Sixteen plates, all of them drawn. `PORTRAITS.md` is the character sheet: what is fixed across every
+plate, the house style the renders established, the prompt blocks to reuse, all sixteen scenes, and
+how to replace one. It also records the one plate that breaks the costume and what to do if it is
+ever re-cut.
+
+Each plate links to its own image file, because the jokes in these are in the set dressing — book
+spines, sticky notes, what is printed on the mug — and a 340px grid cell shows only some of it. A plain
+link is the entire lightbox this page gets; there is still no JavaScript here.
+
+**The artwork is deployed as WebP and kept as PNG, in two different places.** `assets/portraits/`
+holds the renders as delivered, ~2 MB each, and is *not* published — `site/` is what the Pages
+workflow uploads. `site/portraits/` holds 900px WebP cuts at about 100 kB each. The difference is
+29 MB against 1.4 MB, which is the whole rest of the site twenty times over, so the full-size PNGs
+must not be put back into `site/`.
 
 ## The palette
 
