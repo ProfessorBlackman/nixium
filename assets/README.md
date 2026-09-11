@@ -7,6 +7,16 @@
 The application icons in `src-tauri/icons/` are generated from it, and this file is here so they can be
 generated again. Losing it would mean the icon set could only ever be resized, never remade.
 
+## `portraits/`
+
+The gallery renders, as delivered, one per plate of `site/gallery.html` and named for the plate it
+hangs on. Same reason as the mascot: the page serves 900px WebP cuts of about 100 kB, and those can
+be made again from these but never the other way round.
+
+**They live here rather than in `site/` because `site/` is what GitHub Pages publishes.** The set is
+29 MB as PNG against 1.4 MB as WebP. `site/PORTRAITS.md` has the conversion command and the rest of
+the rules.
+
 ## Regenerating the icons
 
 ```sh
