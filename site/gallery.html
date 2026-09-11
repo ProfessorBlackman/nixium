@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  The nonsense wing.
+
+  The rest of the site argues that this tool does not exaggerate. That argument is easier to believe
+  from a project that is visibly not taking *itself* seriously, so the mascot gets a room of their own
+  and the product gets mentioned exactly twice.
+
+  The presentation is deliberately po-faced — plate numbers, placards, a catalogue note — because the
+  joke is the register, not the layout. Absurd subject, museum voice, same palette as the front page
+  so nobody wonders whether they have left the site.
+
+  Plates without artwork are hung as empty frames rather than filled with a stand-in. A gallery that
+  fakes its own exhibits would be arguing against the front page.
+
+  The placards here say "he" and `styles.css` says "she". That is not an oversight and it is not a
+  merge gone wrong: nobody knows, that is the bit, and the catalogue note says so out loud. Leave
+  both. Unifying them is the one change to this page that would actually break something.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>The Nix Gallery</title>
+    <meta
+      name="description"
+      content="Nix's many forms. A chimpanzee in a straw hat, sixteen times, doing things no storage tool should do."
+    />
+    <link rel="icon" href="favicon.png" type="image/png" />
+
+    <meta property="og:title" content="The Nix Gallery" />
+    <meta
+      property="og:description"
+      content="He has seen things. He has done things. He probably should not be operating your system."
+    />
+    <meta property="og:image" content="mascot.png" />
+    <meta property="og:type" content="website" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="gallery.css" />
+  </head>
+
+  <body class="gallery">
+    <a class="skip" href="#plates">Skip to the portraits</a>
+
+    <header class="masthead">
+      <a class="wordmark" href="index.html">nix</a>
+      <nav aria-label="Links">
+        <a href="index.html">Back to the serious site</a>
+        <a href="https://github.com/ProfessorBlackman/nixium">Source</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="gallery-hero">
+        <p class="gallery-eyebrow">Permanent collection</p>
+        <h1><span class="gallery-glyph" aria-hidden="true">🐒</span> Nix&rsquo;s many forms</h1>
+        <p class="gallery-lede">
+          He has seen things. He has done things. He probably should not be operating your system.
+        </p>
+        <p class="gallery-sub">
+          Sixteen portraits of the same chimpanzee. Same hat, same sunglasses, same wings, same dress,
+          same cigar, no explanation.
+        </p>
+      </section>
+
+      <!--
+        Plate 01 is the artwork the application actually ships: the icon source needs no new
+        render. Every other plate is a WebP cut from the full-size PNG kept in
+        `assets/portraits/`; see `PORTRAITS.md`. Dimensions are deliberately not set here —
+        the frame owns the aspect ratio, so a replacement render cannot shift the layout.
+
+        Each plate links to its own file. The jokes in these are in the set dressing — book
+        spines, sticky notes, what is written on the mug — and none of that is legible in a
+        340px grid cell, even with the plate expanded under the pointer. A plain link to the image
+        is the whole of the lightbox this page
+        needs, and it costs no JavaScript.
+      -->
+      <ul class="plates" id="plates">
+        <li class="plate">
+          <figure>
+            <div class="plate-art">
+              <a href="portraits/01-the-default.webp">
+                <img
+                  src="portraits/01-the-default.webp"
+                  alt="Nix: a muscular chimpanzee in a straw boater with a pink hibiscus, black aviator sunglasses, a pink daisy-print sundress and fairy wings, grinning around a lit cigar and making a peace sign."
+                  loading="lazy"
+                  decoding="async"
+                />
+              </a>
+            </div>
+            <figcaption>
+              <p class="plate-no">Plate 01</p>
+              <h2>The Default</h2>
+              <p class="plate-note">
+                The canonical Nix, and the one in your launcher. Peace, a cigar, and no intention of explaining any of it.
+              </p>
+            </figcaption>
+          </figure>
+        </li>
+
+        <li class="plate">
+          <figure>
+            <div class="plate-art">
+              <a href="portraits/02-system-administrator.webp">
+                <img
+                  src="portraits/02-system-administrator.webp"
+                  alt="Nix at a desk before a bank of monitors full of scrolling terminals and dashboards, hands on the keyboard, a Nix mug and a stack of Linux manuals alongside."
+                  loading="lazy"
+                  decoding="async"
+                />
+              </a>
+            </div>
+            <figcaption>
+              <p class="plate-no">Plate 02</p>
+              <h2>System Administrator</h2>
+              <p class="plate-note">
+                Fifteen monitors, arranged in an arc. Fourteen of them are running <code>htop</code>. The fifteenth is the one with the problem.
+              </p>
+            </figcaption>
+          </figure>
+        </li>
+
+        <li class="plate">
+          <figure>
+            <div class="plate-art">
+              <a href="portraits/03-the-thinker.webp">
+                <img
+                  src="portraits/03-the-thinker.webp"
+                  alt="Nix seated on a stone block with chin resting on one fist, cigar smoking, a small replica of Rodin's Thinker on a plinth behind, beside manuals spined Linux, Systems, Performance and Automation."
+                  loading="lazy"
+                  decoding="async"
+                />
+              </a>
+            </div>
+            <figcaption>
+              <p class="plate-no">Plate 03</p>
+              <h2>The Thinker</h2>
+              <p class="plate-note">
+                Chin in hand, smoke curling. Working out where the other 85&nbsp;MB went, which is the only thought in this gallery that also appears in the product.
+              </p>
+            </figcaption>
+          </figure>
+        </li>
+
+        <li class="plate">
+          <figure>
+            <div class="plate-art">
+              <a href="portraits/04-victory.webp">
+                <img
+                  src="portraits/04-victory.webp"
+                  alt="Nix with both fists thrown up in triumph, grinning, in front of a screen reading 'Operation completed successfully'."
+                  loading="lazy"
+                  decoding="async"
+                />
+              </a>
+            </div>
+            <figcaption>
+              <p class="plate-no">Plate 04</p>
+              <h2>Victory</h2>
+              <p class="plate-note">
+                Both arms up. <code>rm -rf ~/.cache</code> has completed without incident and he would like that recognised.
+              </p>
+            </figcaption>
+          </figure>
+        </li>
+
+        <li class="plate">
+          <figure>
+            <div class="plate-art">
+              <a href="portraits/05-suspicious.webp">
+                <img
+                  src="portraits/05-suspicious.webp"
+                  alt="Nix peering over lowered sunglasses straight at the viewer, cigar in mouth, beside a mug reading 'Question, Analyze, Execute' and a notepad whose last box, 'Probably not', is the only one ticked."
+                  loading="lazy"
+                  decoding="async"
+                />
+              </a>
+            </div>
+            <figcaption>
+              <p class="plate-no">Plate 05</p>
+              <h2>Suspicious</h2>
+              <p class="plate-note">
+                Squinting at you over the sunglasses. You said you did not need that partition. He is giving you one more chance to revise that.
+              </p>
+            </figcaption>
+          </figure>
+        </li>
+
+        <li class="plate">
+          <figure>
+            <div class="plate-art">
+              <a href="portraits/06-hacker.webp">
+                <img
+                  src="portraits/06-hacker.webp"
+                  alt="Nix in a dark hoodie hunched over a laptop, face lit by screens of code, a small penguin figure on the desk."
+                  loading="lazy"
+                  decoding="async"
+                />
+              </a>
+            </div>
+            <figcaption>
+              <p class="plate-no">Plate 06</p>
+              <h2>Hacker Nix</h2>
+              <p class="plate-note">
+                Hood up, keys lit, face bathed in monitor glow. The glow is green because the theme is green. Nothing is being hacked.
+              </p>
+            </figcaption>
+          </figure>
+        </li>
+
+        <li class="plate">
+          <figure>
+            <div class="plate-art">
+              <a href="portraits/07-beach.webp">
+                <img
+                  src="portraits/07-beach.webp"
+                  alt="Nix reclining in a deck chair on a beach under palms, arms folded behind the head, beside a signpost reading 'Chill mode' and 'Systems anywhere'."
+                  loading="lazy"
+                  decoding="async"
+                />
+              </a>
+            </div>
+            <figcaption>
+              <p class="plate-no">Plate 07</p>
+              <h2>Beach Nix</h2>
+              <p class="plate-note">
+                Reclined, drink in hand, wings catching the light. The window is closed, so the monitor is sampling nothing. This is documented behaviour.
+              </p>
+            </figcaption>
+          </figure>
+        </li>
+
+        <li class="plate">
+          <figure>
+            <div class="plate-art">
+              <a href="portraits/08-wizard.webp">
+                <img
+                  src="portraits/08-wizard.webp"
+                  alt="Nix in a star-patterned wizard's robe and pointed hat, raising a gnarled staff and conjuring a glowing blue sigil of the Linux penguin."
+                  loading="lazy"
+                  decoding="async"
+                />
+              </a>
+            </div>
+            <figcaption>
+              <p class="plate-no">Plate 08</p>
+              <h2>Wizard Nix</h2>
+              <p class="plate-note">
+                Robe, staff, unearned authority. <code>sudo</code> is, after all, just a word of power that somebody wrote down.
+              </p>
+            </figcaption>
+          </figure>
+        </li>
+
+        <li class="plate">
+          <figure>
+            <div class="plate-art">
+              <a href="portraits/09-angry.webp">
+                <img
+                  src="portraits/09-angry.webp"
+                  alt="Nix roaring and jabbing a finger at a monitor reading 'ERROR: the system is not responding. Terminal frozen', surrounded by crumpled notes reading 'why frozen?' and 'still frozen?', above manuals spined Linux Troubleshooting, System Logs and Patience (hard mode)."
+                  loading="lazy"
+                  decoding="async"
+                />
+              </a>
+            </div>
+            <figcaption>
+              <p class="plate-no">Plate 09</p>
+              <h2>Angry Nix</h2>
+              <p class="plate-note">
+                The screen says <em>the system is not responding</em>. The sticky note beside it says <em>did you try turning it off and on again</em>, and is signed &mdash;&nbsp;Nix.
+              </p>
+            </figcaption>
+          </figure>
+        </li>
+
+        <li class="plate">
+          <figure>
+            <div class="plate-art">
+              <a href="portraits/10-sleepy.webp">
+                <img
+                  src="portraits/10-sleepy.webp"
+                  alt="Nix slumped fast asleep across a keyboard, cigar still smoking, before a screen reading 'zzz… Process paused. A better tomorrow is still loading', beside a mug reading 'Still building a better tomorrow' and manuals spined Automation, Better Systems and Sleep (optional)."
+                  loading="lazy"
+                  decoding="async"
+                />
+              </a>
+            </div>
+            <figcaption>
+              <p class="plate-no">Plate 10</p>
+              <h2>Sleepy Nix</h2>
+              <p class="plate-note">
+                Face down on the keyboard, cigar somehow still lit. The screen reads <em>process paused, a better tomorrow is still loading</em>. Two items on the list are ticked and <em>take over the world</em> is not one of them.
+              </p>
+            </figcaption>
+          </figure>
+        </li>
+
+        <li class="plate">
+          <figure>
+            <div class="plate-art">
+              <a href="portraits/11-corporate.webp">
+                <img
+                  src="portraits/11-corporate.webp"
+                  alt="Nix in a pinstripe suit and tie holding a briefcase in a glass-walled office, looking profoundly weary, beside a desk nameplate reading 'Nix, Chief Disappointment Officer' and a whiteboard headed 'Another meeting…'."
+                  loading="lazy"
+                  decoding="async"
+                />
+              </a>
+            </div>
+            <figcaption>
+              <p class="plate-no">Plate 11</p>
+              <h2>Corporate Nix</h2>
+              <p class="plate-note">
+                Suit, tie, briefcase, and a disappointment that goes all the way down. The nameplate on the desk reads <em>Chief Disappointment Officer</em>.
+              </p>
+            </figcaption>
+          </figure>
+        </li>
+
+        <li class="plate">
+          <figure>
+            <div class="plate-art">
+              <a href="portraits/12-final-boss.webp">
+                <img
+                  src="portraits/12-final-boss.webp"
+                  alt="Nix enthroned and crowned, enormously muscled with dark wings spread wide, flames rising behind, under a sign reading 'Final Boss'."
+                  loading="lazy"
+                  decoding="async"
+                />
+              </a>
+            </div>
+            <figcaption>
+              <p class="plate-no">Plate 12</p>
+              <h2>Final Boss Nix</h2>
+              <p class="plate-note">
+                Absurdly muscular, wings fully spread, smoke everywhere. Phase three. He has root.
+              </p>
+            </figcaption>
+          </figure>
+        </li>
+
+        <li class="plate">
+          <figure>
+            <div class="plate-art">
+              <a href="portraits/13-rastafarian.webp">
+                <img
+                  src="portraits/13-rastafarian.webp"
+                  alt="Nix in a knitted red, gold and green tam with dreadlocks, reclining by the sea with hands behind the head and a lit cigar, beside a laptop reading 'Linux, freedom, good vibes', a sleeping dog, and manuals spined Linux Culture, Peace &amp; Productivity and Reggae &amp; Good Systems."
+                  loading="lazy"
+                  decoding="async"
+                />
+              </a>
+            </div>
+            <figcaption>
+              <p class="plate-no">Plate 13</p>
+              <h2>Rastafarian Nix</h2>
+              <p class="plate-note">
+                The one plate where the hat comes off. Everything he starts runs at <code>nice -n 19</code>, and nothing on this desk is in a hurry.
+              </p>
+            </figcaption>
+          </figure>
+        </li>
+
+        <li class="plate">
+          <figure>
+            <div class="plate-art is-uncropped">
+              <a href="portraits/14-runway.webp">
+                <img
+                  src="portraits/14-runway.webp"
+                  alt="Nix mid-stride down a lit runway in a trailing pink gown before a crowd of photographers, under signs reading 'Style, optimize, automate, dominate'."
+                  loading="lazy"
+                  decoding="async"
+                />
+              </a>
+            </div>
+            <figcaption>
+              <p class="plate-no">Plate 14</p>
+              <h2>Runway Nix</h2>
+              <p class="plate-note">
+                Same chimp, different looks. This is what ricing looks like once it gets out of the desktop and onto a catwalk.
+              </p>
+            </figcaption>
+          </figure>
+        </li>
+
+        <li class="plate">
+          <figure>
+            <div class="plate-art">
+              <a href="portraits/15-blowing-a-kiss.webp">
+                <img
+                  src="portraits/15-blowing-a-kiss.webp"
+                  alt="Nix in a pink feather stole and pearls blowing a kiss to the camera, a glowing heart in the air, before a wall of flashing cameras and a placard reading 'Nix, we love you!'."
+                  loading="lazy"
+                  decoding="async"
+                />
+              </a>
+            </div>
+            <figcaption>
+              <p class="plate-no">Plate 15</p>
+              <h2>Blowing a Kiss</h2>
+              <p class="plate-note">
+                Blown straight down the lens, for whoever finally got round to reviewing the pull request.
+              </p>
+            </figcaption>
+          </figure>
+        </li>
+
+        <li class="plate">
+          <figure>
+            <div class="plate-art is-uncropped">
+              <a href="portraits/16-vote-nix.webp">
+                <img
+                  src="portraits/16-vote-nix.webp"
+                  alt="A campaign poster reading 'Vote Nix for President' showing Nix in a suit at a podium before a crowd and a domed capitol, with the slogans 'Good systems, happier people, a smoother tomorrow'."
+                  loading="lazy"
+                  decoding="async"
+                />
+              </a>
+            </div>
+            <figcaption>
+              <p class="plate-no">Plate 16</p>
+              <h2>Vote Nix</h2>
+              <p class="plate-note">
+                Good systems. Happier people. A smoother tomorrow. The manifesto is three bullet points and does not mention disk space once.
+              </p>
+            </figcaption>
+          </figure>
+        </li>
+      </ul>
+
+      <section class="catalogue">
+        <h2>Catalogue note</h2>
+        <p>
+          One chimpanzee, sixteen situations. The hat, the hibiscus, the aviators, the daisy-print
+          dress, the fairy wings and the cigar are fixed across every plate, because sixteen unrelated
+          chimps are not a mascot.
+        </p>
+        <p>
+          <strong>Nobody knows what Nix is.</strong> The placards here say <em>he</em>. The
+          stylesheet that paints them says <em>she</em>. Both are guesses, neither is authoritative,
+          and the gallery has no plans to settle it.
+        </p>
+        <p>
+          Every sign, book spine and coffee mug in these was drawn to be read, and none of it is
+          legible at this size. <em>Patience (hard mode)</em>. <em>Sleep (optional)</em>.
+          <em>Reggae &amp; good systems</em>. Open a plate and go along the shelves.
+        </p>
+        <p class="catalogue-actions">
+          <a class="button" href="index.html">Back to the serious site</a>
+          <a
+            class="button button-quiet"
+            href="https://github.com/ProfessorBlackman/nixium/blob/master/site/PORTRAITS.md"
+            >How the portraits stay consistent</a
+          >
+        </p>
+      </section>
+    </main>
+
+    <footer>
+      <p>
+        None of this is in the product. The product is
+        <a href="index.html">a storage tool that tells you what you will actually get back</a>.
+      </p>
+      <p>
+        nix is free software under the
+        <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU GPL, version 3 or later</a>.
+      </p>
+    </footer>
+  </body>
+</html>
